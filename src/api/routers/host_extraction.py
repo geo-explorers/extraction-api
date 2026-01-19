@@ -15,6 +15,7 @@ def host_extraction(request: HostExtractionRequest) -> JSONResponse:
       title=request.title,
       description=request.description,
       truncated_transcript=request.truncated_transcript,
+      possible_hosts=request.possible_hosts,
     )
     return JSONResponse(
       content={

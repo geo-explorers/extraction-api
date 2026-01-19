@@ -8,6 +8,7 @@ def extract_podcast_hosts(
     title: str,
     description: str,
     truncated_transcript: str,
+    possible_hosts: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
   try:
     chain = llm_model.build_chain(
@@ -16,11 +17,18 @@ def extract_podcast_hosts(
   except Exception as e:
     raise Exception("Error building chain")
 
+  # Format possible hosts for prompt
+  if possible_hosts:
+    possible_hosts_text = ", ".join(possible_hosts)
+  else:
+    possible_hosts_text = "None provided"
+
   try:
     raw_response = chain.invoke({
       "title": title,
       "description": description,
       "truncated_transcript": truncated_transcript,
+      "possible_hosts": possible_hosts_text,
     })
   except Exception as e:
     raise Exception("Failed invoking chain")
