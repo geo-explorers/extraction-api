@@ -26,6 +26,7 @@ import time
 from src.config.settings import settings
 from src.database.claim_episode_repository import ClaimEpisodeRepository
 from src.database.tag_map_repository import TagMapRepository
+from src.database.key_takeaways_episode_repository import KeyTakeAwaysEpisodeRepository
 from src.database.connection import get_db_session
 from src.database.models import PodcastEpisode
 from src.database.claim_repository import ClaimRepository
@@ -222,8 +223,9 @@ class PremiumExtractionPipeline:
 
         key_takeaways = [
             KeyTakeAwayWithClaim(
-                key_takeaway=key_takeaway,
-            ) for key_takeaway in key_takeaways_raw
+                key_takeaway=key_takeaway, 
+                claim_order=idx
+            ) for idx, key_takeaway in enumerate(key_takeaways_raw, start=1)
         ]
 
         if not key_takeaways:
@@ -240,19 +242,9 @@ class PremiumExtractionPipeline:
                 key_takeaways=[]
             )
         
-        for idx, key_takeaway in enumerate(key_takeaways, start=1):
-            is_key_takeaway_extracted_correct = False
-            for claim in claim_topics:
-                if key_takeaway.key_takeaway == claim.claim_text:
-                    claim.group_order = 1
-                    claim.claim_order = idx
-                    is_key_takeaway_extracted_correct = True
-                    break
-            if not is_key_takeaway_extracted_correct:
-                logger.info(f"{key_takeaway.key_takeaway} extracted different from claims")
-
+      
         claim_count = 1        
-        for topic_idx, topic in enumerate(topics, start=2):
+        for topic_idx, topic in enumerate(topics, start=1):
             for _, claim in enumerate(claim_topics):
                 if claim.claim_order != None:
                      continue
@@ -320,15 +312,22 @@ class PremiumExtractionPipeline:
                     for saved_claim_topic in saved_claim_topics_with_tag_id:
                         if key_takeaway.key_takeaway == saved_claim_topic.claim_text:
                             key_takeaway.claim_episode_id = saved_claim_topic.claim_episode_id
+                            key_takeaway.claim_id = saved_claim_topic.claim_id
+                            key_takeaway.episode_id = saved_claim_topic.episode_id
                             break
                 
                 logger.info("  Saving key takeaways to database...")
-                saved_key_takeaways_with_claim_episode_id = await tag_repo.save_tags(key_takeaways)
-                logger.info(f"  ✓ Saved {len(saved_key_takeaways_with_claim_episode_id)} key takeaways")
+                key_takeaways_repo = KeyTakeAwaysEpisodeRepository(db_session)
+                saved_key_takeaways = await key_takeaways_repo.save_key_takeaways(key_takeaways)
+                logger.info(f"  ✓ Saved {len(saved_key_takeaways)} key takeaways")
 
-                logger.info("  Saving key takeaways to claim-episode links to database...")
-                saved_key_takeaways = await tag_map_repo.save_tag_maps(key_takeaways)
-                logger.info(f"  ✓ Saved {len(saved_key_takeaways)} key takeaways to claim-episode links")
+                # logger.info("  Saving key takeaways to database...")
+                # saved_key_takeaways_with_claim_episode_id = await tag_repo.save_tags(key_takeaways)
+                # logger.info(f"  ✓ Saved {len(saved_key_takeaways_with_claim_episode_id)} key takeaways")
+
+                # logger.info("  Saving key takeaways to claim-episode links to database...")
+                # saved_key_takeaways = await tag_map_repo.save_tag_maps(key_takeaways)
+                # logger.info(f"  ✓ Saved {len(saved_key_takeaways)} key takeaways to claim-episode links")
 
                 # Commit transaction
                 db_session.commit()

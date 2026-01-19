@@ -95,6 +95,10 @@ class ClaimWithTopic:
 @dataclass
 class KeyTakeAwayWithClaim:
     key_takeaway: str
+    claim_order: int
+    claim_id: int = None
+    episode_id: int = None
+    key_takeaway_episode_id: int = None
     claim_episode_id: int = None
     tag_id: int = None
 
