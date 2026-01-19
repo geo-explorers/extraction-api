@@ -321,13 +321,13 @@ class PremiumExtractionPipeline:
                 saved_key_takeaways = await key_takeaways_repo.save_key_takeaways(key_takeaways)
                 logger.info(f"  ✓ Saved {len(saved_key_takeaways)} key takeaways")
 
-                # logger.info("  Saving key takeaways to database...")
-                # saved_key_takeaways_with_claim_episode_id = await tag_repo.save_tags(key_takeaways)
-                # logger.info(f"  ✓ Saved {len(saved_key_takeaways_with_claim_episode_id)} key takeaways")
+                logger.info("  Saving key takeaways to database...")
+                saved_key_takeaways_with_claim_episode_id = await tag_repo.save_tags(key_takeaways)
+                logger.info(f"  ✓ Saved {len(saved_key_takeaways_with_claim_episode_id)} key takeaways")
 
-                # logger.info("  Saving key takeaways to claim-episode links to database...")
-                # saved_key_takeaways = await tag_map_repo.save_tag_maps(key_takeaways)
-                # logger.info(f"  ✓ Saved {len(saved_key_takeaways)} key takeaways to claim-episode links")
+                logger.info("  Saving key takeaways to claim-episode links to database...")
+                saved_key_takeaways = await tag_map_repo.save_tag_maps(key_takeaways)
+                logger.info(f"  ✓ Saved {len(saved_key_takeaways)} key takeaways to claim-episode links")
 
                 # Commit transaction
                 db_session.commit()
