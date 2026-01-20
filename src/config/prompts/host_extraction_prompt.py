@@ -21,9 +21,11 @@ Rules:
 
 Possible Hosts Matching:
 - The "Known Possible Hosts" list contains people who are likely to be hosts of this podcast
-- If someone is mentioned by first name only (e.g., "John") and it matches a possible host (e.g., "John Smith"), use the full name from the list verbatim
+- If someone is mentioned by first name only (e.g., "John") and it matches a possible host (e.g., "John Smith"), use the full name from the list
 - People not in this list can still be identified as hosts if the transcript evidence supports it
+- The transcript can contain transcription errors, so a person from the "Known Possible Hosts" list can be in the transcript (by first or full name) but with a typo, in this case use the name provided in the list as it is provided
 - This list is a hint, not a restriction
+- Focus on the main presenter of this specific episode, other credits like editors, co-creator, founders, co-founders, or any other people who worked on this episode includeing people from this list can be mentioned, ignore all of these just extract the presenter(s) of this specific episode.
 
 Episode:
 title: {title}
