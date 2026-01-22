@@ -21,6 +21,7 @@ from src.api.exceptions import (
     ProcessingTimeoutError,
 )
 from src.config.settings import settings
+from src.database.connection import get_db_session_context
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -70,8 +71,8 @@ class PremiumExtractionService:
         """Initialize the premium extraction service."""
         self.pipeline: PremiumExtractionPipeline | None = None
         self._gemini_rate_limiter = _AsyncSlidingWindowRateLimiter(
-            max_tokens=100,
-            window_seconds=60.0,
+            max_tokens=settings.premium_extraction_rate_limit_max_tokens,
+            window_seconds=settings.premium_extraction_rate_limit_window_seconds,
         )
 
     def _get_pipeline(self) -> PremiumExtractionPipeline:
@@ -198,8 +199,8 @@ class PremiumExtractionService:
         total_claims = 0
         total_time = 0.0
 
-        max_parallel_episodes = 20
-        gemini_calls_per_episode = 3
+        max_parallel_episodes = max(1, settings.premium_extraction_max_parallel_episodes)
+        gemini_calls_per_episode = settings.premium_extraction_gemini_calls_per_episode
         semaphore = asyncio.Semaphore(max_parallel_episodes)
         rate_limiter = self._gemini_rate_limiter
 
@@ -207,9 +208,10 @@ class PremiumExtractionService:
         executor = ThreadPoolExecutor(max_workers=max_parallel_episodes)
 
         def run_episode_sync(episode_id: int) -> SimplifiedExtractionResponse:
-            return asyncio.run(
-                self._extract_single_episode(episode_id, force=force, db_session=db_session)
-            )
+            with get_db_session_context() as session:
+                return asyncio.run(
+                    self._extract_single_episode(episode_id, force=force, db_session=session)
+                )
 
         async def process_episode(episode):
             async with semaphore:
@@ -253,7 +255,7 @@ class PremiumExtractionService:
                             f"in {response.processing_time_seconds:.1f}s (PREMIUM)"
                         )
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=True, cancel_futures=True)
 
         results = [
             responses_by_id[episode.id]
