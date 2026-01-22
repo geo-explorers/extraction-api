@@ -24,6 +24,10 @@ class BatchExtractionRequest(BaseModel):
         default=False,
         description="Continue processing remaining episodes if one fails"
     )
+    should_validate: bool = Field(
+        default=False,
+        description="If true, validate each claim for context independence after extraction"
+    )
 
     @field_validator("podcast_ids")
     @classmethod
@@ -40,6 +44,7 @@ class BatchExtractionRequest(BaseModel):
                 "podcast_ids": [854, 907, 994],
                 "target": 10,
                 "force": False,
-                "continue_on_error": True
+                "continue_on_error": True,
+                "should_validate": False
             }
         }

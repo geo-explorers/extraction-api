@@ -55,6 +55,12 @@ class ClaimValidationResponse(BaseModel):
     results: List[ClaimValidationItem] = Field(description="List of validation results for all claims")
 
 
+class SingleClaimValidationResult(BaseModel):
+    """Result of single claim validation with explanation."""
+    explanation: str = Field(description="Brief explanation of why the claim is or is not context-independent")
+    is_valid: bool = Field(description="Whether the claim is valid (context-independent)")
+
+
 class GeminiService:
     """
     Service for validating claims using Google Gemini API.
@@ -352,3 +358,83 @@ For each claim, evaluate whether it is valid or should be flagged based on the c
 
         logger.info(f"Loaded validation prompt ({len(VALIDATION_PROMPT)} chars)")
         return VALIDATION_PROMPT
+
+    async def validate_single_claim(
+        self,
+        claim_text: str,
+        validation_prompt: str,
+        max_retries: int = 3
+    ) -> SingleClaimValidationResult:
+        """
+        Validate a single claim for context independence.
+
+        Args:
+            claim_text: The claim text to validate
+            validation_prompt: Prompt template with {claim_text} placeholder
+            max_retries: Maximum number of retry attempts on failure
+
+        Returns:
+            SingleClaimValidationResult with explanation and is_valid flag
+
+        Example:
+            ```python
+            result = await service.validate_single_claim(
+                "Bitcoin reached $69,000 in November 2021",
+                CLAIM_VALIDATION_PROMPT
+            )
+            print(f"Valid: {result.is_valid}, Reason: {result.explanation}")
+            ```
+        """
+        # Format the prompt with the claim text
+        full_prompt = validation_prompt.format(claim_text=claim_text)
+
+        for attempt in range(max_retries):
+            try:
+                # Call Gemini with structured output for single claim validation
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=full_prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.0,
+                            max_output_tokens=1024,
+                            safety_settings=self.safety_settings,
+                            response_mime_type="application/json",
+                            response_json_schema=SingleClaimValidationResult.model_json_schema(),
+                        )
+                    )
+                )
+
+                if not response or not response.text:
+                    raise ValueError("Empty response from Gemini")
+
+                # Parse and validate response
+                result = SingleClaimValidationResult.model_validate_json(response.text)
+                return result
+
+            except Exception as e:
+                logger.error(
+                    f"Error validating single claim (attempt {attempt + 1}/{max_retries}): {e}",
+                    exc_info=True
+                )
+
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+                else:
+                    # Fail-safe: assume invalid (conservative approach for context independence)
+                    logger.warning(
+                        f"Failed to validate claim after {max_retries} attempts, marking as invalid"
+                    )
+                    return SingleClaimValidationResult(
+                        explanation="Validation failed due to API error",
+                        is_valid=False
+                    )
+
+        # Should never reach here
+        return SingleClaimValidationResult(
+            explanation="Validation failed unexpectedly",
+            is_valid=False
+        )

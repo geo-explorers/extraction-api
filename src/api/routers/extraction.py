@@ -87,7 +87,8 @@ async def extract_episodes_batch(
     logger.info(
         f"API request: batch extract podcasts={request.podcast_ids}, "
         f"target={request.target}, force={request.force}, "
-        f"continue_on_error={request.continue_on_error}"
+        f"continue_on_error={request.continue_on_error}, "
+        f"should_validate={request.should_validate}"
     )
 
     service = ExtractionService()
@@ -96,6 +97,7 @@ async def extract_episodes_batch(
         target=request.target,
         force=request.force,
         continue_on_error=request.continue_on_error,
+        should_validate=request.should_validate,
         db_session=db,
     )
 
@@ -178,7 +180,8 @@ async def extract_episodes_batch_premium(
     logger.info(
         f"API request: PREMIUM batch extract podcasts={request.podcast_ids}, "
         f"target={request.target}, force={request.force}, "
-        f"continue_on_error={request.continue_on_error}"
+        f"continue_on_error={request.continue_on_error}, "
+        f"should_validate={request.should_validate}"
     )
 
     service = PremiumExtractionService()
@@ -187,6 +190,7 @@ async def extract_episodes_batch_premium(
         target=request.target,
         force=request.force,
         continue_on_error=request.continue_on_error,
+        should_validate=request.should_validate,
         db_session=db,
     )
 

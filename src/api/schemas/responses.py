@@ -12,6 +12,12 @@ class SimplifiedExtractionResponse(BaseModel):
     )
     claims_count: int = Field(..., description="Number of claims extracted and saved")
     quotes_count: int = Field(..., description="Number of quotes extracted and saved")
+    validated_count: int | None = Field(
+        None, description="Number of claims that passed context-independence validation (only if should_validate=true)"
+    )
+    invalid_count: int | None = Field(
+        None, description="Number of claims that failed context-independence validation (only if should_validate=true)"
+    )
 
     class Config:
         json_schema_extra = {
@@ -19,7 +25,9 @@ class SimplifiedExtractionResponse(BaseModel):
                 "episode_id": 123,
                 "processing_time_seconds": 342.5,
                 "claims_count": 28,
-                "quotes_count": 85
+                "quotes_count": 85,
+                "validated_count": 25,
+                "invalid_count": 3
             }
         }
 

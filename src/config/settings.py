@@ -206,6 +206,20 @@ class Settings(BaseSettings):
         description="Minimum number of unverified claims an episode must have to be eligible for validation"
     )
 
+    # Inline Claim Validation (context independence)
+    validation_max_concurrency: int = Field(
+        default=20,
+        description="Maximum concurrent LLM calls for claim validation"
+    )
+    validation_rate_limit_tokens: int = Field(
+        default=100,
+        description="Maximum API calls allowed per rate limit window"
+    )
+    validation_rate_limit_window: float = Field(
+        default=60.0,
+        description="Rate limit sliding window in seconds"
+    )
+
     # Gemini Guest/Keyword Extraction
     gemini_extraction_model: str = Field(
         default="gemini-2.5-flash",

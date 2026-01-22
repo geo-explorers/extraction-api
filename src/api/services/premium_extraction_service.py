@@ -1,7 +1,7 @@
 """Premium extraction service for API endpoints."""
 
 import asyncio
-from typing import List
+from typing import List, Tuple
 from sqlalchemy.orm import Session
 
 from src.pipeline.premium_extraction_pipeline import PremiumExtractionPipeline, PremiumPipelineResult
@@ -17,6 +17,9 @@ from src.api.exceptions import (
     ProcessingError,
     ProcessingTimeoutError,
 )
+from src.api.services.claim_validation_service import ClaimValidationService
+from src.database.claim_repository import ClaimRepository
+from src.database.connection import get_db_session
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
 
@@ -33,6 +36,14 @@ class PremiumExtractionService:
     def __init__(self):
         """Initialize the premium extraction service."""
         self.pipeline: PremiumExtractionPipeline | None = None
+        self.validation_service: ClaimValidationService | None = None
+
+    def _get_validation_service(self) -> ClaimValidationService:
+        """Get or create the claim validation service singleton."""
+        if self.validation_service is None:
+            logger.info("Initializing ClaimValidationService...")
+            self.validation_service = ClaimValidationService()
+        return self.validation_service
 
     def _get_pipeline(self) -> PremiumExtractionPipeline:
         """Get or create the premium extraction pipeline singleton."""
@@ -42,7 +53,11 @@ class PremiumExtractionService:
         return self.pipeline
 
     async def _extract_single_episode(
-        self, episode_id: int, force: bool = False, db_session: Session | None = None
+        self,
+        episode_id: int,
+        force: bool = False,
+        should_validate: bool = False,
+        db_session: Session | None = None
     ) -> SimplifiedExtractionResponse:
         """
         Extract claims from a single episode using Gemini 3 Pro (internal use only).
@@ -50,6 +65,7 @@ class PremiumExtractionService:
         Args:
             episode_id: Episode ID to process
             force: Force reprocessing even if claims exist
+            should_validate: If true, validate claims for context independence after extraction
             db_session: Optional database session for queries
 
         Returns:
@@ -60,7 +76,10 @@ class PremiumExtractionService:
             ProcessingError: If extraction fails
             ProcessingTimeoutError: If processing exceeds timeout
         """
-        logger.info(f"Processing episode {episode_id} with PREMIUM pipeline (force={force})")
+        logger.info(
+            f"Processing episode {episode_id} with PREMIUM pipeline "
+            f"(force={force}, should_validate={should_validate})"
+        )
 
         # Verify episode exists
         query_service = EpisodeQueryService(db_session)
@@ -93,8 +112,82 @@ class PremiumExtractionService:
             logger.error(f"Error processing episode {episode_id}: {e}", exc_info=True)
             raise ProcessingError(str(e))
 
+        # Validate claims if requested
+        validated_count = None
+        invalid_count = None
+
+        if should_validate and result.claims_extracted > 0:
+            validated_count, invalid_count = await self._validate_episode_claims(
+                episode_id, db_session
+            )
+
         # Convert to simplified API response
-        return self._convert_to_simplified_response(result)
+        return self._convert_to_simplified_response(
+            result, validated_count, invalid_count
+        )
+
+    async def _validate_episode_claims(
+        self,
+        episode_id: int,
+        db_session: Session | None = None
+    ) -> Tuple[int, int]:
+        """
+        Validate claims for an episode for context independence.
+
+        Args:
+            episode_id: Episode ID whose claims to validate
+            db_session: Optional database session
+
+        Returns:
+            Tuple of (validated_count, invalid_count)
+        """
+        logger.info(f"Validating claims for episode {episode_id}...")
+
+        # Get or create database session
+        session = db_session or get_db_session()
+        claim_repo = ClaimRepository(session)
+
+        # Get claims that were just saved (include all, even verified ones for fresh validation)
+        claims = claim_repo.get_claims_for_episode(
+            episode_id,
+            include_flagged=False,
+            include_verified=True
+        )
+
+        if not claims:
+            logger.info(f"No claims to validate for episode {episode_id}")
+            return (0, 0)
+
+        # Validate claims concurrently
+        validation_service = self._get_validation_service()
+        validation_results = await validation_service.validate_claims_concurrent(claims)
+
+        # Separate valid and invalid claims
+        valid_claim_ids = [
+            claim_id for claim_id, (is_valid, _) in validation_results.items()
+            if is_valid
+        ]
+        invalid_claim_ids = [
+            claim_id for claim_id, (is_valid, _) in validation_results.items()
+            if not is_valid
+        ]
+
+        # Update database: mark valid claims as verified
+        if valid_claim_ids:
+            claim_repo.mark_claims_verified(valid_claim_ids)
+            logger.info(f"Marked {len(valid_claim_ids)} claims as verified for episode {episode_id}")
+
+        # Note: invalid claims remain is_verified=False (the default)
+        # They are NOT flagged - is_flagged is for different purpose (quality issues)
+
+        # Commit the validation results
+        if db_session is None:
+            session.commit()
+            session.close()
+        else:
+            session.flush()
+
+        return (len(valid_claim_ids), len(invalid_claim_ids))
 
     async def extract_batch_episodes(
         self,
@@ -102,6 +195,7 @@ class PremiumExtractionService:
         target: int | None = None,
         force: bool = False,
         continue_on_error: bool = False,
+        should_validate: bool = False,
         db_session: Session | None = None,
     ) -> SimplifiedBatchExtractionResponse:
         """
@@ -112,6 +206,7 @@ class PremiumExtractionService:
             target: Maintain claims for latest N episodes per podcast
             force: Force reprocessing even if claims exist
             continue_on_error: Continue processing if an episode fails
+            should_validate: If true, validate claims for context independence after extraction
             db_session: Optional database session for queries
 
         Returns:
@@ -123,7 +218,8 @@ class PremiumExtractionService:
         """
         logger.info(
             f"Processing PREMIUM batch: podcasts={podcast_ids}, target={target}, "
-            f"force={force}, continue_on_error={continue_on_error}"
+            f"force={force}, continue_on_error={continue_on_error}, "
+            f"should_validate={should_validate}"
         )
 
         # Query episodes to process
@@ -161,15 +257,27 @@ class PremiumExtractionService:
         for episode in episodes_to_process:
             try:
                 response = await self._extract_single_episode(
-                    episode.id, force=force, db_session=db_session
+                    episode.id,
+                    force=force,
+                    should_validate=should_validate,
+                    db_session=db_session
                 )
                 results.append(response)
                 total_claims += response.claims_count
                 total_time += response.processing_time_seconds
-                logger.info(
-                    f"✓ Episode {episode.id}: {response.claims_count} claims "
+
+                # Build log message with optional validation stats
+                log_msg = (
+                    f"Episode {episode.id}: {response.claims_count} claims "
                     f"in {response.processing_time_seconds:.1f}s (PREMIUM)"
                 )
+                if response.validated_count is not None:
+                    log_msg += (
+                        f" [validated: {response.validated_count}, "
+                        f"invalid: {response.invalid_count}]"
+                    )
+                logger.info(f"✓ {log_msg}")
+
             except Exception as e:
                 error_msg = str(e)
                 errors[episode.id] = error_msg
@@ -194,13 +302,18 @@ class PremiumExtractionService:
         )
 
     def _convert_to_simplified_response(
-        self, result: PremiumPipelineResult
+        self,
+        result: PremiumPipelineResult,
+        validated_count: int | None = None,
+        invalid_count: int | None = None
     ) -> SimplifiedExtractionResponse:
         """
         Convert PremiumPipelineResult to SimplifiedExtractionResponse.
 
         Args:
             result: Pipeline result domain object
+            validated_count: Number of claims that passed validation (if validation was run)
+            invalid_count: Number of claims that failed validation (if validation was run)
 
         Returns:
             SimplifiedExtractionResponse for API
@@ -210,4 +323,6 @@ class PremiumExtractionService:
             processing_time_seconds=result.processing_time_seconds,
             claims_count=result.claims_extracted,
             quotes_count=0,  # Premium pipeline doesn't process quotes
+            validated_count=validated_count,
+            invalid_count=invalid_count,
         )
