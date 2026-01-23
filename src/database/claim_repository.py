@@ -636,3 +636,52 @@ class ClaimRepository:
             logger.error(f"Error marking claims as verified: {e}", exc_info=True)
             self.session.rollback()
             raise
+
+    def get_claims_for_episode(
+        self,
+        episode_id: int,
+        include_flagged: bool = False,
+        include_verified: bool = True
+    ) -> List[Claim]:
+        """
+        Get all claims for a single episode.
+
+        Args:
+            episode_id: Episode ID
+            include_flagged: If True, include already flagged claims
+            include_verified: If True, include already verified claims (default: True)
+
+        Returns:
+            List of claims for the episode
+
+        Example:
+            ```python
+            repo = ClaimRepository(session)
+
+            # Get all claims for validation (including verified for re-validation)
+            claims = repo.get_claims_for_episode(123, include_verified=True)
+            ```
+        """
+        logger.info(
+            f"Fetching claims for episode {episode_id} "
+            f"(include_flagged={include_flagged}, include_verified={include_verified})"
+        )
+
+        # Query through ClaimEpisode junction table (claims no longer have episode_id)
+        query = (
+            self.session.query(Claim)
+            .join(ClaimEpisode, Claim.id == ClaimEpisode.claim_id)
+            .filter(ClaimEpisode.episode_id == episode_id)
+        )
+
+        if not include_flagged:
+            query = query.filter(Claim.is_flagged == False)
+
+        if not include_verified:
+            query = query.filter(Claim.is_verified == False)
+
+        claims = query.all()
+
+        logger.info(f"Found {len(claims)} claims for episode {episode_id}")
+
+        return claims
