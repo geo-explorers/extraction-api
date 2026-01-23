@@ -667,7 +667,12 @@ class ClaimRepository:
             f"(include_flagged={include_flagged}, include_verified={include_verified})"
         )
 
-        query = self.session.query(Claim).filter(Claim.episode_id == episode_id)
+        # Query through ClaimEpisode junction table (claims no longer have episode_id)
+        query = (
+            self.session.query(Claim)
+            .join(ClaimEpisode, Claim.id == ClaimEpisode.claim_id)
+            .filter(ClaimEpisode.episode_id == episode_id)
+        )
 
         if not include_flagged:
             query = query.filter(Claim.is_flagged == False)
