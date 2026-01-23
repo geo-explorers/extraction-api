@@ -180,12 +180,13 @@ class PremiumExtractionService:
         # Note: invalid claims remain is_verified=False (the default)
         # They are NOT flagged - is_flagged is for different purpose (quality issues)
 
-        # Commit the validation results
+        # Commit the validation results (always commit since this is the final step)
+        logger.info(f"Committing validation results for episode {episode_id}...")
+        session.commit()
+        logger.info(f"✓ Validation results committed for episode {episode_id}")
+
         if db_session is None:
-            session.commit()
             session.close()
-        else:
-            session.flush()
 
         return (len(valid_claim_ids), len(invalid_claim_ids))
 

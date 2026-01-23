@@ -399,10 +399,10 @@ For each claim, evaluate whether it is valid or should be flagged based on the c
                         contents=full_prompt,
                         config=types.GenerateContentConfig(
                             temperature=0.0,
-                            max_output_tokens=1024,
+                            max_output_tokens=8192,
                             safety_settings=self.safety_settings,
                             response_mime_type="application/json",
-                            response_json_schema=SingleClaimValidationResult.model_json_schema(),
+                            response_schema=SingleClaimValidationResult,
                         )
                     )
                 )

@@ -74,11 +74,6 @@ class PodcastEpisode(Base):
         "Quote", back_populates="episode", cascade="all, delete-orphan"
     )
 
-    keytakeaways_episode = relationship(
-        "KeyTakeAwaysEpisode", back_populates="episode", cascade="all, delete-orphan"
-    )
-
-    
 
     def __repr__(self) -> str:
         return f"<PodcastEpisode(id={self.id}, name='{self.name[:50]}...')>"
@@ -157,9 +152,6 @@ class Claim(Base):
     claim_episodes = relationship(
         "ClaimEpisode", back_populates="claim", cascade="all, delete-orphan"
     )
-    claim_keytakeaways_episode = relationship(
-        "KeyTakeAwaysEpisode", back_populates="claim", cascade="all, delete-orphan"
-    )
 
 
     def __repr__(self) -> str:
@@ -189,8 +181,7 @@ class ClaimEpisode(Base):
         ForeignKey("crypto.podcast_episodes.id", ondelete="CASCADE"),
         nullable=False,
     )
-    group_order = Column(Integer, nullable=True)
-    claim_order = Column(Integer, nullable=True)
+    claim_order = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -199,35 +190,6 @@ class ClaimEpisode(Base):
     tag_maps = relationship(
         "TagMap", back_populates="claim_episode", cascade="all, delete-orphan"
     )
-
-class KeyTakeAwaysEpisode(Base):
-    """
-    Many-to-many relationship between key takeaways and episodes.
-
-    Table: crypto.key_take_aways
-    """
-    __tablename__ = "key_takeaways_episodes"
-    __table_args__ = (
-        UniqueConstraint("claim_id", "episode_id", name="uq_key_take_aways_claim_episode"),
-        {"schema": "crypto"},
-    )
-
-    
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    claim_id = Column(
-        BigInteger, 
-        ForeignKey("crypto.claims.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    episode_id = Column(
-        BigInteger,
-        ForeignKey("crypto.podcast_episodes.id", ondelete="CASCADE")
-    )
-    claim_order = Column(Integer, nullable=True)
-    
-    claim = relationship("Claim", back_populates="claim_keytakeaways_episode")
-    episode = relationship("PodcastEpisode", back_populates="keytakeaways_episode")
-
 
 class Tag(Base):
     """
