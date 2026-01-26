@@ -17,6 +17,8 @@ from src.api.exceptions import (
     ProcessingError,
     ProcessingTimeoutError,
 )
+from sqlalchemy import text
+
 from src.api.services.claim_validation_service import ClaimValidationService
 from src.database.claim_repository import ClaimRepository
 from src.database.connection import get_db_session
@@ -121,6 +123,22 @@ class PremiumExtractionService:
                 episode_id, db_session
             )
 
+        # Filter topics with fewer than 3 (valid) claims
+        # This runs regardless of whether validation was performed
+        if result.claims_extracted > 0:
+            session = db_session or get_db_session()
+            try:
+                await self._filter_topics_by_claim_count(
+                    episode_id=episode_id,
+                    session=session,
+                    min_claims=3,
+                    use_verified_only=should_validate  # Only count verified if validation ran
+                )
+                session.commit()
+            finally:
+                if db_session is None:
+                    session.close()
+
         # Convert to simplified API response
         return self._convert_to_simplified_response(
             result, validated_count, invalid_count
@@ -189,6 +207,105 @@ class PremiumExtractionService:
             session.close()
 
         return (len(valid_claim_ids), len(invalid_claim_ids))
+
+    async def _filter_topics_by_claim_count(
+        self,
+        episode_id: int,
+        session: Session,
+        min_claims: int = 3,
+        use_verified_only: bool = True
+    ) -> int:
+        """
+        Filter out topics that have fewer than min_claims valid claims.
+
+        Only removes the Topic tag_map entries - claim-episode links remain intact.
+        Claims become "uncategorized" but still belong to the episode.
+
+        Args:
+            episode_id: The episode to filter
+            session: Database session
+            min_claims: Minimum claims required per topic (default 3)
+            use_verified_only: If True, only count is_verified=True claims
+
+        Returns:
+            Number of topic tag_map entries removed
+        """
+        logger.info(
+            f"Filtering topics with <{min_claims} claims for episode {episode_id} "
+            f"(use_verified_only={use_verified_only})"
+        )
+
+        # Find topics with fewer than min_claims valid claims
+        find_small_topics_query = text("""
+            WITH topic_claim_counts AS (
+                SELECT
+                    t.name as topic_name,
+                    t.id as tag_id,
+                    COUNT(CASE WHEN c.is_verified = true OR :count_all THEN 1 END) as valid_count
+                FROM crypto.claim_episodes ce
+                JOIN crypto.claims c ON c.id = ce.claim_id
+                JOIN crypto.tag_map tm ON tm.from_claim_episode_id = ce.id
+                JOIN crypto.tags t ON t.id = tm.to_tag_id
+                WHERE ce.episode_id = :episode_id
+                  AND tm.tag_category = 'Topic'
+                GROUP BY t.name, t.id
+            )
+            SELECT tag_id, topic_name, valid_count
+            FROM topic_claim_counts
+            WHERE valid_count < :min_claims
+        """)
+
+        result = session.execute(
+            find_small_topics_query,
+            {
+                "episode_id": episode_id,
+                "min_claims": min_claims,
+                "count_all": not use_verified_only
+            }
+        )
+        small_topics = result.fetchall()
+
+        if not small_topics:
+            logger.info(f"No topics to filter for episode {episode_id}")
+            return 0
+
+        # Log which topics will be filtered
+        for row in small_topics:
+            logger.info(
+                f"  Removing topic '{row.topic_name}' with {row.valid_count} valid claims"
+            )
+
+        # Get the tag IDs to filter
+        filtered_tag_ids = [row.tag_id for row in small_topics]
+
+        # Delete ONLY the Topic tag_map entries (keep claim_episodes intact!)
+        delete_query = text("""
+            DELETE FROM crypto.tag_map
+            WHERE id IN (
+                SELECT tm.id
+                FROM crypto.tag_map tm
+                JOIN crypto.claim_episodes ce ON tm.from_claim_episode_id = ce.id
+                WHERE ce.episode_id = :episode_id
+                  AND tm.to_tag_id = ANY(:filtered_tag_ids)
+                  AND tm.tag_category = 'Topic'
+            )
+        """)
+
+        result = session.execute(
+            delete_query,
+            {
+                "episode_id": episode_id,
+                "filtered_tag_ids": filtered_tag_ids
+            }
+        )
+        removed_count = result.rowcount
+
+        logger.info(
+            f"Filtered {len(small_topics)} topics, removed {removed_count} tag_map entries "
+            f"for episode {episode_id}"
+        )
+
+        return removed_count
 
     async def extract_batch_episodes(
         self,

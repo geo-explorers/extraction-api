@@ -155,26 +155,8 @@ class PremiumExtractionPipeline:
 
         logger.info(f"  ✓ Extracted {claims_extracted} claims in {extraction_time:.1f}s")
 
-        # Post-processing: Filter out topics with fewer than 3 claims
-        min_claims_per_topic = 3
-        filtered_claims_with_topics = {
-            topic: claims for topic, claims in claims_with_topics.items()
-            if len(claims) >= min_claims_per_topic
-        }
-
-        filtered_out_topics = len(claims_with_topics) - len(filtered_claims_with_topics)
-        filtered_out_claims = claims_extracted - sum(len(c) for c in filtered_claims_with_topics.values())
-
-        if filtered_out_topics > 0:
-            logger.info(
-                f"  Filtered out {filtered_out_topics} topics with <{min_claims_per_topic} claims "
-                f"({filtered_out_claims} claims removed)"
-            )
-
-        # Update variables to use filtered data
-        claims_with_topics = filtered_claims_with_topics
-        topics = [t for t in topics if t in claims_with_topics]
-        claims_extracted = sum(len(c) for c in claims_with_topics.values())
+        # Note: Minimum claims per topic filtering is now done AFTER validation
+        # in premium_extraction_service._filter_topics_by_claim_count()
 
         # Build claim_topics in LLM extraction order:
         # - Topics are ordered as returned by the LLM (preserved in `topics` list)

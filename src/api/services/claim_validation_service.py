@@ -140,9 +140,10 @@ class ClaimValidationService:
                         claim.claim_text,
                         CLAIM_VALIDATION_PROMPT
                     )
-                    logger.debug(
-                        f"Claim {claim.id}: valid={result.is_valid}, "
-                        f"explanation={result.explanation[:100]}..."
+                    status = "✓ VALID" if result.is_valid else "✗ INVALID"
+                    logger.info(
+                        f"[{status}] Claim {claim.id}: \"{claim.claim_text[:80]}{'...' if len(claim.claim_text) > 80 else ''}\" "
+                        f"| Reason: {result.explanation}"
                     )
                     return (claim.id, result.is_valid, result.explanation)
                 except Exception as e:
