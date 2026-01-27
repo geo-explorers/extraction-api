@@ -10,13 +10,14 @@ A claim is VALID if:
 - The reader can fully grasp the meaning without knowing what came before or after
 - The entities refered to are refered by their complete proper names.
 - A well informed reader can understand the claim without further explanations
+- acronyms or abbreviations are allowed which is well known are easy to understand like US, FBI, NASA etc. 
+- If the acronyms or abbreviations can be understood from the context should be also be allowed.
 
 A claim is INVALID if:
 - It contains unresolved references (e.g., "he", "she", "they", "this", "that", "the company", "the project")
 - It requires prior context to understand who or what is being discussed
 - Key terms or entities are linguistically ambigius
 - It references "the above", "as mentioned", "the previous", or similar context-dependent phrases
-- It uses acronyms or abbreviations that are not well known without first defining them
 
 Claim to evaluate:
 {claim_text}
