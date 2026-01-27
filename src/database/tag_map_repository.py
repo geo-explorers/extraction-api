@@ -10,11 +10,11 @@ Usage:
     updated_claims = await repo.save_tag_maps(claim_topics)
 """
 
-from typing import Dict, List, Tuple, Union, overload
+from typing import Dict, List, Tuple, Optional
 from sqlalchemy.orm import Session
 
 from src.database.models import TagMap
-from src.extraction.quote_finder import ClaimWithTopic, KeyTakeAwayWithClaim
+from src.extraction.quote_finder import ClaimWithTopic
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -48,35 +48,19 @@ class TagMapRepository:
         """
         self.session = db_session
 
-    @overload
     async def save_tag_maps(
         self,
         claim_topics: List[ClaimWithTopic]
     ) -> List[ClaimWithTopic]:
-        ...
-
-    @overload
-    async def save_tag_maps(
-        self,
-        claim_topics: List[KeyTakeAwayWithClaim]
-    ) -> List[KeyTakeAwayWithClaim]:
-        ...
-
-    async def save_tag_maps(
-        self,
-        claim_topics: List[Union[ClaimWithTopic, KeyTakeAwayWithClaim]]
-    ) -> List[Union[ClaimWithTopic, KeyTakeAwayWithClaim]]:
         """
         Save tag map entries to database.
 
         Creates TagMap records for each claim-episode + tag pair, skipping
         any entries that already exist. Uses a constant tag_category of
-        "Topic" and the tag_id from each item. Returns the ClaimWithTopic
-        or KeyTakeAwayWithClaim items that have valid tag map links.
+        "Topic" and the tag_id from each item.
 
         Args:
-            claim_topics: ClaimWithTopic or KeyTakeAwayWithClaim items with
-                claim_episode_id and tag_id
+            claim_topics: ClaimWithTopic items with claim_episode_id and tag_id
 
         Returns:
             List of items with tag map entries saved
@@ -91,7 +75,7 @@ class TagMapRepository:
             tag_category = "Topic"
             pair_to_claim_topics: Dict[
                 Tuple[int, int],
-                List[Union[ClaimWithTopic, KeyTakeAwayWithClaim]]
+                List[ClaimWithTopic]
             ] = {}
             ordered_pairs: List[Tuple[int, int]] = []
 
@@ -159,9 +143,7 @@ class TagMapRepository:
                 self.session.add_all(tag_maps)
                 self.session.flush()
 
-            saved_claim_topics: List[
-                Union[ClaimWithTopic, KeyTakeAwayWithClaim]
-            ] = []
+            saved_claim_topics: List[ClaimWithTopic] = []
             for key, claim_topic_list in pair_to_claim_topics.items():
                 if key in existing_pairs or key in new_pairs:
                     saved_claim_topics.extend(claim_topic_list)
@@ -252,6 +234,65 @@ class TagMapRepository:
         )
 
         return claim_episodes_by_tag
+
+    async def create_tag_map(
+        self,
+        tag_id: int,
+        from_claim_episode_id: int,
+        tag_category: str = "KeyTakeaway"
+    ) -> None:
+        """
+        Create a single tag map entry.
+
+        Args:
+            tag_id: The tag ID to link
+            from_claim_episode_id: The claim-episode ID to link from
+            tag_category: Category for the tag map (default: "KeyTakeaway")
+
+        Example:
+            ```python
+            repo = TagMapRepository(session)
+            await repo.create_tag_map(
+                tag_id=123,
+                from_claim_episode_id=456,
+                tag_category="KeyTakeaway"
+            )
+            ```
+        """
+        try:
+            # Check if entry already exists
+            existing = (
+                self.session.query(TagMap)
+                .filter(
+                    TagMap.from_claim_episode_id == from_claim_episode_id,
+                    TagMap.to_tag_id == tag_id,
+                    TagMap.tag_category == tag_category,
+                )
+                .first()
+            )
+
+            if existing:
+                logger.debug(
+                    f"Tag map entry already exists: claim_episode={from_claim_episode_id}, tag={tag_id}"
+                )
+                return
+
+            tag_map = TagMap(
+                from_claim_episode_id=from_claim_episode_id,
+                tag_category=tag_category,
+                to_tag_id=tag_id,
+            )
+            self.session.add(tag_map)
+            self.session.flush()
+
+            logger.debug(
+                f"Created tag map: claim_episode={from_claim_episode_id}, tag={tag_id}, category={tag_category}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error creating tag map entry: {e}", exc_info=True)
+            self.session.rollback()
+            raise
 
     def rollback(self) -> None:
         """

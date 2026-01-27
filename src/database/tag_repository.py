@@ -10,11 +10,11 @@ Usage:
     updated_claims = await repo.save_tags(claim_topics)
 """
 
-from typing import List, Dict, Union, overload
+from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 
 from src.database.models import Tag
-from src.extraction.quote_finder import ClaimWithTopic, KeyTakeAwayWithClaim
+from src.extraction.quote_finder import ClaimWithTopic
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -26,7 +26,8 @@ class TagRepository:
 
     Features:
     - Save unique tags in batch
-    - Update tag_id on ClaimWithTopic or KeyTakeAwayWithClaim records
+    - Update tag_id on ClaimWithTopic records
+    - Get or create tags by name and category
     - Transaction management with rollback
     """
 
@@ -47,24 +48,10 @@ class TagRepository:
         """
         self.session = db_session
 
-    @overload
     async def save_tags(
         self,
         claim_topics: List[ClaimWithTopic]
     ) -> List[ClaimWithTopic]:
-        ...
-
-    @overload
-    async def save_tags(
-        self,
-        claim_topics: List[KeyTakeAwayWithClaim]
-    ) -> List[KeyTakeAwayWithClaim]:
-        ...
-
-    async def save_tags(
-        self,
-        claim_topics: List[Union[ClaimWithTopic, KeyTakeAwayWithClaim]]
-    ) -> List[Union[ClaimWithTopic, KeyTakeAwayWithClaim]]:
         """
         Save tags to database.
 
@@ -72,7 +59,7 @@ class TagRepository:
         already exist. Updates tag_id on each item.
 
         Args:
-            claim_topics: ClaimWithTopic or KeyTakeAwayWithClaim items
+            claim_topics: ClaimWithTopic items
 
         Returns:
             List of items with tag_id set
@@ -88,11 +75,7 @@ class TagRepository:
             seen_names = set()
 
             for claim_topic in claim_topics:
-                if isinstance(claim_topic, ClaimWithTopic):
-                    tag_name = claim_topic.topic
-                else:
-                    # KeyTakeAwayWithClaim: use constant tag name, not the claim text
-                    tag_name = "Key Takeaways"
+                tag_name = claim_topic.topic
                 if not tag_name:
                     logger.warning(
                         "Item missing tag text; skipping tag creation"
@@ -128,13 +111,9 @@ class TagRepository:
                 for tag in tags:
                     existing_by_name[tag.name] = tag.id
 
-            updated_claim_topics: List[Union[ClaimWithTopic, KeyTakeAwayWithClaim]] = []
+            updated_claim_topics: List[ClaimWithTopic] = []
             for claim_topic in claim_topics:
-                if isinstance(claim_topic, ClaimWithTopic):
-                    tag_name = claim_topic.topic
-                else:
-                    # KeyTakeAwayWithClaim: use constant tag name, not the claim text
-                    tag_name = "Key Takeaways"
+                tag_name = claim_topic.topic
                 if not tag_name:
                     continue
                 tag_id = existing_by_name.get(tag_name)
@@ -153,6 +132,49 @@ class TagRepository:
 
         except Exception as e:
             logger.error(f"Error saving tags: {e}", exc_info=True)
+            self.session.rollback()
+            raise
+
+    async def get_or_create_tag(
+        self,
+        tag_name: str,
+        tag_category: Optional[str] = None
+    ) -> int:
+        """
+        Get an existing tag by name or create a new one.
+
+        Args:
+            tag_name: The tag name to find or create
+            tag_category: Optional category for the tag (stored in metadata)
+
+        Returns:
+            The tag ID
+
+        Example:
+            ```python
+            repo = TagRepository(session)
+            tag_id = await repo.get_or_create_tag("KeyTakeaway", tag_category="KeyTakeaway")
+            ```
+        """
+        try:
+            existing_tag = (
+                self.session.query(Tag)
+                .filter(Tag.name == tag_name)
+                .first()
+            )
+
+            if existing_tag:
+                return existing_tag.id
+
+            new_tag = Tag(name=tag_name)
+            self.session.add(new_tag)
+            self.session.flush()
+
+            logger.info(f"Created new tag: {tag_name} (category: {tag_category})")
+            return new_tag.id
+
+        except Exception as e:
+            logger.error(f"Error getting/creating tag: {e}", exc_info=True)
             self.session.rollback()
             raise
 
