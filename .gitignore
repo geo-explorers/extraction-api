@@ -17,3 +17,5 @@ logs/
 notes.md
 
 *.bk
+
+.codex

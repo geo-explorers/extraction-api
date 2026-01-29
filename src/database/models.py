@@ -74,6 +74,7 @@ class PodcastEpisode(Base):
         "Quote", back_populates="episode", cascade="all, delete-orphan"
     )
 
+
     def __repr__(self) -> str:
         return f"<PodcastEpisode(id={self.id}, name='{self.name[:50]}...')>"
 
@@ -180,11 +181,12 @@ class ClaimEpisode(Base):
         ForeignKey("crypto.podcast_episodes.id", ondelete="CASCADE"),
         nullable=False,
     )
+    claim_order = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
-    claim = relationship("Claim")
-    episode = relationship("PodcastEpisode")
+    claim = relationship("Claim", back_populates="claim_episodes")
+    episode = relationship("PodcastEpisode", back_populates="claim_episodes")
     tag_maps = relationship(
         "TagMap", back_populates="claim_episode", cascade="all, delete-orphan"
     )

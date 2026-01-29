@@ -32,7 +32,7 @@ from src.database.claim_repository import ClaimRepository
 from src.database.tag_repository import TagRepository
 from src.preprocessing.transcript_parser import TranscriptParser
 from src.extraction.premium_claim_extractor import PremiumClaimExtractor
-from src.extraction.quote_finder import ClaimWithTopic, KeyTakeAwayWithClaim
+from src.extraction.quote_finder import ClaimWithTopic
 from src.infrastructure.embedding_service import EmbeddingService
 from src.infrastructure.logger import get_logger
 
@@ -49,7 +49,7 @@ class PremiumPipelineResult:
     model_used: str  # "gemini-3-pro-preview"
     topic_of_discussion: list[str]
     claim_with_topic: dict[str, list[str]]
-    key_takeaways: list[KeyTakeAwayWithClaim]
+    key_takeaways: list[str]  # Key takeaways are now stored as tags via TagMap
 
 
 
@@ -139,7 +139,7 @@ class PremiumExtractionPipeline:
                 claim_with_topic={},
                 key_takeaways=[]
             )
-                
+
 
         logger.info("Step 3/5: Extracting claims with topics...")
         stage_start = time.time()
@@ -148,7 +148,7 @@ class PremiumExtractionPipeline:
             topics_of_discussion=topics
         )
         extraction_time = time.time() - stage_start
-        
+
         claims_extracted = 0
         for _, claimList in claims_with_topics.items():
             claims_extracted += len(claimList)
@@ -176,16 +176,24 @@ class PremiumExtractionPipeline:
         topics = [t for t in topics if t in claims_with_topics]
         claims_extracted = sum(len(c) for c in claims_with_topics.values())
 
+        # Build claim_topics in LLM extraction order:
+        # - Topics are ordered as returned by the LLM (preserved in `topics` list)
+        # - Claims within each topic are in LLM extraction order
+        # - claim_order is assigned sequentially to preserve this order for frontend display
         claim_topics: List[ClaimWithTopic] = []
-        for topic, claims in claims_with_topics.items():
+        claim_order = 1
+        for topic in topics:
+            claims = claims_with_topics.get(topic, [])
             for claim in claims:
                 claim_topics.append(
                     ClaimWithTopic(
                         claim_text=claim,
                         topic=topic,
-                        episode_id=episode_id
+                        episode_id=episode_id,
+                        claim_order=claim_order
                     )
                 )
+                claim_order += 1
 
         if not claim_topics:
             logger.warning("No claims extracted, ending pipeline")
@@ -220,26 +228,12 @@ class PremiumExtractionPipeline:
         extraction_time = time.time() - stage_start
         logger.info(f"  ✓ Extracted {len(key_takeaways_raw)} key takeaways in {extraction_time:.1f}s")
 
-        key_takeaways = [
-            KeyTakeAwayWithClaim(
-                key_takeaway=key_takeaway,
-            ) for key_takeaway in key_takeaways_raw
-        ]
+        # Key takeaways are now stored as tags (not separate table)
+        key_takeaways: list[str] = key_takeaways_raw
 
         if not key_takeaways:
-            logger.warning("No key takeaways extracted, ending pipeline")
-            processing_time = time.time() - start_time
-            return PremiumPipelineResult(
-                episode_id=episode_id,
-                claims=claim_topics,
-                processing_time_seconds=processing_time,
-                claims_extracted=claims_extracted,
-                model_used=settings.gemini_premium_model,
-                topic_of_discussion=topics,
-                claim_with_topic=claims_with_topics,
-                key_takeaways=[]
-            )
-            
+            logger.warning("No key takeaways extracted, continuing without them")
+
         if save_to_db:
             logger.info("Step 5/5: Saving results to database...")
             db_session = get_db_session()
@@ -280,12 +274,12 @@ class PremiumExtractionPipeline:
 
                 logger.info(f"  ✓ Saved {len(saved_claim_topics_with_claim_episode_id)} claim-episode links")
 
-               
+
                 logger.info("  Saving topic entries to database...")
                 tag_repo = TagRepository(db_session)
                 saved_claim_topics_with_tag_id = await tag_repo.save_tags(
                     claim_topics=saved_claim_topics_with_claim_episode_id
-                )   
+                )
                 logger.info(f"  ✓ Saved {len(saved_claim_topics_with_tag_id)} topic")
 
                 logger.info("  Saving tag map entries to database...")
@@ -295,19 +289,27 @@ class PremiumExtractionPipeline:
                 )
                 logger.info(f"  ✓ Saved {len(saved_tag_map_topics)} tag map entries")
 
-                for key_takeaway in key_takeaways:
-                    for saved_claim_topic in saved_claim_topics_with_tag_id:
-                        if key_takeaway.key_takeaway == saved_claim_topic.claim_text:
-                            key_takeaway.claim_episode_id = saved_claim_topic.claim_episode_id
-                            break
-                
-                logger.info("  Saving key takeaways to database...")
-                saved_key_takeaways_with_claim_episode_id = await tag_repo.save_tags(key_takeaways)
-                logger.info(f"  ✓ Saved {len(saved_key_takeaways_with_claim_episode_id)} key takeaways")
-
-                logger.info("  Saving key takeaways to claim-episode links to database...")
-                saved_key_takeaways = await tag_map_repo.save_tag_maps(key_takeaways)
-                logger.info(f"  ✓ Saved {len(saved_key_takeaways)} key takeaways to claim-episode links")
+                # Save key takeaways as tags linked to their corresponding claims
+                if key_takeaways:
+                    logger.info("  Saving key takeaways as tags...")
+                    # Get or create the "Key takeaways" tag once
+                    key_takeaway_tag_id = await tag_repo.get_or_create_tag(
+                        tag_name="Key takeaways",
+                        tag_category="KeyTakeaway"
+                    )
+                    key_takeaway_tag_count = 0
+                    for key_takeaway_text in key_takeaways:
+                        # Find the claim that matches this key takeaway
+                        for saved_claim_topic in saved_claim_topics_with_tag_id:
+                            if key_takeaway_text == saved_claim_topic.claim_text:
+                                # Link the claim to the "Key Takeaways" tag via TagMap
+                                await tag_map_repo.create_tag_map(
+                                    tag_id=key_takeaway_tag_id,
+                                    from_claim_episode_id=saved_claim_topic.claim_episode_id
+                                )
+                                key_takeaway_tag_count += 1
+                                break
+                    logger.info(f"  ✓ Saved {key_takeaway_tag_count} key takeaway tags")
 
                 # Commit transaction
                 db_session.commit()
@@ -327,12 +329,12 @@ class PremiumExtractionPipeline:
 
         logger.info(
             f"✅ PREMIUM pipeline complete for episode {episode_id} "
-            f"({processing_time:.1f}s, {len(claims)} claims)"
+            f"({processing_time:.1f}s, {len(claim_topics)} claims)"
         )
 
         return PremiumPipelineResult(
             episode_id=episode_id,
-            claims=claims,
+            claims=claim_topics,
             processing_time_seconds=processing_time,
             claims_extracted=claims_extracted,
             model_used=settings.gemini_premium_model,

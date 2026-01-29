@@ -72,7 +72,7 @@ class ClaimEpisodeRepository:
 
         Creates ClaimEpisode records for each claim ID, skipping any links
         that already exist for the given episode. Updates claim_episode_id
-        on each ClaimWithTopic.
+        on each ClaimWithTopic and persists claim_order values.
 
         Args:
             claim_topics: ClaimWithTopic items to link to the episode
@@ -98,6 +98,7 @@ class ClaimEpisodeRepository:
 
         try:
             claim_id_to_topics: Dict[int, List[ClaimWithTopic]] = {}
+            claim_id_to_order: Dict[int, int] = {}
             ordered_claim_ids: List[int] = []
 
             for claim_topic in claim_topics:
@@ -114,12 +115,23 @@ class ClaimEpisodeRepository:
 
                 claim_id_to_topics[claim_id].append(claim_topic)
 
+            for claim_id, claim_topic_list in claim_id_to_topics.items():
+                claim_order = next(
+                    (
+                        claim_topic.claim_order
+                        for claim_topic in claim_topic_list
+                        if claim_topic.claim_order is not None
+                    ),
+                    None,
+                )
+                claim_id_to_order[claim_id] = claim_order
+
             if not ordered_claim_ids:
                 logger.warning("No claim IDs provided to link")
                 return []
 
             existing_links = (
-                self.session.query(ClaimEpisode.claim_id, ClaimEpisode.id)
+                self.session.query(ClaimEpisode)
                 .filter(
                     ClaimEpisode.episode_id == episode_id,
                     ClaimEpisode.claim_id.in_(ordered_claim_ids),
@@ -127,7 +139,7 @@ class ClaimEpisodeRepository:
                 .all()
             )
             existing_by_claim = {
-                claim_id: link_id for claim_id, link_id in existing_links
+                link.claim_id: link for link in existing_links
             }
 
             new_claim_ids = [
@@ -138,22 +150,35 @@ class ClaimEpisodeRepository:
 
             links = []
             if new_claim_ids:
-                links = [
-                    ClaimEpisode(claim_id=claim_id, episode_id=episode_id)
-                    for claim_id in new_claim_ids
-                ]
+                for claim_id in new_claim_ids:
+                    claim_order = claim_id_to_order.get(claim_id)
+                    links.append(
+                        ClaimEpisode(
+                            claim_id=claim_id,
+                            episode_id=episode_id,
+                            claim_order=claim_order,
+                        )
+                    )
 
                 self.session.add_all(links)
                 self.session.flush()
 
                 for link in links:
-                    existing_by_claim[link.claim_id] = link.id
+                    existing_by_claim[link.claim_id] = link
+
+            for claim_id, claim_order in claim_id_to_order.items():
+                link = existing_by_claim.get(claim_id)
+                if link is None:
+                    continue
+                if claim_order is not None:
+                    link.claim_order = claim_order
 
             updated_claim_topics: List[ClaimWithTopic] = []
             for claim_id, claim_topic_list in claim_id_to_topics.items():
-                claim_episode_id = existing_by_claim.get(claim_id)
-                if claim_episode_id is None:
+                link = existing_by_claim.get(claim_id)
+                if link is None:
                     continue
+                claim_episode_id = link.id
                 for claim_topic in claim_topic_list:
                     claim_topic.claim_episode_id = claim_episode_id
                     updated_claim_topics.append(claim_topic)
