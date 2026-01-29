@@ -75,7 +75,7 @@ class PremiumClaimExtractor:
             )
 
             # Parse structured response using Pydantic
-            result = ClaimExtractionResult.model_validate_json(response.text)
+            result: ClaimExtractionResult = ClaimExtractionResult.model_validate_json(response.text)
             claims = result.claims
 
             logger.info(f"Extracted {len(claims)} claims from full transcript via structured outputs")

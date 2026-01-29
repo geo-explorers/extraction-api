@@ -12,7 +12,7 @@ def extract_keyword_and_topics(
     max_keywords: int,
     min_topics: int,
     max_topics: int
-) -> Tuple[List[str], List[str]]:
+) -> Tuple[List[str], List[str], Dict[str, List[str]]]:
   try:
     chain = llm_model.build_chain(
       prompt=KEYWORD_EXTRACTION_PROMPT
@@ -57,5 +57,7 @@ def extract_keyword_and_topics(
     topics =  response["topics"]
   except KeyError:
     raise Exception("Failed extracting topics")
- 
-  return keywords, topics
+
+  topic_keywords = response.get("topic_keywords", {})
+
+  return keywords, topics, topic_keywords

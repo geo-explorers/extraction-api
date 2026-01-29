@@ -17,7 +17,7 @@ def keyword_extraction(request: KeywordExtractionRequest) -> JSONResponse:
   logger.info(f"Keyword extraction request - Episode: '{request.episode.get('title', 'N/A')}', Claims: {len(request.episode.get('claims', []))}, Topics: {len(request.topics_list)}")
 
   try:
-    keywords, topics = extract_keyword_and_topics(
+    keywords, topics, topic_keywords = extract_keyword_and_topics(
       episode=request.episode,
       topics_list=request.topics_list,
       min_keywords=request.min_keywords,
@@ -29,11 +29,12 @@ def keyword_extraction(request: KeywordExtractionRequest) -> JSONResponse:
     response_data = {
       "error": None,
       "keywords": keywords,
-      "topics": topics
+      "topics": topics,
+      "topic_keywords": topic_keywords
     }
 
     # Log response body
-    logger.info(f"Keyword extraction response - Keywords: {len(keywords) if keywords else 0}, Topics: {len(topics) if topics else 0}")
+    logger.info(f"Keyword extraction response - Keywords: {len(keywords) if keywords else 0}, Topics: {len(topics) if topics else 0}, Topic Keywords: {len(topic_keywords) if topic_keywords else 0}")
     logger.debug(f"Response body: {json.dumps(response_data)}")
 
     return JSONResponse(
@@ -48,7 +49,8 @@ def keyword_extraction(request: KeywordExtractionRequest) -> JSONResponse:
       content={
         "error": error_msg,
         "keywords": None,
-        "topics": None
+        "topics": None,
+        "topic_keywords": None
       },
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
     )
