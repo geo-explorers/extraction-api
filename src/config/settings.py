@@ -226,6 +226,12 @@ class Settings(BaseSettings):
         description="Temperature for premium extraction (0 = deterministic)"
     )
 
+    # Standalone Claim Keywords
+    standalone_claim_keywords_max_claims: int = Field(
+        default=500,
+        description="Maximum number of claims per standalone keyword extraction request"
+    )
+
     # API Configuration
     api_host: str = Field(
         default="0.0.0.0",

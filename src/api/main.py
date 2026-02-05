@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 import requests
 
-from src.api.routers import extraction, guest_extraction, keyword_extraction, claim_keyword_extraction, validation
+from src.api.routers import extraction, guest_extraction, keyword_extraction, claim_keyword_extraction, standalone_claim_keywords, validation
 from src.api.exceptions import (
     database_exception_handler,
     generic_exception_handler,
@@ -160,6 +160,7 @@ app.include_router(extraction.router, tags=["claims"])
 app.include_router(guest_extraction.router, prefix="/extract", tags=["guests"])
 app.include_router(keyword_extraction.router, prefix="/extract", tags=["keywords"])
 app.include_router(claim_keyword_extraction.router, prefix="/extract", tags=["claim-keywords"])
+app.include_router(standalone_claim_keywords.router, prefix="/extract", tags=["standalone-claim-keywords"])
 app.include_router(validation.router, tags=["validation"])
 
 # Register exception handlers
