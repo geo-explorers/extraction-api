@@ -27,6 +27,40 @@ from src.infrastructure.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
+    """Cancel all pending tasks and wait for them to complete."""
+    to_cancel = asyncio.all_tasks(loop)
+    if not to_cancel:
+        return
+
+    for task in to_cancel:
+        task.cancel()
+
+    loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
+
+
+def _run_coroutine_in_thread(coro) -> any:
+    """
+    Run a coroutine in a new event loop with proper cleanup.
+
+    This handles the Windows-specific issue where asyncio.run() can leave
+    pending tasks that cause 'Task was destroyed but it is pending' errors.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        try:
+            _cancel_all_tasks(loop)
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            if hasattr(loop, 'shutdown_default_executor'):
+                loop.run_until_complete(loop.shutdown_default_executor())
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+
 class _AsyncSlidingWindowRateLimiter:
     def __init__(self, max_tokens: int, window_seconds: float = 60.0) -> None:
         if max_tokens <= 0:
@@ -209,7 +243,7 @@ class PremiumExtractionService:
 
         def run_episode_sync(episode_id: int) -> SimplifiedExtractionResponse:
             with get_db_session_context() as session:
-                return asyncio.run(
+                return _run_coroutine_in_thread(
                     self._extract_single_episode(episode_id, force=force, db_session=session)
                 )
 
