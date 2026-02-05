@@ -2,9 +2,10 @@ from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 
 from src.api.services.host_extraction_service import extract_podcast_hosts
-from src.api.schemas.host_extraction_schema import (
-  HostExtractionRequest,
-)
+from src.api.schemas.host_extraction_schema import HostExtractionRequest
+from src.infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -25,6 +26,7 @@ def host_extraction(request: HostExtractionRequest) -> JSONResponse:
       status_code=status.HTTP_200_OK
     )
   except Exception as e:
+    logger.error(f"Host extraction failed for title='{request.title[:50]}...': {e}")
     return JSONResponse(
       content={
         "error":"An internal error occurred. Please try again later.",
