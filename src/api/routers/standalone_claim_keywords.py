@@ -8,6 +8,9 @@ from src.api.services.standalone_claim_keywords_service import (
     extract_standalone_claim_keywords,
     TooManyClaimsError,
 )
+from src.infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -39,7 +42,8 @@ def standalone_claim_keywords_extraction(
             },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
-    except Exception:
+    except Exception as e:
+        logger.error(f"Standalone claim keywords extraction failed: {e}", exc_info=True)
         return JSONResponse(
             content={
                 "claim_keywords": None,

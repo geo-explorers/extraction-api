@@ -1,14 +1,33 @@
+"""Standalone claim keywords extraction service using Gemini structured outputs."""
+
 import json
 from typing import Any, Dict, List
 
-from src.config.prompts.standalone_claim_keywords_prompt import STANDALONE_CLAIM_KEYWORDS_PROMPT
+from pydantic import BaseModel, Field
+from google import genai
+from google.genai import types
+
 from src.config.settings import settings
-from src.api.utils import llm_model
+from src.config.prompts.standalone_claim_keywords_prompt import STANDALONE_CLAIM_KEYWORDS_PROMPT
+from src.infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class TooManyClaimsError(ValueError):
     """Raised when request exceeds maximum allowed claims."""
     pass
+
+
+class ClaimKeywordsItem(BaseModel):
+    """Keywords for a single claim."""
+    id: str = Field(description="The claim ID")
+    keywords: List[str] = Field(description="List of keywords for this claim")
+
+
+class ClaimKeywordsResponse(BaseModel):
+    """Complete response containing keywords for all claims."""
+    results: List[ClaimKeywordsItem] = Field(description="List of keyword results for all claims")
 
 
 def extract_standalone_claim_keywords(
@@ -18,6 +37,8 @@ def extract_standalone_claim_keywords(
 ) -> Dict[str, List[str]]:
     """
     Extract keywords for each claim independently (no episode context).
+
+    Uses Gemini's structured output feature for reliable JSON parsing.
 
     Args:
         claims: List of claim dicts with 'id' and 'text' keys
@@ -29,43 +50,76 @@ def extract_standalone_claim_keywords(
 
     Raises:
         TooManyClaimsError: If claims exceed max_claims setting
-        Exception: For chain building, invocation, or parsing errors
+        Exception: For API or parsing errors
     """
     max_claims = settings.standalone_claim_keywords_max_claims
     if len(claims) > max_claims:
         raise TooManyClaimsError(f"Request exceeds maximum of {max_claims} claims")
 
-    try:
-        chain = llm_model.build_chain(prompt=STANDALONE_CLAIM_KEYWORDS_PROMPT)
-    except Exception:
-        raise Exception("Error building chain")
+    if not claims:
+        return {}
 
+    # Initialize Gemini client
+    if not settings.gemini_api_key:
+        raise ValueError("GEMINI_API_KEY not set")
+
+    client = genai.Client(api_key=settings.gemini_api_key)
+
+    # Build prompt
     claims_json = json.dumps(claims, indent=2)
+    prompt = STANDALONE_CLAIM_KEYWORDS_PROMPT.format(
+        min_keywords=min_keywords,
+        max_keywords=max_keywords,
+        claims_json=claims_json,
+    )
 
-    try:
-        raw_response = chain.invoke({
-            "claims_json": claims_json,
-            "min_keywords": min_keywords,
-            "max_keywords": max_keywords,
-        })
-    except Exception:
-        raise Exception("Failed invoking chain")
+    # Configure safety settings
+    safety_settings = [
+        types.SafetySetting(
+            category="HARM_CATEGORY_HATE_SPEECH",
+            threshold="BLOCK_NONE"
+        ),
+        types.SafetySetting(
+            category="HARM_CATEGORY_HARASSMENT",
+            threshold="BLOCK_NONE"
+        ),
+        types.SafetySetting(
+            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold="BLOCK_NONE"
+        ),
+        types.SafetySetting(
+            category="HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold="BLOCK_NONE"
+        ),
+    ]
 
-    try:
-        response = json.loads(raw_response)
-    except Exception:
-        raise Exception("Failed parsing response")
+    # Call Gemini with structured output
+    logger.info(f"Extracting keywords for {len(claims)} claims using Gemini")
 
-    try:
-        claim_keywords = response["claim_keywords"]
-    except KeyError:
-        raise Exception("Failed extracting claim_keywords from response")
+    response = client.models.generate_content(
+        model=settings.gemini_extraction_model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=settings.gemini_extraction_temperature,
+            max_output_tokens=8192,
+            safety_settings=safety_settings,
+            response_mime_type="application/json",
+            response_json_schema=ClaimKeywordsResponse.model_json_schema(),
+        )
+    )
 
-    if not isinstance(claim_keywords, dict):
-        raise Exception("Invalid response format: claim_keywords must be a dict")
+    if not response or not response.text:
+        raise ValueError("Empty response from Gemini")
 
-    for claim_id, keywords in claim_keywords.items():
-        if not isinstance(keywords, list):
-            raise Exception(f"Invalid response format: keywords for {claim_id} must be a list")
+    logger.debug(f"Received response: {len(response.text)} chars")
 
-    return claim_keywords
+    # Parse structured response
+    validated_response = ClaimKeywordsResponse.model_validate_json(response.text)
+
+    # Convert to dict format
+    result: Dict[str, List[str]] = {}
+    for item in validated_response.results:
+        result[item.id] = item.keywords
+
+    logger.info(f"Successfully extracted keywords for {len(result)} claims")
+    return result
