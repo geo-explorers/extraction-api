@@ -64,6 +64,7 @@ def extract_standalone_claim_keywords(
         raise ValueError("GEMINI_API_KEY not set")
 
     client = genai.Client(api_key=settings.gemini_api_key)
+    model_name = settings.gemini_extraction_model
 
     # Build prompt
     claims_json = json.dumps(claims, indent=2)
@@ -94,32 +95,43 @@ def extract_standalone_claim_keywords(
     ]
 
     # Call Gemini with structured output
-    logger.info(f"Extracting keywords for {len(claims)} claims using Gemini")
-
-    response = client.models.generate_content(
-        model=settings.gemini_extraction_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=settings.gemini_extraction_temperature,
-            max_output_tokens=8192,
-            safety_settings=safety_settings,
-            response_mime_type="application/json",
-            response_json_schema=ClaimKeywordsResponse.model_json_schema(),
-        )
+    logger.info(
+        f"Calling {model_name} for standalone claim keywords extraction "
+        f"({len(claims)} claims, {len(prompt)} chars)"
     )
 
-    if not response or not response.text:
-        raise ValueError("Empty response from Gemini")
+    response = None
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=settings.gemini_extraction_temperature,
+                max_output_tokens=8192,
+                safety_settings=safety_settings,
+                response_mime_type="application/json",
+                response_schema=ClaimKeywordsResponse,
+            )
+        )
 
-    logger.debug(f"Received response: {len(response.text)} chars")
+        if not response or not response.text:
+            raise ValueError("Empty response from Gemini")
 
-    # Parse structured response
-    validated_response = ClaimKeywordsResponse.model_validate_json(response.text)
+        logger.debug(f"Received response: {len(response.text)} chars")
 
-    # Convert to dict format
-    result: Dict[str, List[str]] = {}
-    for item in validated_response.results:
-        result[item.id] = item.keywords
+        # Parse structured response
+        validated_response = ClaimKeywordsResponse.model_validate_json(response.text)
 
-    logger.info(f"Successfully extracted keywords for {len(result)} claims")
-    return result
+        # Convert to dict format
+        result: Dict[str, List[str]] = {}
+        for item in validated_response.results:
+            result[item.id] = item.keywords
+
+        logger.info(f"Successfully extracted keywords for {len(result)} claims")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in standalone claim keywords extraction: {e}", exc_info=True)
+        if response:
+            logger.error(f"Response text: {getattr(response, 'text', 'N/A')[:500]}")
+        raise
