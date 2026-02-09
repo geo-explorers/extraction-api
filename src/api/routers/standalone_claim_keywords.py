@@ -1,0 +1,53 @@
+from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
+
+from src.api.schemas.standalone_claim_keywords_schema import (
+    StandaloneClaimKeywordsRequest,
+)
+from src.api.services.standalone_claim_keywords_service import (
+    extract_standalone_claim_keywords,
+    TooManyClaimsError,
+)
+from src.infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
+
+router = APIRouter()
+
+
+@router.post("/standalone-claim-keywords")
+def standalone_claim_keywords_extraction(
+    request: StandaloneClaimKeywordsRequest,
+) -> JSONResponse:
+    claims_data = [{"id": c.id, "text": c.text} for c in request.claims]
+
+    try:
+        claim_keywords = extract_standalone_claim_keywords(
+            claims=claims_data,
+            min_keywords=request.min_keywords,
+            max_keywords=request.max_keywords,
+        )
+        return JSONResponse(
+            content={
+                "claim_keywords": claim_keywords,
+                "error": None,
+            },
+            status_code=status.HTTP_200_OK,
+        )
+    except TooManyClaimsError as e:
+        return JSONResponse(
+            content={
+                "claim_keywords": None,
+                "error": str(e),
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as e:
+        logger.error(f"Standalone claim keywords extraction failed: {e}", exc_info=True)
+        return JSONResponse(
+            content={
+                "claim_keywords": None,
+                "error": "An internal error occurred. Please try again later.",
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
