@@ -3,20 +3,29 @@
 import signal
 import sys
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
-import requests
 
-from src.api.routers import extraction, guest_extraction, keyword_extraction, claim_keyword_extraction, validation
+import requests
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy.exc import SQLAlchemyError
+
 from src.api.exceptions import (
     database_exception_handler,
     generic_exception_handler,
     requests_exception_handler,
 )
+from src.api.routers import (
+    claim_keyword_extraction,
+    extraction,
+    guest_extraction,
+    keyword_extraction,
+    single_claim_extraction,
+    validation,
+)
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
+from src.infrastructure.rate_limiter import init_gemini_rate_limiter
 
 logger = get_logger(__name__)
 
@@ -28,6 +37,7 @@ def handle_shutdown_signal(signum, frame):
     # Close DSPy connections immediately
     try:
         from src.config.dspy_config import shutdown_dspy_configuration
+
         shutdown_dspy_configuration()
     except Exception as e:
         logger.error(f"Error closing DSPy connections: {e}")
@@ -61,12 +71,18 @@ async def lifespan(app: FastAPI):
     logger.info("Validating DSPy configuration...")
     try:
         from src.config.dspy_startup import validate_dspy_configuration
+
         validate_dspy_configuration()
-        logger.info("DSPy validation complete - models will initialize lazily on first request")
+        logger.info(
+            "DSPy validation complete - models will initialize lazily on first request"
+        )
     except Exception as e:
         logger.error(f"DSPy validation failed: {e}", exc_info=True)
         logger.critical("API cannot start without valid DSPy configuration")
         raise
+
+    # Initialize Gemini rate limiter (100 calls per 60 seconds)
+    init_gemini_rate_limiter(max_calls=100, window_seconds=60)
 
     logger.info("API Documentation: http://localhost:8000/docs")
     logger.info("=" * 80)
@@ -79,6 +95,7 @@ async def lifespan(app: FastAPI):
     # Close DSPy connections to prevent hanging on shutdown
     try:
         from src.config.dspy_config import shutdown_dspy_configuration
+
         shutdown_dspy_configuration()
     except Exception as e:
         logger.error(f"Error during DSPy shutdown: {e}", exc_info=True)
@@ -139,16 +156,14 @@ async def verify_api_key(request: Request, call_next):
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={
                 "detail": "Missing API key. Include 'X-API-Key' header in your request."
-            }
+            },
         )
 
     # Validate API key
     if api_key != settings.api_key:
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
-                "detail": "Invalid API key"
-            }
+            content={"detail": "Invalid API key"},
         )
 
     # API key is valid, proceed with request
@@ -159,8 +174,11 @@ async def verify_api_key(request: Request, call_next):
 app.include_router(extraction.router, tags=["claims"])
 app.include_router(guest_extraction.router, prefix="/extract", tags=["guests"])
 app.include_router(keyword_extraction.router, prefix="/extract", tags=["keywords"])
-app.include_router(claim_keyword_extraction.router, prefix="/extract", tags=["claim-keywords"])
+app.include_router(
+    claim_keyword_extraction.router, prefix="/extract", tags=["claim-keywords"]
+)
 app.include_router(validation.router, tags=["validation"])
+app.include_router(single_claim_extraction.router, tags=["single-claim-extraction"])
 
 # Register exception handlers
 app.add_exception_handler(SQLAlchemyError, database_exception_handler)
