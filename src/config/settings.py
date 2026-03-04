@@ -218,12 +218,28 @@ class Settings(BaseSettings):
 
     # Premium Claim Extraction (Gemini 3)
     gemini_premium_model: str = Field(
-        default="gemini-3-pro-preview",
-        description="Gemini 3 model for premium claim extraction (1M context)"
+        default="gemini-2.5-pro",
+        description="Gemini 2 model for premium claim extraction"
     )
     gemini_premium_temperature: float = Field(
         default=0.2,
         description="Temperature for premium extraction (0 = deterministic)"
+    )
+    premium_extraction_max_parallel_episodes: int = Field(
+        default=20,
+        description="Maximum number of episodes processed in parallel for premium extraction"
+    )
+    premium_extraction_gemini_calls_per_episode: int = Field(
+        default=3,
+        description="Estimated Gemini calls per episode for premium extraction rate limiting"
+    )
+    premium_extraction_rate_limit_max_tokens: int = Field(
+        default=100,
+        description="Maximum Gemini calls allowed per rate limit window for premium extraction"
+    )
+    premium_extraction_rate_limit_window_seconds: float = Field(
+        default=60.0,
+        description="Rate limit window in seconds for premium extraction calls"
     )
 
     # API Configuration
