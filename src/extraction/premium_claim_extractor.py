@@ -1,5 +1,6 @@
 """Premium claim extraction service using Gemini 3 Pro with structured outputs."""
 
+import asyncio
 from typing import List
 from pydantic import BaseModel, Field
 from google import genai
@@ -12,6 +13,9 @@ from src.config.prompts.premium_claim_extraction_prompt import (
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Timeout for Gemini API calls (3 minutes for large transcripts)
+GEMINI_TIMEOUT_SECONDS = 60 * 3
 
 
 class ClaimExtractionResult(BaseModel):
@@ -64,25 +68,38 @@ class PremiumClaimExtractor:
                 f"({len(full_transcript)} chars)"
             )
 
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=settings.gemini_premium_temperature,
-                    response_mime_type="application/json",
-                    response_schema=ClaimExtractionResult,
-                )
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=settings.gemini_premium_temperature,
+                        response_mime_type="application/json",
+                        response_schema=ClaimExtractionResult
+                    )
+                ),
+                timeout=GEMINI_TIMEOUT_SECONDS
             )
 
             # Parse structured response using Pydantic
+            if response.text is None:
+                logger.error("Gemini returned empty response text")
+                return []
             result: ClaimExtractionResult = ClaimExtractionResult.model_validate_json(response.text)
             claims = result.claims
 
             logger.info(f"Extracted {len(claims)} claims from full transcript via structured outputs")
             return claims
 
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Gemini API call timed out after {GEMINI_TIMEOUT_SECONDS} seconds "
+                f"for transcript of {len(full_transcript)} chars"
+            )
+            return []
         except Exception as e:
             logger.error(f"Error in premium claim extraction: {e}", exc_info=True)
             if response:
-                logger.error(f"Response text: {getattr(response, 'text', 'N/A')[:500]}")
+                response_text = response.text if response.text else "N/A"
+                logger.error(f"Response text: {response_text[:500]}")
             return []

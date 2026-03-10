@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 import requests
 
-from src.api.routers import extraction, guest_extraction, keyword_extraction, claim_keyword_extraction, validation
+from src.api.routers import extraction, guest_extraction, host_extraction, keyword_extraction, validation, claim_keyword_extraction
 from src.api.exceptions import (
     database_exception_handler,
     generic_exception_handler,
@@ -158,6 +158,7 @@ async def verify_api_key(request: Request, call_next):
 # Register routers
 app.include_router(extraction.router, tags=["claims"])
 app.include_router(guest_extraction.router, prefix="/extract", tags=["guests"])
+app.include_router(host_extraction.router, prefix="/extract", tags=["hosts"])
 app.include_router(keyword_extraction.router, prefix="/extract", tags=["keywords"])
 app.include_router(claim_keyword_extraction.router, prefix="/extract", tags=["claim-keywords"])
 app.include_router(validation.router, tags=["validation"])
