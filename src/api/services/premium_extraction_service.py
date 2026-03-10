@@ -2,7 +2,6 @@
 
 import asyncio
 import time
-from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 from typing import Deque, List
 from sqlalchemy.orm import Session
@@ -21,44 +20,10 @@ from src.api.exceptions import (
     ProcessingTimeoutError,
 )
 from src.config.settings import settings
-from src.database.connection import get_db_session_context
 from src.infrastructure.logger import get_logger
 
+
 logger = get_logger(__name__)
-
-
-def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
-    """Cancel all pending tasks and wait for them to complete."""
-    to_cancel = asyncio.all_tasks(loop)
-    if not to_cancel:
-        return
-
-    for task in to_cancel:
-        task.cancel()
-
-    loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
-
-
-def _run_coroutine_in_thread(coro) -> any:
-    """
-    Run a coroutine in a new event loop with proper cleanup.
-
-    This handles the Windows-specific issue where asyncio.run() can leave
-    pending tasks that cause 'Task was destroyed but it is pending' errors.
-    """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        try:
-            _cancel_all_tasks(loop)
-            loop.run_until_complete(loop.shutdown_asyncgens())
-            if hasattr(loop, 'shutdown_default_executor'):
-                loop.run_until_complete(loop.shutdown_default_executor())
-        finally:
-            asyncio.set_event_loop(None)
-            loop.close()
 
 
 class _AsyncSlidingWindowRateLimiter:
@@ -238,58 +203,48 @@ class PremiumExtractionService:
         semaphore = asyncio.Semaphore(max_parallel_episodes)
         rate_limiter = self._gemini_rate_limiter
 
-        loop = asyncio.get_running_loop()
-        executor = ThreadPoolExecutor(max_workers=max_parallel_episodes)
-
-        def run_episode_sync(episode_id: int) -> SimplifiedExtractionResponse:
-            with get_db_session_context() as session:
-                return _run_coroutine_in_thread(
-                    self._extract_single_episode(episode_id, force=force, db_session=session)
-                )
-
         async def process_episode(episode):
             async with semaphore:
                 await rate_limiter.acquire(tokens=gemini_calls_per_episode)
-                return await loop.run_in_executor(executor, run_episode_sync, episode.id)
+                return await self._extract_single_episode(
+                    episode.id, force=force, db_session=db_session
+                )
 
         tasks = {
             asyncio.create_task(process_episode(episode)): episode.id
             for episode in episodes_to_process
         }
 
-        try:
-            pending = set(tasks.keys())
-            while pending:
-                done, pending = await asyncio.wait(
-                    pending, return_when=asyncio.FIRST_COMPLETED
-                )
-                for task in done:
-                    episode_id = tasks[task]
-                    try:
-                        response = await task
-                    except Exception as e:
-                        error_msg = str(e)
-                        errors[episode_id] = error_msg
-                        logger.error(f"✗ Episode {episode_id} failed: {error_msg}")
+        pending = set(tasks.keys())
+        while pending:
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                episode_id = tasks[task]
+                try:
+                    response = await task
+                except Exception as e:
+                    error_msg = str(e)
+                    errors[episode_id] = error_msg
+                    logger.error(f"✗ Episode {episode_id} failed: {error_msg}")
 
-                        if not continue_on_error:
-                            for pending_task in pending:
-                                if not pending_task.done():
-                                    pending_task.cancel()
-                            await asyncio.gather(*pending, return_exceptions=True)
-                            raise ProcessingError(
-                                f"Episode {episode_id} failed: {error_msg}"
-                            )
-                    else:
-                        responses_by_id[episode_id] = response
-                        total_claims += response.claims_count
-                        total_time += response.processing_time_seconds
-                        logger.info(
-                            f"✓ Episode {episode_id}: {response.claims_count} claims "
-                            f"in {response.processing_time_seconds:.1f}s (PREMIUM)"
+                    if not continue_on_error:
+                        for pending_task in pending:
+                            if not pending_task.done():
+                                pending_task.cancel()
+                        await asyncio.gather(*pending, return_exceptions=True)
+                        raise ProcessingError(
+                            f"Episode {episode_id} failed: {error_msg}"
                         )
-        finally:
-            executor.shutdown(wait=True, cancel_futures=True)
+                else:
+                    responses_by_id[episode_id] = response
+                    total_claims += response.claims_count
+                    total_time += response.processing_time_seconds
+                    logger.info(
+                        f"✓ Episode {episode_id}: {response.claims_count} claims "
+                        f"in {response.processing_time_seconds:.1f}s (PREMIUM)"
+                    )
 
         results = [
             responses_by_id[episode.id]
