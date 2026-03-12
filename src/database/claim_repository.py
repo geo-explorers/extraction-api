@@ -14,8 +14,8 @@ from typing import List, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from src.database.models import Claim, Quote, ClaimQuote
-from src.extraction.quote_finder import ClaimWithQuotes, Quote as ExtractedQuote
+from src.database.models import Claim, Quote, ClaimQuote, ClaimEpisode
+from src.extraction.quote_finder import ClaimWithTopic, Quote as ExtractedQuote
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -70,9 +70,9 @@ class ClaimRepository:
 
     async def save_claims(
         self,
-        claims_with_quotes: List[ClaimWithQuotes],
+        claim_with_topics: List[ClaimWithTopic],
         episode_id: int
-    ) -> List[int]:
+    ) -> List[ClaimWithTopic]:
         """
         Save claims with their quotes to database.
 
@@ -95,50 +95,50 @@ class ClaimRepository:
             print(f"Saved {len(claim_ids)} claims")
             ```
         """
-        if not claims_with_quotes:
+        if not claim_with_topics:
             logger.warning("No claims to save")
             return []
 
-        logger.info(f"Saving {len(claims_with_quotes)} claims for episode {episode_id}")
+        logger.info(f"Saving {len(claim_with_topics)} claims for episode {episode_id}")
 
-        claim_ids = []
+        saved_claim_with_topics: List[ClaimWithTopic] = []
 
         try:
-            for i, claim_with_quotes in enumerate(claims_with_quotes, 1):
+            for i, claim_with_topic in enumerate(claim_with_topics):
                 # Save claim
                 claim = Claim(
-                    episode_id=episode_id,
-                    claim_text=claim_with_quotes.claim_text,
-                    confidence=claim_with_quotes.confidence,
-                    source_chunk_id=claim_with_quotes.source_chunk_id,
-                    merged_from_chunk_ids=claim_with_quotes.merged_from_chunk_ids,
+                    claim_text=claim_with_topic.claim_text,
+                    confidence=0.8,
+                    source_chunk_id=None,
+                    merged_from_chunk_ids=None,
                     embedding=None,  # Will be set after we get the ID
-                    confidence_components=(
-                        claim_with_quotes.confidence_components.__dict__
-                        if claim_with_quotes.confidence_components else None
-                    )
+                    confidence_components=None
                 )
 
                 self.session.add(claim)
                 self.session.flush()  # Get ID without committing
+                claim_with_topic.claim_id = claim.id
 
-                claim_ids.append(claim.id)
+
+                saved_claim_with_topics.append(
+                    claim_with_topic
+                )
 
                 logger.debug(
-                    f"Saved claim {i}/{len(claims_with_quotes)}: ID={claim.id}, "
+                    f"Saved claim {i}/{len(claim_with_topics)}: ID={claim.id}, "
                     f"text='{claim.claim_text[:60]}...'"
                 )
 
                 # Save quotes and create links
-                if claim_with_quotes.quotes:
-                    await self._save_quotes_and_links(
-                        claim.id,
-                        claim_with_quotes.quotes,
-                        episode_id
-                    )
+                # if claim_with_topic.quotes:
+                #     await self._save_quotes_and_links(
+                #         claim.id,
+                #         claim_with_topic.quotes,
+                #         episode_id
+                #     )
 
-            logger.info(f"✅ Saved {len(claim_ids)} claims")
-            return claim_ids
+            logger.info(f"✅ Saved {len(saved_claim_with_topics)} claims")
+            return saved_claim_with_topics
 
         except Exception as e:
             logger.error(f"Error saving claims: {e}", exc_info=True)
@@ -425,7 +425,12 @@ class ClaimRepository:
             f"(include_flagged={include_flagged}, include_verified={include_verified})"
         )
 
-        query = self.session.query(Claim).filter(Claim.episode_id.in_(episode_ids))
+        # Query claims through ClaimEpisode junction table
+        query = (
+            self.session.query(Claim, ClaimEpisode.episode_id)
+            .join(ClaimEpisode, Claim.id == ClaimEpisode.claim_id)
+            .filter(ClaimEpisode.episode_id.in_(episode_ids))
+        )
 
         if not include_flagged:
             query = query.filter(Claim.is_flagged == False)
@@ -433,18 +438,17 @@ class ClaimRepository:
         if not include_verified:
             query = query.filter(Claim.is_verified == False)
 
-        claims = query.all()
+        results = query.all()
 
         # Group by episode
-        claims_by_episode = {}
-        for claim in claims:
-            episode_id = claim.episode_id
+        claims_by_episode: Dict[int, List[Claim]] = {}
+        for claim, episode_id in results:
             if episode_id not in claims_by_episode:
                 claims_by_episode[episode_id] = []
             claims_by_episode[episode_id].append(claim)
 
         logger.info(
-            f"Found {len(claims)} claims across {len(claims_by_episode)} episodes"
+            f"Found {len(results)} claims across {len(claims_by_episode)} episodes"
         )
 
         return claims_by_episode
@@ -483,13 +487,15 @@ class ClaimRepository:
             f"(only_unverified={only_unverified})"
         )
 
+        # Query through ClaimEpisode junction table
         query = (
             self.session.query(
-                Claim.episode_id,
+                ClaimEpisode.episode_id,
                 func.count(Claim.id).label("count")
             )
+            .join(ClaimEpisode, Claim.id == ClaimEpisode.claim_id)
             .filter(
-                Claim.episode_id.in_(episode_ids),
+                ClaimEpisode.episode_id.in_(episode_ids),
                 Claim.is_flagged == False
             )
         )
@@ -497,7 +503,7 @@ class ClaimRepository:
         if only_unverified:
             query = query.filter(Claim.is_verified == False)
 
-        results = query.group_by(Claim.episode_id).all()
+        results = query.group_by(ClaimEpisode.episode_id).all()
 
         counts = {episode_id: count for episode_id, count in results}
 
@@ -630,3 +636,52 @@ class ClaimRepository:
             logger.error(f"Error marking claims as verified: {e}", exc_info=True)
             self.session.rollback()
             raise
+
+    def get_claims_for_episode(
+        self,
+        episode_id: int,
+        include_flagged: bool = False,
+        include_verified: bool = True
+    ) -> List[Claim]:
+        """
+        Get all claims for a single episode.
+
+        Args:
+            episode_id: Episode ID
+            include_flagged: If True, include already flagged claims
+            include_verified: If True, include already verified claims (default: True)
+
+        Returns:
+            List of claims for the episode
+
+        Example:
+            ```python
+            repo = ClaimRepository(session)
+
+            # Get all claims for validation (including verified for re-validation)
+            claims = repo.get_claims_for_episode(123, include_verified=True)
+            ```
+        """
+        logger.info(
+            f"Fetching claims for episode {episode_id} "
+            f"(include_flagged={include_flagged}, include_verified={include_verified})"
+        )
+
+        # Query through ClaimEpisode junction table (claims no longer have episode_id)
+        query = (
+            self.session.query(Claim)
+            .join(ClaimEpisode, Claim.id == ClaimEpisode.claim_id)
+            .filter(ClaimEpisode.episode_id == episode_id)
+        )
+
+        if not include_flagged:
+            query = query.filter(Claim.is_flagged == False)
+
+        if not include_verified:
+            query = query.filter(Claim.is_verified == False)
+
+        claims = query.all()
+
+        logger.info(f"Found {len(claims)} claims for episode {episode_id}")
+
+        return claims

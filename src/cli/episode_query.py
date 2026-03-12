@@ -19,7 +19,7 @@ from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 
-from src.database.models import PodcastEpisode, Claim
+from src.database.models import PodcastEpisode, Claim, ClaimEpisode
 from src.database.connection import get_db_session
 from src.infrastructure.logger import get_logger
 
@@ -120,8 +120,8 @@ class EpisodeQueryService:
             Number of episodes with at least one claim
         """
         count = (
-            self.session.query(func.count(func.distinct(Claim.episode_id)))
-            .join(PodcastEpisode, Claim.episode_id == PodcastEpisode.id)
+            self.session.query(func.count(func.distinct(ClaimEpisode.episode_id)))
+            .join(PodcastEpisode, ClaimEpisode.episode_id == PodcastEpisode.id)
             .filter(
                 PodcastEpisode.podcast_id == podcast_id,
                 or_(
@@ -222,8 +222,8 @@ class EpisodeQueryService:
                 unprocessed_episodes_query = (
                     self.session.query(PodcastEpisode)
                     .filter(PodcastEpisode.id.in_(latest_episode_ids))
-                    .outerjoin(Claim, Claim.episode_id == PodcastEpisode.id)
-                    .filter(Claim.id.is_(None))  # No claims = unprocessed
+                    .outerjoin(ClaimEpisode, ClaimEpisode.episode_id == PodcastEpisode.id)
+                    .filter(ClaimEpisode.id.is_(None))  # No claims = unprocessed
                     .order_by(PodcastEpisode.air_date.desc().nulls_last())
                 )
 
@@ -267,9 +267,9 @@ class EpisodeQueryService:
             if not force:
                 # LEFT JOIN to find episodes without claims
                 query = query.outerjoin(
-                    Claim, Claim.episode_id == PodcastEpisode.id
+                    ClaimEpisode, ClaimEpisode.episode_id == PodcastEpisode.id
                 ).filter(
-                    Claim.id.is_(None)
+                    ClaimEpisode.id.is_(None)
                 )  # No claims = not processed
                 logger.debug("Filtering to unprocessed episodes only (force=False)")
 
@@ -307,8 +307,8 @@ class EpisodeQueryService:
             ```
         """
         count = (
-            self.session.query(func.count(Claim.id))
-            .filter(Claim.episode_id == episode_id)
+            self.session.query(func.count(ClaimEpisode.id))
+            .filter(ClaimEpisode.episode_id == episode_id)
             .scalar()
         )
 
@@ -362,8 +362,8 @@ class EpisodeQueryService:
 
         # Processed episodes (have claims)
         processed = (
-            self.session.query(func.count(func.distinct(Claim.episode_id)))
-            .join(PodcastEpisode, Claim.episode_id == PodcastEpisode.id)
+            self.session.query(func.count(func.distinct(ClaimEpisode.episode_id)))
+            .join(PodcastEpisode, ClaimEpisode.episode_id == PodcastEpisode.id)
             .filter(episode_filter)
             .scalar()
         )
@@ -371,7 +371,8 @@ class EpisodeQueryService:
         # Total claims
         total_claims = (
             self.session.query(func.count(Claim.id))
-            .join(PodcastEpisode, Claim.episode_id == PodcastEpisode.id)
+            .join(ClaimEpisode, Claim.id == ClaimEpisode.claim_id)
+            .join(PodcastEpisode, ClaimEpisode.episode_id == PodcastEpisode.id)
             .filter(episode_filter)
             .scalar()
         )
@@ -480,7 +481,8 @@ class EpisodeQueryService:
                 episodes_with_unverified_query = (
                     self.session.query(PodcastEpisode)
                     .filter(PodcastEpisode.id.in_(latest_episode_ids))
-                    .join(Claim, Claim.episode_id == PodcastEpisode.id)
+                    .join(ClaimEpisode, ClaimEpisode.episode_id == PodcastEpisode.id)
+                    .join(Claim, Claim.id == ClaimEpisode.claim_id)
                     .filter(Claim.is_verified == False)  # Has unverified claims
                     .distinct()
                     .order_by(PodcastEpisode.air_date.desc().nulls_last())
@@ -526,7 +528,8 @@ class EpisodeQueryService:
                         PodcastEpisode.assembly_transcript.isnot(None)
                     )
                 )
-                .join(Claim, Claim.episode_id == PodcastEpisode.id)
+                .join(ClaimEpisode, ClaimEpisode.episode_id == PodcastEpisode.id)
+                .join(Claim, Claim.id == ClaimEpisode.claim_id)
                 .filter(Claim.is_verified == False)  # Has unverified claims
                 .distinct()
             )

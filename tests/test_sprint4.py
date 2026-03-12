@@ -221,20 +221,34 @@ class TestDatabaseDeduplication:
         """Test database dedup when duplicate is found."""
         deduplicator = ClaimDeduplicator(mock_embedder, mock_reranker)
 
-        # Mock database query to return similar claim
+        # Mock database query to return similar claim from a different episode
         similar_claim = Mock()
         similar_claim.id = 999
         similar_claim.claim_text = "Bitcoin hit $69k"
-        similar_claim.episode_id = 456  # Different episode
-        similar_claim.embedding = [0.1] * 768  # Add embedding attribute
+        similar_claim.embedding = [0.1] * 768
 
-        # Setup mock query chain
-        mock_query = Mock()
-        mock_query.filter = Mock(return_value=mock_query)
-        mock_query.order_by = Mock(return_value=mock_query)
-        mock_query.limit = Mock(return_value=mock_query)
-        mock_query.all = Mock(return_value=[similar_claim])
-        mock_db_session.query = Mock(return_value=mock_query)
+        # Setup mock query chains
+        # First query: ClaimEpisode to get current episode's claim IDs (returns empty - no claims in episode 123)
+        mock_claim_episode_query = Mock()
+        mock_claim_episode_query.filter = Mock(return_value=mock_claim_episode_query)
+        mock_claim_episode_query.all = Mock(return_value=[])  # No claims in current episode
+
+        # Second query: Claim to find similar claims
+        mock_claim_query = Mock()
+        mock_claim_query.filter = Mock(return_value=mock_claim_query)
+        mock_claim_query.order_by = Mock(return_value=mock_claim_query)
+        mock_claim_query.limit = Mock(return_value=mock_claim_query)
+        mock_claim_query.all = Mock(return_value=[similar_claim])
+
+        # Return different query objects for ClaimEpisode vs Claim queries
+        call_count = [0]
+        def query_side_effect(model):
+            call_count[0] += 1
+            # First call is for ClaimEpisode, subsequent calls for Claim
+            if call_count[0] == 1:
+                return mock_claim_episode_query
+            return mock_claim_query
+        mock_db_session.query = Mock(side_effect=query_side_effect)
 
         # Mock reranker to confirm duplicate (score > 0.9)
         mock_reranker.rerank_quotes = AsyncMock(return_value=[{"score": 0.95}])
@@ -255,20 +269,32 @@ class TestDatabaseDeduplication:
     async def test_deduplicate_against_database_same_episode(
         self, mock_db_session, mock_embedder, mock_reranker
     ):
-        """Test that claims from the same episode are not considered duplicates."""
+        """Test that claims from the same episode are not considered duplicates.
+
+        When a similar claim exists but belongs to the current episode, it should be excluded.
+        """
         deduplicator = ClaimDeduplicator(mock_embedder, mock_reranker)
 
-        # Mock database query to return claim from SAME episode
-        same_episode_claim = Mock()
-        same_episode_claim.id = 999
-        same_episode_claim.claim_text = "Bitcoin hit $69k"
-        same_episode_claim.episode_id = 123  # Same episode
+        # Setup mock query chains
+        # First query: ClaimEpisode returns the claim ID (999) as belonging to current episode
+        mock_claim_episode_query = Mock()
+        mock_claim_episode_query.filter = Mock(return_value=mock_claim_episode_query)
+        mock_claim_episode_query.all = Mock(return_value=[(999,)])  # Claim 999 is in episode 123
 
-        mock_query = Mock()
-        mock_query.filter = Mock(return_value=mock_query)
-        mock_query.limit = Mock(return_value=mock_query)
-        mock_query.all = Mock(return_value=[same_episode_claim])
-        mock_db_session.query = Mock(return_value=mock_query)
+        # Second query: Claim finds no similar claims (because 999 was excluded)
+        mock_claim_query = Mock()
+        mock_claim_query.filter = Mock(return_value=mock_claim_query)
+        mock_claim_query.order_by = Mock(return_value=mock_claim_query)
+        mock_claim_query.limit = Mock(return_value=mock_claim_query)
+        mock_claim_query.all = Mock(return_value=[])  # Empty after exclusion
+
+        call_count = [0]
+        def query_side_effect(model):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return mock_claim_episode_query
+            return mock_claim_query
+        mock_db_session.query = Mock(side_effect=query_side_effect)
 
         claim_text = "Bitcoin reached $69,000"
         embedding = [0.1] * 768
@@ -277,7 +303,7 @@ class TestDatabaseDeduplication:
             claim_text, embedding, episode_id=123, db_session=mock_db_session
         )
 
-        # Should not be considered duplicate (same episode)
+        # Should not be considered duplicate (similar claim was excluded as it's from same episode)
         assert result.is_duplicate is False
 
 
@@ -508,21 +534,33 @@ class TestCrossEpisodeDeduplication:
         existing_claim = Mock()
         existing_claim.id = 100
         existing_claim.claim_text = "Bitcoin reached $69,000"
-        existing_claim.episode_id = 1
-        existing_claim.embedding = [0.1] * 768  # Add embedding attribute
+        existing_claim.embedding = [0.1] * 768
 
         # Episode 2 has same claim
         new_claim_text = "Bitcoin hit $69k"
         new_claim_embedding = [0.1] * 768
         new_episode_id = 2
 
-        # Mock database to return existing claim
-        mock_query = Mock()
-        mock_query.filter = Mock(return_value=mock_query)
-        mock_query.order_by = Mock(return_value=mock_query)
-        mock_query.limit = Mock(return_value=mock_query)
-        mock_query.all = Mock(return_value=[existing_claim])
-        mock_db_session.query = Mock(return_value=mock_query)
+        # Setup mock query chains
+        # First query: ClaimEpisode to get episode 2's claim IDs (returns empty - no claims yet)
+        mock_claim_episode_query = Mock()
+        mock_claim_episode_query.filter = Mock(return_value=mock_claim_episode_query)
+        mock_claim_episode_query.all = Mock(return_value=[])  # No claims in new episode
+
+        # Second query: Claim to find similar claims
+        mock_claim_query = Mock()
+        mock_claim_query.filter = Mock(return_value=mock_claim_query)
+        mock_claim_query.order_by = Mock(return_value=mock_claim_query)
+        mock_claim_query.limit = Mock(return_value=mock_claim_query)
+        mock_claim_query.all = Mock(return_value=[existing_claim])
+
+        call_count = [0]
+        def query_side_effect(model):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return mock_claim_episode_query
+            return mock_claim_query
+        mock_db_session.query = Mock(side_effect=query_side_effect)
 
         # Mock reranker to confirm duplicate
         mock_reranker.rerank_quotes = AsyncMock(return_value=[{"score": 0.95}])

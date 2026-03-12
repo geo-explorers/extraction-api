@@ -21,7 +21,7 @@ from src.extraction.quote_finder import ClaimWithQuotes
 from src.infrastructure.embedding_service import EmbeddingService
 from src.infrastructure.reranker_service import RerankerService
 from src.deduplication.quote_deduplicator import QuoteDeduplicator
-from src.database.models import Claim
+from src.database.models import Claim, ClaimEpisode
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
 
@@ -430,12 +430,25 @@ class ClaimDeduplicator:
         # 1. pgvector similarity search
         # L2 distance < 0.15 ≈ cosine similarity > 0.85
         try:
+            # Get claim IDs linked to current episode (to exclude them)
+            current_episode_claim_ids_result = (
+                db_session.query(ClaimEpisode.claim_id)
+                .filter(ClaimEpisode.episode_id == episode_id)
+                .all()
+            )
+            current_episode_claim_ids = [row[0] for row in current_episode_claim_ids_result]
+
+            # Build query to find similar claims
+            query = db_session.query(Claim).filter(
+                Claim.embedding.l2_distance(claim_embedding) < settings.vector_distance_threshold
+            )
+
+            # Exclude current episode's claims if there are any
+            if current_episode_claim_ids:
+                query = query.filter(~Claim.id.in_(current_episode_claim_ids))
+
             similar_claims = (
-                db_session.query(Claim)
-                .filter(
-                    Claim.episode_id != episode_id,  # Exclude current episode
-                    Claim.embedding.l2_distance(claim_embedding) < settings.vector_distance_threshold
-                )
+                query
                 .order_by(Claim.embedding.l2_distance(claim_embedding))
                 .limit(10)
                 .all()

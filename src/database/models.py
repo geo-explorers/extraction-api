@@ -26,6 +26,7 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.declarative import declarative_base
@@ -66,12 +67,13 @@ class PodcastEpisode(Base):
     transcript_chunks = relationship(
         "TranscriptChunk", back_populates="episode", cascade="all, delete-orphan"
     )
-    claims = relationship(
-        "Claim", back_populates="episode", cascade="all, delete-orphan"
+    claim_episodes = relationship(
+        "ClaimEpisode", back_populates="episode", cascade="all, delete-orphan"
     )
     quotes = relationship(
         "Quote", back_populates="episode", cascade="all, delete-orphan"
     )
+
 
     def __repr__(self) -> str:
         return f"<PodcastEpisode(id={self.id}, name='{self.name[:50]}...')>"
@@ -124,11 +126,6 @@ class Claim(Base):
     __table_args__ = {"schema": "crypto"}
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    episode_id = Column(
-        BigInteger,
-        ForeignKey("crypto.podcast_episodes.id", ondelete="CASCADE"),
-        nullable=False,
-    )
     source_chunk_id = Column(
         BigInteger,
         ForeignKey("crypto.transcript_chunks.id", ondelete="SET NULL"),
@@ -146,16 +143,97 @@ class Claim(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    episode = relationship("PodcastEpisode", back_populates="claims")
     source_chunk = relationship(
         "TranscriptChunk", back_populates="claims", foreign_keys=[source_chunk_id]
     )
     claim_quotes = relationship(
         "ClaimQuote", back_populates="claim", cascade="all, delete-orphan"
     )
+    claim_episodes = relationship(
+        "ClaimEpisode", back_populates="claim", cascade="all, delete-orphan"
+    )
+
 
     def __repr__(self) -> str:
         return f"<Claim(id={self.id}, text='{self.claim_text[:50]}...', confidence={self.confidence:.2f})>"
+
+class ClaimEpisode(Base):
+    """
+    Many-to-many relationship between claims and episodes.
+
+    Table: crypto.claim_episodes
+    """
+
+    __tablename__ = "claim_episodes"
+    __table_args__ = (
+        UniqueConstraint("claim_id", "episode_id", name="uq_claim_episodes_claim_episode"),
+        {"schema": "crypto"},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    claim_id = Column(
+        BigInteger,
+        ForeignKey("crypto.claims.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    episode_id = Column(
+        BigInteger,
+        ForeignKey("crypto.podcast_episodes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    claim_order = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    claim = relationship("Claim", back_populates="claim_episodes")
+    episode = relationship("PodcastEpisode", back_populates="claim_episodes")
+    tag_maps = relationship(
+        "TagMap", back_populates="claim_episode", cascade="all, delete-orphan"
+    )
+
+class Tag(Base):
+    """
+    Table: crypto.tags
+    """
+
+    __tablename__ = "tags"
+    __table_args__ = {"schema": "crypto"}
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    name = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TagMap(Base):
+    """
+    Table: crypto.tag_map
+    """
+    __tablename__ = "tag_map"
+    __table_args__ = (
+        UniqueConstraint(
+            "from_claim_episode_id",
+            "tag_category",
+            name="uq_tag_map_claim_episode_category",
+        ),
+        {"schema": "crypto"},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tag_category = Column(Text, nullable=False)
+    from_claim_episode_id = Column(
+        BigInteger,
+        ForeignKey("crypto.claim_episodes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    to_tag_id = Column(
+        BigInteger,
+        ForeignKey("crypto.tags.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Relationships
+    claim_episode = relationship("ClaimEpisode", back_populates="tag_maps")
+    tag = relationship("Tag")
 
 
 class Quote(Base):

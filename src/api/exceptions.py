@@ -48,6 +48,9 @@ class ProcessingError(HTTPException):
 
 async def database_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle database errors."""
+    from src.infrastructure.logger import get_logger
+    logger = get_logger(__name__)
+    logger.error(f"Database error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
@@ -71,6 +74,9 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 async def requests_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle HTTP request errors to external services."""
+    from src.infrastructure.logger import get_logger
+    logger = get_logger(__name__)
+    logger.error(f"External service error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={

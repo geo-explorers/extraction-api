@@ -10,10 +10,12 @@ wheels/
 .venv
 .env
 
-.claude
+.claude/settings.local.json
 
 logs/
 
 notes.md
 
 *.bk
+
+.codex

@@ -80,6 +80,17 @@ class ClaimWithQuotes:
     merged_from_chunk_ids: Optional[List[int]] = field(default=None)  # For tracking merged claims
     metadata: dict = field(default_factory=dict)
 
+@dataclass
+class ClaimWithTopic:
+    claim_text: str
+    topic: str
+    episode_id: int
+    claim_id: int = None
+    claim_episode_id: int = None
+    tag_id: int = None
+    claim_order: int = None
+    metadata: dict = field(default_factory=dict)
+
 
 class QuoteFinder:
     """
