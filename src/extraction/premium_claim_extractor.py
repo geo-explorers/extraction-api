@@ -1,5 +1,6 @@
 """Premium claim extraction service using Gemini 3 Pro with structured outputs."""
 
+import asyncio
 from typing import Dict, List
 from pydantic import BaseModel, Field
 from google import genai
@@ -16,6 +17,9 @@ from src.config.prompts.claim_extraction_prompt import (
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Timeout for Gemini API calls (3 minutes for large transcripts)
+GEMINI_TIMEOUT_SECONDS = 60 * 3
 
 
 class ClaimExtractionResult(BaseModel):
@@ -226,8 +230,15 @@ class PremiumClaimExtractor:
             logger.info(f"Extracted {len(key_takeaways)} key takeaways via structured outputs")
             return key_takeaways
 
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Gemini API call timed out after {GEMINI_TIMEOUT_SECONDS} seconds "
+                f"for transcript of {len(full_transcript)} chars"
+            )
+            return []
         except Exception as e:
             logger.error(f"Error in premium key takeaway extraction: {e}", exc_info=True)
             if response:
-                logger.error(f"Response text: {getattr(response, 'text', 'N/A')[:500]}")
+                response_text = response.text if response.text else "N/A"
+                logger.error(f"Response text: {response_text[:500]}")
             return []

@@ -7,6 +7,7 @@ from src.api.utils import llm_model
 def extract_podcast_guests(
     title: str,
     description: str,
+    truncated_transcript: str = "",
 ) -> List[Dict[str, Any]]:
   try:
     chain = llm_model.build_chain(
@@ -14,11 +15,12 @@ def extract_podcast_guests(
     )
   except Exception as e:
     raise Exception("Error building chain")
-  
+
   try:
     raw_response = chain.invoke({
       "title": title,
       "description": description,
+      "truncated_transcript": truncated_transcript,
     })
   except Exception as e:
     raise Exception("Failed invoking chain")
