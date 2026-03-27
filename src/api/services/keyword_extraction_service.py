@@ -7,7 +7,7 @@ from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
 
-MAX_RETRIES = 2
+MAX_RETRIES = 3
 
 
 def extract_keyword_and_topics(
@@ -38,17 +38,13 @@ def extract_keyword_and_topics(
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       raw_response = chain.invoke(invoke_params)
-    except Exception as e:
-      raise Exception("Failed invoking chain")
-
-    try:
       response = _parse_llm_response(raw_response)
       break
     except Exception as e:
       last_error = e
-      logger.warning(f"Parse attempt {attempt}/{MAX_RETRIES} failed. Raw response: {raw_response}")
+      logger.warning(f"Keyword extraction attempt {attempt}/{MAX_RETRIES} failed: {e}")
       if attempt == MAX_RETRIES:
-        raise Exception("Failed parsing response") from last_error
+        raise Exception(f"Keyword extraction failed after {MAX_RETRIES} attempts") from last_error
   
   
   try:

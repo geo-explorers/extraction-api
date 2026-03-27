@@ -2,6 +2,11 @@ import json
 from typing import Any, Dict, List
 from src.config.prompts.guest_extraction_prompt import GUEST_EXTRACTION_PROMPT
 from src.api.utils import llm_model
+from src.infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
+
+MAX_RETRIES = 3
 
 
 def extract_podcast_guests(
@@ -16,25 +21,27 @@ def extract_podcast_guests(
   except Exception as e:
     raise Exception("Error building chain")
 
+  last_error = None
+  for attempt in range(1, MAX_RETRIES + 1):
+    try:
+      raw_response = chain.invoke({
+        "title": title,
+        "description": description,
+        "truncated_transcript": truncated_transcript,
+      })
+      response = json.loads(raw_response)
+      break
+    except Exception as e:
+      last_error = e
+      logger.warning(f"Guest extraction attempt {attempt}/{MAX_RETRIES} failed: {e}")
+      if attempt == MAX_RETRIES:
+        raise Exception(f"Guest extraction failed after {MAX_RETRIES} attempts") from last_error
+
   try:
-    raw_response = chain.invoke({
-      "title": title,
-      "description": description,
-      "truncated_transcript": truncated_transcript,
-    })
-  except Exception as e:
-    raise Exception("Failed invoking chain")
-  
-  try:
-    response = json.loads(raw_response)
-  except Exception as e:
-    raise Exception("Failed parsing response")
-  
-  try:
-    guests =  response["guests"]
+    guests = response["guests"]
   except KeyError:
     raise Exception("Failed extracting guests")
-  
+
   for guest in guests:
     if "name" not in guest or "urls" not in guest:
       raise Exception("Invalid guest format")
