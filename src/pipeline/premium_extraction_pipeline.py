@@ -222,21 +222,11 @@ class PremiumExtractionPipeline:
             formatted_topics_with_claims.append(topic_section)
         topics_with_claims_str = "\n".join(formatted_topics_with_claims)
 
-        # Key takeaways are non-critical — if extraction fails, continue with claims
-        key_takeaways: list[str] = []
-        try:
-            key_takeaways_raw = await self.premium_extractor.extract_key_takeaways_from_claims(
-                topics_with_claims=topics_with_claims_str
-            )
-            key_takeaways = key_takeaways_raw
-            extraction_time = time.time() - stage_start
-            logger.info(f"  ✓ Extracted {len(key_takeaways)} key takeaways in {extraction_time:.1f}s")
-        except Exception as e:
-            extraction_time = time.time() - stage_start
-            logger.warning(
-                f"Key takeaway extraction failed after {extraction_time:.1f}s, "
-                f"continuing without them: {e}"
-            )
+        key_takeaways = await self.premium_extractor.extract_key_takeaways_from_claims(
+            topics_with_claims=topics_with_claims_str
+        )
+        extraction_time = time.time() - stage_start
+        logger.info(f"  ✓ Extracted {len(key_takeaways)} key takeaways in {extraction_time:.1f}s")
 
         if save_to_db:
             logger.info("Step 5/5: Saving results to database...")

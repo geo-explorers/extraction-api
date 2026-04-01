@@ -1,9 +1,12 @@
 """Premium claim extraction service using Gemini 3 Pro with structured outputs."""
 
+import asyncio
+import time
 from typing import Dict, List
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 
 from src.config.prompts.key_takeaways_prompt import KEY_TAKEAWAYS_PROMPT
 from src.config.settings import settings
@@ -20,10 +23,10 @@ logger = get_logger(__name__)
 # Timeout for Gemini API calls (3 minutes for large transcripts)
 GEMINI_TIMEOUT_SECONDS = 60 * 3
 
-# Retry configuration for Gemini API calls
-GEMINI_RETRY_ATTEMPTS = 7
-GEMINI_RETRY_INITIAL_DELAY = 2.0
-GEMINI_RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504]
+# Application-level retry configuration (on top of SDK retries)
+APP_MAX_RETRIES = 3
+APP_RETRY_INITIAL_DELAY = 5.0
+APP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 
 class ClaimExtractionResult(BaseModel):
@@ -77,19 +80,89 @@ class PremiumClaimExtractor:
         self.client = genai.Client(
             api_key=settings.gemini_api_key,
             http_options=types.HttpOptions(
-                retry_options=types.HttpRetryOptions(
-                    initial_delay=GEMINI_RETRY_INITIAL_DELAY,
-                    attempts=GEMINI_RETRY_ATTEMPTS,
-                    http_status_codes=GEMINI_RETRYABLE_STATUS_CODES,
-                ),
                 timeout=GEMINI_TIMEOUT_SECONDS * 1000,
             )
         )
         self.model_name = settings.gemini_premium_model
         logger.info(
             f"Initialized PremiumClaimExtractor with model {self.model_name} "
-            f"(structured outputs, {GEMINI_RETRY_ATTEMPTS} retry attempts)"
+            f"(structured outputs, {APP_MAX_RETRIES} app-level retries)"
         )
+
+    async def _call_gemini(self, prompt: str, config: types.GenerateContentConfig, step_name: str) -> str:
+        """
+        Call Gemini API with application-level retry logic and logging.
+
+        Args:
+            prompt: The prompt to send
+            config: Gemini generation config
+            step_name: Human-readable step name for logging
+
+        Returns:
+            Response text from Gemini
+
+        Raises:
+            APIError: If all retries exhausted for retryable errors
+            ValueError: If response is empty
+            Exception: For non-retryable errors
+        """
+        for attempt in range(1, APP_MAX_RETRIES + 1):
+            try:
+                start = time.time()
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=config,
+                )
+                elapsed = time.time() - start
+
+                if not response or not response.text or not response.text.strip():
+                    raise ValueError(f"Empty response from Gemini API during {step_name}")
+
+                if attempt > 1:
+                    logger.info(
+                        f"Gemini {step_name} succeeded on attempt {attempt}/{APP_MAX_RETRIES} "
+                        f"({elapsed:.1f}s)"
+                    )
+                return response.text
+
+            except APIError as e:
+                status_code = getattr(e, 'code', None)
+                if status_code in APP_RETRYABLE_STATUS_CODES and attempt < APP_MAX_RETRIES:
+                    wait_time = APP_RETRY_INITIAL_DELAY * (2 ** (attempt - 1))
+                    logger.warning(
+                        f"Gemini {step_name} failed (attempt {attempt}/{APP_MAX_RETRIES}): "
+                        f"HTTP {status_code} - {e.message}. Retrying in {wait_time:.0f}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(
+                        f"Gemini {step_name} failed (attempt {attempt}/{APP_MAX_RETRIES}): "
+                        f"HTTP {status_code} - {e.message}. "
+                        f"{'Non-retryable error.' if status_code not in APP_RETRYABLE_STATUS_CODES else 'Max retries exhausted.'}"
+                    )
+                    raise
+
+            except ValueError:
+                # Empty response is not retryable — fail immediately
+                raise
+
+            except Exception as e:
+                if attempt < APP_MAX_RETRIES:
+                    wait_time = APP_RETRY_INITIAL_DELAY * (2 ** (attempt - 1))
+                    logger.warning(
+                        f"Gemini {step_name} failed (attempt {attempt}/{APP_MAX_RETRIES}): "
+                        f"{type(e).__name__}: {e}. Retrying in {wait_time:.0f}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(
+                        f"Gemini {step_name} failed (attempt {attempt}/{APP_MAX_RETRIES}): "
+                        f"{type(e).__name__}: {e}. Max retries exhausted."
+                    )
+                    raise
     
     async def extract_topics_of_discussion_from_episode(
         self,
@@ -119,20 +192,17 @@ class PremiumClaimExtractor:
         )
         logger.info(f"Calling {self.model_name} for topics of discussion extraction")
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
+        response_text = await self._call_gemini(
+            prompt=prompt,
             config=types.GenerateContentConfig(
                 temperature=settings.gemini_premium_temperature,
                 response_mime_type="application/json",
                 response_schema=TopicDiscussionResult,
-            )
+            ),
+            step_name="topic extraction",
         )
 
-        if not response or not response.text or not response.text.strip():
-            raise ValueError("Empty response from Gemini API during topic extraction")
-
-        result: TopicDiscussionResult = TopicDiscussionResult.model_validate_json(response.text)
+        result: TopicDiscussionResult = TopicDiscussionResult.model_validate_json(response_text)
 
         if not result.topics:
             raise ValueError("Gemini returned empty topics list")
@@ -170,20 +240,17 @@ class PremiumClaimExtractor:
             f"({len(full_transcript)} chars)"
         )
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
+        response_text = await self._call_gemini(
+            prompt=prompt,
             config=types.GenerateContentConfig(
                 temperature=settings.gemini_premium_temperature,
                 response_mime_type="application/json",
                 response_schema=ClaimWithTopicResult,
-            )
+            ),
+            step_name="claim extraction",
         )
 
-        if not response or not response.text or not response.text.strip():
-            raise ValueError("Empty response from Gemini API during claim extraction")
-
-        result: ClaimWithTopicResult = ClaimWithTopicResult.model_validate_json(response.text)
+        result: ClaimWithTopicResult = ClaimWithTopicResult.model_validate_json(response_text)
 
         if not result.claim_topic:
             raise ValueError("Gemini returned empty claims list")
@@ -223,20 +290,17 @@ class PremiumClaimExtractor:
             f"Calling {self.model_name} for key takeaway extraction with structured outputs"
         )
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
+        response_text = await self._call_gemini(
+            prompt=prompt,
             config=types.GenerateContentConfig(
                 temperature=settings.gemini_premium_temperature,
                 response_mime_type="application/json",
                 response_schema=KeyTakeawayResult,
-            )
+            ),
+            step_name="key takeaway extraction",
         )
 
-        if not response or not response.text or not response.text.strip():
-            raise ValueError("Empty response from Gemini API during key takeaway extraction")
-
-        result: KeyTakeawayResult = KeyTakeawayResult.model_validate_json(response.text)
+        result: KeyTakeawayResult = KeyTakeawayResult.model_validate_json(response_text)
 
         if not result.key_takeaways:
             raise ValueError("Gemini returned empty key takeaways list")
