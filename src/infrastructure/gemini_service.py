@@ -101,7 +101,7 @@ class GeminiService:
             http_options=types.HttpOptions(
                 retry_options=types.HttpRetryOptions(
                     initial_delay=2.0,
-                    attempts=7,
+                    attempts=3,
                     http_status_codes=[408, 429, 500, 502, 503, 504],
                 ),
                 timeout=self.timeout * 1000,
