@@ -16,6 +16,7 @@ def _create_chat_model(
     model=model_name or settings.gemini_extraction_model,
     temperature=temperature if temperature is not None else settings.gemini_extraction_temperature,
     api_key=settings.gemini_api_key,
+    max_retries=3,
   )
 
 def build_chain(

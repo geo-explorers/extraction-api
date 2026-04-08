@@ -7,6 +7,9 @@ from src.infrastructure.logger import get_logger
 logger = get_logger(__name__)
 
 
+MAX_RETRIES = 3
+
+
 def extract_podcast_hosts(
     title: str,
     description: str,
@@ -29,23 +32,23 @@ def extract_podcast_hosts(
   else:
     possible_hosts_text = "None provided"
 
-  try:
-    raw_response = chain.invoke({
-      "title": title,
-      "description": description,
-      "truncated_transcript": truncated_transcript,
-      "possible_hosts": possible_hosts_text,
-    })
-    logger.debug(f"Raw LLM response: {raw_response[:500]}")
-  except Exception as e:
-    logger.error(f"Failed invoking chain: {e}")
-    raise Exception("Failed invoking chain")
-
-  try:
-    response = json.loads(raw_response)
-  except Exception as e:
-    logger.error(f"Failed parsing response: {e}, raw={raw_response[:200]}")
-    raise Exception("Failed parsing response")
+  last_error = None
+  for attempt in range(1, MAX_RETRIES + 1):
+    try:
+      raw_response = chain.invoke({
+        "title": title,
+        "description": description,
+        "truncated_transcript": truncated_transcript,
+        "possible_hosts": possible_hosts_text,
+      })
+      logger.debug(f"Raw LLM response: {raw_response[:500]}")
+      response = json.loads(raw_response)
+      break
+    except Exception as e:
+      last_error = e
+      logger.warning(f"Host extraction attempt {attempt}/{MAX_RETRIES} failed: {e}")
+      if attempt == MAX_RETRIES:
+        raise Exception(f"Host extraction failed after {MAX_RETRIES} attempts") from last_error
 
   try:
     hosts = response["hosts"]

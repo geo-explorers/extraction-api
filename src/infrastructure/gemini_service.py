@@ -91,11 +91,22 @@ class GeminiService:
                 "GEMINI_API_KEY not set. Please set the GEMINI_API_KEY environment variable."
             )
 
-        # Initialize Gemini client with new SDK
-        self.client = genai.Client(api_key=settings.gemini_api_key)
+        # Initialize Gemini client with new SDK and retry configuration
         self.model_name = settings.gemini_model
         self.batch_size = settings.gemini_validation_batch_size
         self.timeout = settings.gemini_timeout
+
+        self.client = genai.Client(
+            api_key=settings.gemini_api_key,
+            http_options=types.HttpOptions(
+                retry_options=types.HttpRetryOptions(
+                    initial_delay=2.0,
+                    attempts=3,
+                    http_status_codes=[408, 429, 500, 502, 503, 504],
+                ),
+                timeout=self.timeout * 1000,
+            )
+        )
 
         # Configure safety settings for the new SDK
         self.safety_settings = [

@@ -1,10 +1,12 @@
 """Premium claim extraction service using Gemini 3 Pro with structured outputs."""
 
 import asyncio
+import time
 from typing import Dict, List
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 
 from src.config.prompts.key_takeaways_prompt import KEY_TAKEAWAYS_PROMPT
 from src.config.settings import settings
@@ -20,6 +22,11 @@ logger = get_logger(__name__)
 
 # Timeout for Gemini API calls (3 minutes for large transcripts)
 GEMINI_TIMEOUT_SECONDS = 60 * 3
+
+# Application-level retry configuration (on top of SDK retries)
+APP_MAX_RETRIES = 3
+APP_RETRY_INITIAL_DELAY = 5.0
+APP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 
 class ClaimExtractionResult(BaseModel):
@@ -70,9 +77,92 @@ class PremiumClaimExtractor:
         if not settings.gemini_api_key:
             raise ValueError("GEMINI_API_KEY required for premium extraction")
 
-        self.client = genai.Client(api_key=settings.gemini_api_key)
+        self.client = genai.Client(
+            api_key=settings.gemini_api_key,
+            http_options=types.HttpOptions(
+                timeout=GEMINI_TIMEOUT_SECONDS * 1000,
+            )
+        )
         self.model_name = settings.gemini_premium_model
-        logger.info(f"Initialized PremiumClaimExtractor with model {self.model_name} (structured outputs)")
+        logger.info(
+            f"Initialized PremiumClaimExtractor with model {self.model_name} "
+            f"(structured outputs, {APP_MAX_RETRIES} app-level retries)"
+        )
+
+    async def _call_gemini(self, prompt: str, config: types.GenerateContentConfig, step_name: str) -> str:
+        """
+        Call Gemini API with application-level retry logic and logging.
+
+        Args:
+            prompt: The prompt to send
+            config: Gemini generation config
+            step_name: Human-readable step name for logging
+
+        Returns:
+            Response text from Gemini
+
+        Raises:
+            APIError: If all retries exhausted for retryable errors
+            ValueError: If response is empty
+            Exception: For non-retryable errors
+        """
+        for attempt in range(1, APP_MAX_RETRIES + 1):
+            try:
+                start = time.time()
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=config,
+                )
+                elapsed = time.time() - start
+
+                if not response or not response.text or not response.text.strip():
+                    raise ValueError(f"Empty response from Gemini API during {step_name}")
+
+                if attempt > 1:
+                    logger.info(
+                        f"Gemini {step_name} succeeded on attempt {attempt}/{APP_MAX_RETRIES} "
+                        f"({elapsed:.1f}s)"
+                    )
+                return response.text
+
+            except APIError as e:
+                status_code = getattr(e, 'code', None)
+                if status_code in APP_RETRYABLE_STATUS_CODES and attempt < APP_MAX_RETRIES:
+                    wait_time = APP_RETRY_INITIAL_DELAY * (2 ** (attempt - 1))
+                    logger.warning(
+                        f"Gemini {step_name} failed (attempt {attempt}/{APP_MAX_RETRIES}): "
+                        f"HTTP {status_code} - {e.message}. Retrying in {wait_time:.0f}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(
+                        f"Gemini {step_name} failed (attempt {attempt}/{APP_MAX_RETRIES}): "
+                        f"HTTP {status_code} - {e.message}. "
+                        f"{'Non-retryable error.' if status_code not in APP_RETRYABLE_STATUS_CODES else 'Max retries exhausted.'}"
+                    )
+                    raise
+
+            except ValueError:
+                # Empty response is not retryable — fail immediately
+                raise
+
+            except Exception as e:
+                if attempt < APP_MAX_RETRIES:
+                    wait_time = APP_RETRY_INITIAL_DELAY * (2 ** (attempt - 1))
+                    logger.warning(
+                        f"Gemini {step_name} failed (attempt {attempt}/{APP_MAX_RETRIES}): "
+                        f"{type(e).__name__}: {e}. Retrying in {wait_time:.0f}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(
+                        f"Gemini {step_name} failed (attempt {attempt}/{APP_MAX_RETRIES}): "
+                        f"{type(e).__name__}: {e}. Max retries exhausted."
+                    )
+                    raise
     
     async def extract_topics_of_discussion_from_episode(
         self,
@@ -81,7 +171,7 @@ class PremiumClaimExtractor:
         full_transcript: str
     ) -> List[str]:
         """
-        Extract topics of discussion from title, description and transcript
+        Extract topics of discussion from title, description and transcript.
 
         Args:
             title: Podcast episode title
@@ -92,40 +182,33 @@ class PremiumClaimExtractor:
             List of extracted topic strings
 
         Raises:
-            Exception: If LLM call fails
+            ValueError: If response is empty or contains no topics
+            Exception: If Gemini API call fails (after SDK retries exhausted)
         """
+        prompt = TOPICS_OF_DISCUSSION_PROMPT.format(
+            title=title,
+            description=description,
+            transcript=full_transcript
+        )
+        logger.info(f"Calling {self.model_name} for topics of discussion extraction")
 
-        response = None
-        try:
-            # Format prompt with transcript
-            prompt = TOPICS_OF_DISCUSSION_PROMPT.format(
-                title=title,
-                description=description,
-                transcript=full_transcript
-            )
-            logger.info(f"Calling {self.model_name} for topics of discussion extraction ")
+        response_text = await self._call_gemini(
+            prompt=prompt,
+            config=types.GenerateContentConfig(
+                temperature=settings.gemini_premium_temperature,
+                response_mime_type="application/json",
+                response_schema=TopicDiscussionResult,
+            ),
+            step_name="topic extraction",
+        )
 
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=settings.gemini_premium_temperature,
-                    response_mime_type="application/json",
-                    response_schema=TopicDiscussionResult,
-                )
-            )
+        result: TopicDiscussionResult = TopicDiscussionResult.model_validate_json(response_text)
 
-            # Parse structured response using Pydantic
-            result: TopicDiscussionResult = TopicDiscussionResult.model_validate_json(response.text)
-            topics = result.topics
+        if not result.topics:
+            raise ValueError("Gemini returned empty topics list")
 
-            logger.info(f"Extracted {len(topics)} topics from full transcript via structured outputs")
-            return topics
-        except Exception as e:
-            logger.error(f"Error in premium topic extraction: {e}", exc_info=True)
-            if response:
-                logger.error(f"Response text: {getattr(response, 'text', 'N/A')[:500]}")
-            return []
+        logger.info(f"Extracted {len(result.topics)} topics from full transcript via structured outputs")
+        return result.topics
 
     async def extract_claims_with_topics_from_transcript(
         self,
@@ -144,46 +227,43 @@ class PremiumClaimExtractor:
             A dictionary where keys are topic labels and values are lists of claims associated with that topic.
 
         Raises:
-            Exception: If LLM call fails
+            ValueError: If response is empty or contains no claims
+            Exception: If Gemini API call fails (after SDK retries exhausted)
         """
+        prompt = CLAIM_EXTRACTION_PROMPT.format(
+            transcript=full_transcript,
+            topics_of_discussion=topics_of_discussion
+        )
 
-        response = None
-        try:
-            prompt = CLAIM_EXTRACTION_PROMPT.format(
-                transcript=full_transcript,
-                topics_of_discussion=topics_of_discussion
-            )
+        logger.info(
+            f"Calling {self.model_name} for claim extraction with topics of discussion "
+            f"({len(full_transcript)} chars)"
+        )
 
-            logger.info(
-                f"Calling {self.model_name} for claim extraction with topics of discussion"
-                f"({len(full_transcript)} chars)"
-            )
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=settings.gemini_premium_temperature,
-                    response_mime_type="application/json",
-                    response_schema=ClaimWithTopicResult,
-                )
-            )
+        response_text = await self._call_gemini(
+            prompt=prompt,
+            config=types.GenerateContentConfig(
+                temperature=settings.gemini_premium_temperature,
+                response_mime_type="application/json",
+                response_schema=ClaimWithTopicResult,
+            ),
+            step_name="claim extraction",
+        )
 
-            result: ClaimWithTopicResult = ClaimWithTopicResult.model_validate_json(response.text)
-            claims_with_topics = result.claim_topic
+        result: ClaimWithTopicResult = ClaimWithTopicResult.model_validate_json(response_text)
 
-            parsed_result: Dict[str, List[str]] = {}
-            for claim_topic in claims_with_topics:
-                if claim_topic.topic not in parsed_result:
-                    parsed_result[claim_topic.topic] = []
-                parsed_result[claim_topic.topic].extend(claim_topic.claim)
+        if not result.claim_topic:
+            raise ValueError("Gemini returned empty claims list")
 
-            logger.info(f"Extracted {len(claims_with_topics)} claims from full transcript via structured outputs")
-            return parsed_result
-        except Exception as e:
-            logger.error(f"Error in premium claim extraction with topics: {e}", exc_info=True)
-            if response:
-                logger.error(f"Response text: {getattr(response, 'text', 'N/A')[:500]}")
-            return {}
+        parsed_result: Dict[str, List[str]] = {}
+        for claim_topic in result.claim_topic:
+            if claim_topic.topic not in parsed_result:
+                parsed_result[claim_topic.topic] = []
+            parsed_result[claim_topic.topic].extend(claim_topic.claim)
+
+        total_claims = sum(len(c) for c in parsed_result.values())
+        logger.info(f"Extracted {total_claims} claims across {len(parsed_result)} topics via structured outputs")
+        return parsed_result
 
     async def extract_key_takeaways_from_claims(
         self,
@@ -199,46 +279,31 @@ class PremiumClaimExtractor:
             List of key takeaway strings.
 
         Raises:
-            Exception: If LLM call fails.
+            ValueError: If response is empty or contains no key takeaways
+            Exception: If Gemini API call fails (after SDK retries exhausted)
         """
-        response = None
-        try:
-            # Format prompt with claims
-            prompt = KEY_TAKEAWAYS_PROMPT.format(
-                topics_with_claims=topics_with_claims
-            )
+        prompt = KEY_TAKEAWAYS_PROMPT.format(
+            topics_with_claims=topics_with_claims
+        )
 
-            # Call Gemini API with structured output configuration
-            logger.info(
-                f"Calling {self.model_name} for key takeaway extraction with structured outputs"
-            )
+        logger.info(
+            f"Calling {self.model_name} for key takeaway extraction with structured outputs"
+        )
 
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=settings.gemini_premium_temperature,
-                    response_mime_type="application/json",
-                    response_schema=KeyTakeawayResult,
-                )
-            )
+        response_text = await self._call_gemini(
+            prompt=prompt,
+            config=types.GenerateContentConfig(
+                temperature=settings.gemini_premium_temperature,
+                response_mime_type="application/json",
+                response_schema=KeyTakeawayResult,
+            ),
+            step_name="key takeaway extraction",
+        )
 
-            # Parse structured response using Pydantic
-            result: KeyTakeawayResult = KeyTakeawayResult.model_validate_json(response.text)
-            key_takeaways = result.key_takeaways
+        result: KeyTakeawayResult = KeyTakeawayResult.model_validate_json(response_text)
 
-            logger.info(f"Extracted {len(key_takeaways)} key takeaways via structured outputs")
-            return key_takeaways
+        if not result.key_takeaways:
+            raise ValueError("Gemini returned empty key takeaways list")
 
-        except asyncio.TimeoutError:
-            logger.error(
-                f"Gemini API call timed out after {GEMINI_TIMEOUT_SECONDS} seconds "
-                f"for transcript of {len(full_transcript)} chars"
-            )
-            return []
-        except Exception as e:
-            logger.error(f"Error in premium key takeaway extraction: {e}", exc_info=True)
-            if response:
-                response_text = response.text if response.text else "N/A"
-                logger.error(f"Response text: {response_text[:500]}")
-            return []
+        logger.info(f"Extracted {len(result.key_takeaways)} key takeaways via structured outputs")
+        return result.key_takeaways
