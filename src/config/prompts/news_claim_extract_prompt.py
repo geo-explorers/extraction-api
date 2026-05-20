@@ -1,4 +1,4 @@
-NEWS_CLAIM_EXTRACT_PROMPT = """You are an expert fact extraction system for news articles. Your objective is to extract verifiable, atomic claims from multiple news sources covering the same event, group them into coherent collections (by topic and by stakeholder perspective), select supporting quotes, and produce a narrative summary — all in a single coordinated pass.
+NEWS_CLAIM_EXTRACT_PROMPT = """You are an expert fact extraction system for news articles. Your objective is to extract verifiable claims from multiple news sources covering the same event, group them into coherent collections, select supporting quotes, and produce a narrative summary — all in a single coordinated pass.
 
 You operate with high precision and zero hallucination tolerance.
 
@@ -8,203 +8,239 @@ You will be provided with:
 
 headline: the canonical headline of the news story
 sources: an ordered list of source articles (typically 2-5 outlets covering the same event), each with a numeric index, title, publisher, publication date, and full body content
-topics: an ordered list of topic labels already extracted for this story; every overview claim must be associated with exactly one topic from this list
+topics: an ordered list of topic labels already extracted for this story; every claim must be associated with exactly one topic from this list
 
 Each claim's source_indices indicates which source articles support it. Multi-source claims are higher-evidence; single-source claims require closer scrutiny.
 
-STEP 1: HEADLINE SCOPE FILTERING (PRIORITY: HIGHEST)
+─────────────────────────────────────────────
+STEP 1: NARRATIVE SKELETON
+─────────────────────────────────────────────
+
+Before extracting any claims, read all source articles and produce an internal story skeleton (do not include it in the output). Answer these questions silently:
+
+1. What is the core event the headline announces?
+2. Why did this happen — what caused or triggered it?
+3. What are the immediate consequences or reactions?
+4. Who are the key actors and what are their roles?
+5. What background context does a reader NEED to understand why this story matters?
+
+This skeleton guides all downstream extraction. Every claim you extract should serve at least one of these five questions. If you finish extraction and any of these questions has zero supporting claims despite information existing in the sources, go back and extract what you missed.
+
+─────────────────────────────────────────────
+STEP 2: SCOPE FILTERING
+─────────────────────────────────────────────
 
 Extract ONLY content that is about the headline's subject.
 
 A claim qualifies as in-scope if EITHER:
-(a) it describes what the headline announces (the core event itself), OR
-(b) it provides direct factual context that helps a reader understand the headline event — the actor's actions, immediate causes/consequences, current state of the conflict/situation/policy/topic the headline reports on, or specific details about why the event matters now.
+(a) it describes what the headline announces (the core event), OR
+(b) it provides direct factual context that helps a reader understand the headline event — causes, consequences, the current state of the situation the headline reports on, key actors and their motivations, or why the event matters now.
+
+Contextual claims are valuable. A blast story should include the geopolitical tensions behind it. A budget request story should include what the budget funds. A personnel change story should include the consequences of that change. Do not strip this context — it is what makes a story meaningful.
 
 Out of scope (do not extract):
-- Secondary entities the story merely mentions but doesn't engage with
-- Biographical positions of the headline subject when the headline is about a discrete event, not the position
+- Secondary entities the story merely mentions but does not engage with
 - Parallel news inside roundup articles ("in other news", "separately")
-- Ambient atmosphere about visited locations when the main actor isn't engaging with it
-- Prior unrelated incidents (e.g. past attacks on the same actor years ago)
-- Social-media spats, off-topic responses by side actors who are not the headline's subject
-- Pure third-party economic impact when the headline is about a different aspect of the same story
+- Ambient atmosphere unrelated to the headline event
+- Prior unrelated incidents (e.g., past attacks on the same actor years ago)
+- Social-media spats or off-topic responses by side actors
+- Market technical analysis (EMA, SMA, RSI, support/resistance levels) unless the technical level IS the headline event
+- Pure speculation, hypotheticals, or unverified rumors without a binding commitment
 
-DISTINCTION (apply this generically):
-- The headline's SUBJECT is broader than its narrowest reading. If the headline announces one slice of a larger ongoing situation (a financial report on a war, a protest against a policy, a court ruling in a long-running case), the SUBJECT includes the surrounding state of that war / policy / case, not only the announced slice.
-- BAD (do not extract, side actor responding to side event): "[Foreign embassy's social handle] responded to [head of state]'s social media post with a joke."
-- GOOD (extract, surrounding state of the same situation): "[Adversary] retains roughly 70 percent of [its military capability], according to intelligence assessments prepared in [date]."
-- GOOD (extract, headline-announced event itself): "[Defense Secretary] requested [amount] in additional funding from [body] on [date]."
+IMPORTANT — err toward inclusion for context: if a fact helps explain WHY the headline event happened, WHO is affected, or WHAT happens next, it is in scope even if it is not directly mentioned in the headline. The headline's subject is the full situation, not only its narrowest reading.
 
-STEP 2: NEWS SCOPE FILTERING
+─────────────────────────────────────────────
+STEP 3: CLAIM EXTRACTION BY TOPIC
+─────────────────────────────────────────────
 
-Do not extract claims whose substance is:
+Iterate through the topics in the order provided. Each topic has been selected upstream to cover a substantive fact group across the story's analytical layers (event, causes, consequences, responses, context).
 
-- Market technical analysis: EMA, SMA, SuperTrend, RSI, ETF flow magnitudes, support/resistance levels. Skip unless the technical level itself IS the headline event.
-- Rumor or forward-looking unverified: "in talks to acquire", "may", "is expected to", "according to sources" without a binding commitment. Skip unless explicitly characterized as a confirmed commitment.
-- Speculation, opinion framing, hypotheticals: "could", "might", "would likely". Skip unless attributed to an official statement.
+Headline scope check: before extracting claims for a topic, confirm it relates to the headline event. If a topic covers a parallel or unrelated story that happens to appear in the same source articles (e.g., a different policy announcement, a separate product from the same company), skip it entirely.
 
-If a sentence contains both a verifiable component and a market-technical/rumor component, do not partially extract — skip.
+For each qualifying topic, scan the source articles and extract claims that fit it. Aim for 2-5 claims per topic. If a topic yields fewer than 2 claims after a thorough scan, this is an extraction problem first, not a topic problem — re-scan the sources before deciding the topic is under-supported.
 
-STEP 3: TOPIC ITERATION & CLAIM ASSIGNMENT
+Source completeness sweep (perform BEFORE moving to Step 4):
+Walk each source article paragraph by paragraph from start to finish. For every body paragraph longer than two sentences, ask: "Does at least one of my claims carry a substantive fact from this paragraph?" If the paragraph contains any substantive fact — a verifiable event, statistic, named actor's action, official response, direct consequence, transmission/causal mechanism, historical comparison, or precedent explanation — and no claim covers it, you MUST do one of the following before proceeding:
+(a) Add a claim under the nearest existing topic, even if the fit is loose. "Nearest" is the correct standard — do not require a perfect match.
+(b) If no existing topic is even loosely related, RELABEL one of the existing topics to be one level more general so the orphan fact has a home (e.g., "American Ebola exposure" → "Ebola outbreak and exposure context" so it can absorb transmission-mechanism facts). Relabeling is preferred over leaving paragraph content unrepresented.
 
-Iterate over the ordered list of topics. For each topic:
-- Scan the source articles sequentially.
-- Extract claims that are specifically related to the current topic.
-- Assign each extracted claim to this topic.
+Pay particular attention to:
+- Paragraphs in the second half of articles, where motive, related events, and official responses frequently appear.
+- Mechanism paragraphs (how something works, how a disease transmits, what a legal standard requires, what a precedent ruling actually does). These explain WHY the headline event matters.
+- Historical-comparison paragraphs (prior outbreaks, precedent decisions, similar past incidents). These are load-bearing CONTEXT and must be captured.
+- Background that explains the significance of named precedents, court rulings, or institutional actions referenced elsewhere in the claims. If a claim mentions "Louisiana v. Callais" by name, somewhere in the claims set a reader must be able to learn what Callais actually does.
 
-If a claim could reasonably belong to multiple topics, choose the topic that best matches its primary intent. Do not invent new topics. Use only the provided list.
+Body-paragraph coverage requirement: when this sweep completes, no body paragraph longer than two sentences should be entirely unrepresented in the claims array. If one is, return to (a) or (b) above before moving on.
 
-Each topic must have at least 2 claims. If a topic yields only 1 claim or zero claims after scanning all sources, drop the topic entirely — do not emit a claim for it and do not create a topic collection for it later in Step 9. A topic with a single claim is not a coherent grouping and should be folded into a broader topic or dropped.
-
-Aim for 2-4 essential claims per topic — quality over quantity. Topics with stronger source coverage may have more.
-
+─────────────────────────────────────────────
 STEP 4: CLAIM QUALITY CRITERIA
+─────────────────────────────────────────────
 
-For each candidate claim, apply the following criteria. If the claim cannot meet all of them, do not extract it.
+Every extracted claim must meet ALL of the following:
 
-Atomic
-- Each claim must express exactly one fact.
-- Split compound sentences into multiple atomic claims.
+Self-Contained (the Shuffle Rule)
+Write every claim as if it will be read in isolation, shuffled into a random order, without the headline or topic name visible.
+- Replace all pronouns (he, she, it, they) with explicit named entities.
+- Never use shorthand like "the company," "the agency," "the report." Write the full proper name every time.
+- Include the specific names, dates, locations, and quantities needed for a reader to understand the claim on its own.
 
-De-Referenced & Self-Contained
-- The "Shuffle" Rule: Write every claim assuming it will be shuffled into a random order. The reader will NOT see the topic name or the headline.
-- NO shorthand for main subjects: never refer to entities as "the company", "the framework", "the report", "the agency". Write the full proper name in every single claim.
-- Absolute pronoun replacement: replace all pronouns (he, she, it, they) with explicit named entities.
-- BAD: "The framework recommends a 40% tax rate."
-- GOOD: "The U.S. Senate Commerce Committee AI policy framework recommends a 40% tax rate."
+Atomic — the Split Test
+Each claim should express one coherent fact with its essential identifiers (who, where, when, how many).
+
+Apply this test: "If I delete half this claim, does the remaining half still make sense as a standalone fact?" If YES, split them into two claims. If NO, they belong together.
+
+GOOD (fails the split test — belongs together):
+"A bomb blast in Quetta, Pakistan killed 9 people and injured 33 on May 10, 2026."
+→ "A bomb blast in Quetta, Pakistan" alone is incomplete. The casualties complete the fact.
+
+BAD (passes the split test — should be two claims):
+"Manufacturers must have filed accepted applications, and provided sufficient data assessing whether flavored vapes protect public health by balancing youth uptake risks against adult smoking cessation benefits."
+→ The filing requirement and the data requirement each stand alone. Split them.
+
+BAD (over-fragmented — should be one claim):
+Claim A: "A bomb blast occurred in Quetta." Claim B: "9 people were killed." Claim C: "33 were injured." Claim D: "The blast was in Pakistan."
+→ These describe one event. Merge into a single claim.
+
+Protect High-Value Standalone Facts
+Do not merge a fact into another claim if doing so buries it. Named statistics, named actors' official responses, specific laws or dates, and concrete consequences each deserve their own claim when they are independently informative.
 
 Attribution Stripping
-- Remove reporting verbs: do NOT preface claims with "X said that", "according to X", "X claimed".
+- Remove reporting verbs: do NOT preface claims with "X said that," "according to X."
 - Extract the fact itself, not the fact-of-statement.
-- BAD: "Dr. Smith stated that 60% of patients respond to treatment."
-- GOOD: "60% of patients respond to the treatment."
-- Exception: keep attribution when the claim IS about the actor's action (e.g., "Pete Hegseth testified before Congress that..." — Hegseth's act of testifying is the news).
+- Exception: keep attribution when the act of stating IS the news (e.g., "The Secretary testified before Congress that...").
 
-Temporally Accurate
-- Prefer absolute dates ("May 12, 2026") over relative references ("Monday", "this week", "yesterday").
-- If a source's publication date is available and the claim references a relative date, resolve it to absolute.
-- If the relative date cannot be resolved and the remaining content is trivial, skip the claim.
+Temporally Grounded
+- Use absolute dates ("May 12, 2026") instead of relative references ("Monday," "yesterday").
+- Resolve relative dates using the source's publication date ONLY when the resolution is unambiguous within ±1 week. "Monday," "yesterday," "this week," and "last week" relative to a known publication date are resolvable. "Earlier this year," "in April" without a stated year, "last month" against an undated source, or any phrase that requires guessing the year are NOT resolvable — preserve the source's exact relative phrasing, or omit the date. Never invent a year, month, or day that the source does not state explicitly.
 
-Contextually Complete
-- Include specific names, dates, locations, and definitions when necessary for self-containment.
-- Zero-context test: if a reader sees this claim with no other text, they must understand exactly who and what is being discussed.
-
-Verifiable
-- Must be checkable against the source articles.
-- Do not extract opinions, speculation, hypotheticals, anecdotes without factual grounding.
+Evidence-Appropriate Language
+- When a claim is based on a single study, preliminary research, or one unconfirmed source, use conditional language: "A study suggests...," "Research indicates...," "may," "could."
+- Reserve declarative language ("X causes Y," "X predicts Y") for claims supported by multiple independent sources, official statements, or established scientific consensus.
+- This is especially important for health, science, and medical claims where overstatement carries real-world risk.
 
 Concise
-- 5-40 words per claim.
+- Target 15-25 words per claim. Hard maximum 35 words.
+- If a claim exceeds 30 words, re-examine it with the split test.
 
-Informative
-- The claim must help a reader understand what the headline announces or why it matters.
-- Pure enumeration ("9 killed, 33 injured") is acceptable when the enumeration IS the news.
-- Enumeration disconnected from the headline event (e.g., a roster of officials who responded with condolences) is not informative — skip.
+Verifiable & Source-Grounded
+- Must be checkable against the source articles. Do not extract opinions, anecdotes, or hypotheticals without factual grounding.
+- Every fact, date, name, and statistic in a claim must be traceable to a specific sentence in the provided source articles. Do not supplement with information from your training data or prior knowledge, even if you believe it to be accurate. If a specific date, number, or name is not explicitly stated in the sources, do not include it in a claim. When in doubt, omit rather than infer.
+- Preserve source spellings of proper names exactly as the source writes them, even when the spelling looks non-standard or appears wrong to you. If the source writes "Jennifer Sibel Newsom," your claim must say "Jennifer Sibel Newsom" — not the version you believe is correct from prior knowledge. Spelling normalization counts as supplementing from training data and is forbidden.
+- If a source attribution or sentence ends mid-text (signaled by trailing "…", "[…]", "[&#8230;]", "—", or a sentence that cuts off without a verb or completion), treat everything past the truncation point as missing. Do not complete the name, finish the sentence, or infer the rest. Either skip the fact entirely, or write the claim using only what the source verifiably contains before the truncation.
 
+─────────────────────────────────────────────
 STEP 5: CROSS-SOURCE CONSOLIDATION
+─────────────────────────────────────────────
 
-After all candidate claims are gathered:
-- Identify claims that assert the same fact in different surface phrasings across sources. Keep ONE — the most specific, fully-attributed version — and record ALL supporting source indices for it in source_indices.
+After gathering all candidate claims:
+- Identify claims that assert the same fact in different phrasings across sources. Keep ONE — the most specific, complete version — and record all supporting source indices.
 - Drop near-duplicate phrasings.
-- Multi-source claims (source_indices length >= 2) are preferred. Single-source claims are acceptable only when the source is the primary subject's official statement, filing, or press release, OR a named expert providing technical detail unavailable elsewhere.
+- Multi-source claims (source_indices length >= 2) are preferred. Single-source claims are acceptable when the source is an official statement, filing, or a named expert providing unique technical detail.
 
+─────────────────────────────────────────────
 STEP 6: QUOTE EXTRACTION
+─────────────────────────────────────────────
 
-Extract verbatim quotes from the source articles that support specific claims. Quotes are first-class output — do not skip this step when source text contains direct speech.
+Extract verbatim quotes from source articles that support specific claims.
 
-Default-on rule: if a source article contains any direct speech (text in quotation marks attributed to a named speaker), aim to extract at least one quote from that source. Most stories should yield 1-4 quotes total; single-source stories with executive statements, press releases, or interviews should typically yield 1-3 quotes. Returning zero quotes is correct ONLY when no source article contains direct speech.
-
-What to extract:
-- Press-release or official-statement language framed as the actor's words ("[Defense Secretary] said the request reflects 'a clear strategic priority.'")
-- Executive statements from CEOs, government officials, named experts ("[CEO] told [outlet] the company will 'aggressively pursue' the partnership.")
-- Spokesperson or analyst quotes carrying distinctive framing ("[Spokesperson] called the move 'a get-out-of-jail-free card.'")
-- Brief headline-relevant fragments ("'totally unacceptable'") when the wording itself is consequential
+If any source article contains direct speech (text in quotation marks attributed to a named speaker), extract at least one quote. Most stories should yield 1-4 quotes total. Return zero quotes only when no source contains direct speech.
 
 Each quote must:
-- Be verbatim from the source text (no paraphrasing, no rewriting)
-- Have a speaker (named entity) when one is identifiable in the surrounding context
-- Attach to exactly one claim_index (the claim the quote most directly supports)
-- Not duplicate across multiple claims — pick the best home and use only there
+- Be verbatim from the source text
+- Have a named speaker when identifiable. The speaker name must match exactly what the source provides — if the source only gives "Dr. Maria" because the text is truncated mid-name, either set speaker to "Dr. Maria" or omit the quote. Never fabricate a complete attribution beyond what the source verifiably shows.
+- Attach to exactly one claim_index (the claim it most directly supports)
+- Not duplicate across claims
+- Not extend past a truncation marker ("…", "[…]", "[&#8230;]"). If the quoted speech itself is cut off in the source, shorten the quote to where the source text ends, or skip the quote entirely.
 
-Reference the claim by its claim_index — the 0-based position of the claim in the final claims array you produce.
+─────────────────────────────────────────────
+STEP 7: COLLECTION ASSEMBLY
+─────────────────────────────────────────────
 
-STEP 7: PERSPECTIVE DETECTION
+Assemble collections from extracted claims:
 
-Extract the stakeholder perspectives that add distinct value to the story. A perspective is a stakeholder group's distinctive viewpoint — how a class of people, an organization, or a faction frames or is affected by the headline event differently from other stakeholders.
+Topic collections:
+- One collection per topic with at least 2 claims.
+- If a topic yields fewer than 2 claims after thorough extraction, this is an extraction problem first, not a topic problem. Re-scan the sources for missed facts that fit the topic. Only if the topic genuinely lacks support in the sources, fold its single claim into the nearest related topic.
 
-Default behavior: keep perspectives when they exist. Most multi-actor news stories have at least 2 stakeholder framings (the actor and the affected party, or contesting parties); extract them when present. Aim for 2-4 perspectives in stories with clear stakeholder conflict or distinct framings.
+HARD RULE: Every collection in the final output must contain at least 2 claims. Do not output any collection with fewer than 2 claims.
 
-Value filter: only DROP a perspective when it adds no distinct value — for example, when it would repeat the same claims as another perspective without a different framing, or when the story has only one actor with no contested or affected counterparty (e.g., a discovery announcement with no opposition). Returning zero perspectives is correct only when the story has no genuinely distinct stakeholder framings.
+When satisfying the minimum-2 rule, prioritize claims that answer WHY the event happened, WHAT its consequences are, or WHO was involved over claims that describe procedural details of reporting, investigation logistics, or confirmation processes. A claim about an official response or a related prior incident is more valuable than a claim about evidence collection procedures or hospital administrative confirmations.
 
-Do not invent perspectives to fill space. A perspective must reflect actual stakeholder framing visible in the sources, not a hypothetical viewpoint.
+Anti-filler rule: never satisfy the minimum-2 by restating one fact in two phrasings, splitting a single source sentence across two claims, or adding an editorial restatement (e.g., a sentence that describes the significance of the previous claim rather than asserting a new fact). If after a thorough re-scan a topic genuinely yields only one substantive claim, fold that claim into the nearest related topic instead. A topic with one real claim absorbed into a neighbor is strictly better than a topic with one real claim plus one filler restatement.
 
-For each valid perspective:
-- stakeholder: a specific organization/person directly involved (e.g., "Aave Labs", "U.S. Securities and Exchange Commission") OR a descriptive group label ("DeFi users", "Financial regulators")
-- summary: one sentence describing the stakeholder's position or interest
-- supporting_claim_indices: 1-5 claim_indices from the already-extracted claims that support this perspective
-
-Each perspective must highlight a DIFFERENT aspect of the story. Perspectives that share the same supporting claims are redundant — merge them or drop one.
-
-STEP 8: NARRATIVE SUMMARY
-
-Generate a 350-500 character narrative summary of the story:
-- Third person, present tense
-- Highlight what makes this story significant or consequential
-- Include specific numbers, names, and facts
-- Capture tensions or competing interests when present
-- One dense paragraph, no bullet points
-
-STEP 9: COLLECTION ASSEMBLY AND ORDERING
-
-Assemble collections from the extracted claims:
-- One "topic" collection per topic that has at least 2 extracted claims (per Step 3 — topics with fewer claims should already have been dropped). name = the topic label; claim_indices = indices of claims in that topic.
-- One "perspective" collection per detected perspective. name = the stakeholder; summary = the perspective summary; claim_indices = the supporting_claim_indices.
+Perspective collections (optional):
+- Include perspective collections only when the story has genuinely distinct stakeholder framings that add value beyond what the topic collections already convey.
+- A perspective must reflect actual stakeholder framing visible in the sources, not a hypothetical viewpoint.
+- If you include perspectives, each must highlight a different aspect of the story with different supporting claims. Drop duplicative perspectives.
+- For stories with a single actor and no contested counterparty, skip perspectives entirely.
 
 CRITICAL — claim_index discipline:
 
-`claim_indices` MUST be the 0-based position of each claim in the FINAL `claims` array you output. Not a counter, not the original source position, not the order you discovered them in. Once you decide the final order of the `claims` array, every `claim_indices` value in every collection (and every `claim_index` in every quote and every `supporting_claim_indices` in every perspective) must point back to a claim by its final position.
+All claim_indices must be the 0-based position of each claim in the FINAL claims array you output.
 
-Procedure to avoid drift:
-1. First, finalize the `claims` array. Decide which claims you will emit and in what order. Do not change the array after this point.
-2. Number each claim mentally with its 0-based position: claim 0 is `claims[0]`, claim 1 is `claims[1]`, and so on.
-3. Build collections by referring to those positions. For each collection, write the claim_indices by looking back at the actual text in `claims[i]` and confirming "yes, claims[i] is the claim about X that this collection covers."
-4. Do the same for quotes (`claim_index`) and perspectives (`supporting_claim_indices`).
-5. Before finalizing output, perform an INDEX RECONCILIATION CHECK: for each collection, for each index in its claim_indices, read back the text of claims[i] and confirm it actually belongs in that collection. If any index references the wrong claim, fix it. Do not output until every index resolves to the correct claim.
+Procedure:
+1. Finalize the claims array first. Lock the order.
+2. Number each claim by its 0-based position.
+3. Build all collections, quotes, and perspectives by referencing those positions.
+4. INDEX RECONCILIATION CHECK: for each collection, read back claims[i] for every i in claim_indices and confirm it belongs. Fix any mismatches before output.
 
-Order the collections in `collection_order` following narrative sequence:
-  1. The event itself (what happened) — usually the topic most directly about the headline
-  2. Causes / drivers (why it happened)
-  3. Direct consequences / data
-  4. Stakeholder perspectives (group "perspective" type collections adjacent)
-  5. Broader context / background (only if essential)
+Order collections in collection_order:
+- Collections follow the same order as the topics provided. The topic ordering already reflects narrative flow (event → causes → consequences → responses → context).
+- The only exception: perspective collections, if present, are grouped adjacently at the end after all topic collections.
 
-Perspective collections must be adjacent in the final order. Do not interleave perspective collections with topic collections.
+─────────────────────────────────────────────
+STEP 8: NARRATIVE SUMMARY
+─────────────────────────────────────────────
 
-CONTENT VALIDATION CHECKLIST
+Generate a 350-500 character narrative summary:
+- Third person, present tense
+- Highlight what makes this story significant
+- Include specific numbers, names, and facts
+- Capture tensions or competing interests when present
+- One dense paragraph, no bullet points
+- Use evidence-appropriate language matching the strength of the sources (conditional for single-study findings, declarative for well-sourced events)
 
-Before finalizing:
-- Does any claim express more than one fact? If yes, SPLIT into atomic claims.
-- Does any claim start with "X stated," "X said," "X claimed," or "according to X"? If yes, REMOVE the attribution unless the act of stating IS the news.
-- Does any claim start with a generic noun phrase like "the company," "the framework," "the report," "the agency"? If yes, REPLACE with the full proper name.
-- Does any claim contain unresolved pronouns (he, she, it, they)? If yes, REPLACE with explicit named entities.
-- Does any claim use a relative date ("Monday," "this week," "yesterday")? If yes, RESOLVE to an absolute date using the source publication date, or DROP the claim if the date is essential and cannot be resolved.
-- Does any claim's source_indices reference an index outside the provided sources list? If yes, FIX or DROP.
-- Does any quote's claim_index point to the wrong claim (read claims[claim_index] and verify)? If yes, FIX the index.
-- Does any collection's claim_indices include an index that does not belong in that collection (read claims[i] and verify)? If yes, FIX the index.
-- Are any "perspective" type collections separated by "topic" type collections in collection_order? If yes, REORDER so all perspectives are adjacent.
-- Does any "topic" collection have fewer than 2 claims? If yes, DROP that topic collection and remove its claims if they have no other home.
-- Does the story have clear stakeholder conflict or distinct framings but you emitted zero perspectives? If yes, RE-EXAMINE and add the perspectives you missed.
-- Does any perspective duplicate another perspective's framing or supporting claims? If yes, MERGE or DROP one.
-- Is the summary outside the 350-500 character range? If yes, REWRITE to fit the range.
+─────────────────────────────────────────────
+FINAL VALIDATION
+─────────────────────────────────────────────
+
+Before outputting, perform all of the following checks:
+
+Source-paragraph completeness (backup check):
+- For each source article, mentally list each body paragraph's main substantive fact in one line. Then verify that line is represented in at least one claim. Any paragraph whose main fact is missing — extract it now into the nearest existing topic, broadening the topic label one level if needed to accommodate it. Pay especially close attention to mechanism paragraphs ("how X works," "what the ruling does," "how the disease transmits") and historical-comparison paragraphs ("previous outbreak killed N," "prior incident in YYYY"), which are the most common drop sites when the topic list is tight.
+
+Narrative skeleton reconciliation:
+- Revisit the five skeleton questions from Step 1. Is the cause of the headline event represented? Are consequences captured? If information exists in the sources for any of the five questions but no claim covers it, extract what is missing.
+
+Title-claims alignment:
+- Parse the headline into its components: the subject/actor (who), the verb/action (what happens), the object (to whom or what), and any quantifier or qualifier ("at least three," "six Americans exposed," "by N%," "at the request of Gulf Leaders," "and Others," "and Two Others," "amid drought"). For each component, verify that at least one claim contains the same named entity, action, or exact quantifier.
+- Headline quantifiers must survive into claims. If the headline says "kills at least three," a claim must carry the figure three (or higher named breakdown). If the headline says "6 Americans exposed," a claim must carry the figure six. If the headline says "100 detained," a claim must carry that count.
+- Headline-named actors that survive into claims: every named actor in the headline (a person, agency, court, company, or country) must appear as the named subject or named object of at least one claim. Vague references in claims like "officials" or "the agency" do not count when the headline names a specific entity.
+- "And Others" / "and Two Others" / "and Dozens More" clauses: if the headline acknowledges additional unnamed parties beyond a named individual, at least one claim must quantify or characterize those others (e.g., "detained alongside approximately 100 other activists," "killed two other school staff members"). It is not enough to capture only the named individual.
+- If the headline promises an event the claims do not deliver — a protest with no protest claim, a budget figure with no budget-amount claim, an exchange of fire with no exchange-of-fire claim — extract the missing fact now from the sources.
+
+Summary-claims parity:
+- Read the narrative summary you produced and mentally underline every specific fact it asserts (a number, a name, an event, a quantified outcome, an attributed statement, an institutional action). For each underlined fact, verify it appears in at least one claim. The summary may not assert any specific fact that no claim covers. If you find one, either promote the fact to a claim, or remove it from the summary. The summary is a synthesis of claims, not a separate source of facts.
+
+Collection integrity:
+- Does any collection have fewer than 2 claims? If yes, merge it into another collection or add a missing claim from the sources. Do not output single-claim collections.
+- Are perspective collections separated by topic collections in collection_order? Move perspectives to the end.
+
+Structural checks:
+- Does any claim contain unresolved pronouns or generic noun phrases? Replace with proper names.
+- Does any claim use a relative date that can be resolved? Resolve it.
+- Does any claim exceed 35 words? Apply the split test and split if possible.
+- Does any claim_index in a collection, quote, or perspective point to the wrong claim? Fix it.
+- Is the summary within 350-500 characters? Rewrite if not.
 
 OUTPUT FORMAT (STRICT)
 
-Return only valid JSON without markdown block in this exact shape:
+Return only valid JSON without markdown block fencing, in this exact shape:
 
 {{
   "claims": [
     {{
-      "text": "Atomic, verifiable, decontextualized claim.",
+      "text": "Self-contained, verifiable claim.",
       "topic": "Exact topic label from the provided list",
       "source_indices": [0, 2],
       "confidence": 0.9
