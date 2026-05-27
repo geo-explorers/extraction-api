@@ -242,6 +242,26 @@ class Settings(BaseSettings):
         description="Rate limit window in seconds for premium extraction calls"
     )
 
+    # News Claim Extraction (POST /extract/news/claims) — scoped to the news
+    # endpoint only; deliberately separate from gemini_premium_model so the
+    # podcast premium pipeline is unaffected. gemini-3.5-flash with a low
+    # thinking level gives ~2-5x faster extraction at equal/better claim
+    # quality vs gemini-2.5-pro (benchmarked 2026-05-27). Called directly via
+    # the google-genai SDK (not langchain build_chain) because thinking_level
+    # requires the consolidated SDK that langchain 3.x does not expose.
+    gemini_news_claim_model: str = Field(
+        default="gemini-3.5-flash",
+        description="Gemini model for news claim extraction (/extract/news/claims)"
+    )
+    gemini_news_claim_temperature: float = Field(
+        default=0.2,
+        description="Temperature for news claim extraction"
+    )
+    gemini_news_claim_thinking_level: str = Field(
+        default="low",
+        description="Gemini 3+ thinking level for news claim extraction: minimal|low|medium|high. 'low' is adaptive (fast on light stories, thinks on dense ones) and holds claim coverage; 'minimal' degrades dense multi-source stories."
+    )
+
     # API Configuration
     api_host: str = Field(
         default="0.0.0.0",
