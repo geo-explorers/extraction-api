@@ -21,6 +21,31 @@ MAX_RETRIES = 3
 # while, and the news-worker caller has its own 240s budget + retries on top.
 _REQUEST_TIMEOUT_MS = 180_000
 
+# Minimal role primer for the Claude fallback. All extraction logic +
+# grounding rules live in NEWS_CLAIM_EXTRACT_PROMPT (the user message) — this
+# only sets the system role and reinforces raw-JSON output. NOT a second copy
+# of the extraction prompt.
+_CLAUDE_SYSTEM_PROMPT = (
+  "You are an expert news fact-extraction system. Follow the user's instructions "
+  "exactly and with zero hallucination tolerance. Output ONLY a single valid JSON "
+  "object matching the requested schema — no prose, no markdown code fences."
+)
+
+
+def _build_prompt(
+  headline: str,
+  sources: List[NewsArticleSource],
+  topics: List[str],
+) -> str:
+  """Render NEWS_CLAIM_EXTRACT_PROMPT — the single source of truth shared by
+  both the Gemini and Claude extraction paths (same f-string substitution
+  langchain used previously: {{ }} -> { }, list values str()'d)."""
+  return NEWS_CLAIM_EXTRACT_PROMPT.format(
+    headline=headline,
+    sources=[s.model_dump() for s in sources],
+    topics=topics,
+  )
+
 
 def extract_news_claims(
   headline: str,
@@ -45,14 +70,9 @@ def extract_news_claims(
   if not settings.gemini_api_key:
     raise Exception("GEMINI_API_KEY not configured for news claim extraction")
 
-  # Render the prompt with the same f-string template substitution langchain
-  # used previously (verified equivalent: {{ }} -> { }, list values str()'d),
-  # then call google-genai directly so we can pass thinking_level.
-  prompt = NEWS_CLAIM_EXTRACT_PROMPT.format(
-    headline=headline,
-    sources=[s.model_dump() for s in sources],
-    topics=topics,
-  )
+  # Render the shared prompt, then call google-genai directly so we can pass
+  # thinking_level (only exposed by the consolidated SDK, not langchain 3.x).
+  prompt = _build_prompt(headline, sources, topics)
 
   try:
     client = genai.Client(
@@ -96,6 +116,76 @@ def extract_news_claims(
 
   # Unreachable — loop above either returns or raises
   raise Exception("News claim extraction: unreachable code path")
+
+
+def extract_news_claims_claude(
+  headline: str,
+  sources: List[NewsArticleSource],
+  topics: List[str],
+) -> NewsClaimExtractResponse:
+  """Fallback news-claim extraction running the SAME strong prompt on Claude.
+
+  Identical contract to extract_news_claims() — same NEWS_CLAIM_EXTRACT_PROMPT,
+  same NewsClaimExtractResponse schema — but invokes Anthropic Claude instead
+  of Gemini. news-worker calls this only when the Gemini path errors out, so a
+  Gemini failure no longer drops the pipeline onto a weaker, locally-defined
+  prompt (the root cause of the 2026-06-10 inverted-claim incident). The
+  prompt is NOT duplicated: it is built once by _build_prompt(), shared with
+  the Gemini path.
+
+  anthropic is imported lazily so that a missing/unsynced SDK can never break
+  module import for the primary Gemini endpoint.
+  """
+  if not settings.anthropic_api_key:
+    raise Exception("ANTHROPIC_API_KEY not configured for Claude news claim fallback")
+
+  prompt = _build_prompt(headline, sources, topics)
+
+  try:
+    import anthropic
+
+    client = anthropic.Anthropic(
+      api_key=settings.anthropic_api_key,
+      timeout=_REQUEST_TIMEOUT_MS / 1000,
+    )
+  except Exception as e:
+    logger.error(f"Failed to build Claude news extraction client: {e}")
+    raise Exception("Error building Claude extraction client") from e
+
+  last_error: Exception | None = None
+  for attempt in range(1, MAX_RETRIES + 1):
+    try:
+      message = client.messages.create(
+        model=settings.news_claim_claude_model,
+        max_tokens=settings.news_claim_claude_max_tokens,
+        temperature=settings.gemini_news_claim_temperature,
+        system=_CLAUDE_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": prompt}],
+      )
+      parsed = _parse_llm_response(_claude_text(message))
+      return NewsClaimExtractResponse.model_validate(parsed)
+    except Exception as e:
+      last_error = e
+      logger.warning(
+        f"Claude news claim extraction attempt {attempt}/{MAX_RETRIES} failed: {e}"
+      )
+      if attempt == MAX_RETRIES:
+        raise Exception(
+          f"Claude news claim extraction failed after {MAX_RETRIES} attempts"
+        ) from last_error
+
+  # Unreachable — loop above either returns or raises
+  raise Exception("Claude news claim extraction: unreachable code path")
+
+
+def _claude_text(message) -> str:
+  """Concatenate the text blocks of an Anthropic Messages response."""
+  parts = [
+    block.text
+    for block in message.content
+    if getattr(block, "type", None) == "text"
+  ]
+  return "".join(parts)
 
 
 def _parse_llm_response(raw_response: str) -> dict:

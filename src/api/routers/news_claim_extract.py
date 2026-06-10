@@ -1,35 +1,48 @@
+from typing import Callable, List
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 import json
 
-from src.api.schemas.news_claim_extract_schema import NewsClaimExtractRequest
-from src.api.services.news_claim_extract_service import extract_news_claims
+from src.api.schemas.news_claim_extract_schema import (
+  NewsArticleSource,
+  NewsClaimExtractRequest,
+  NewsClaimExtractResponse,
+)
+from src.api.services.news_claim_extract_service import (
+  extract_news_claims,
+  extract_news_claims_claude,
+)
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()
 
+# Type of the two interchangeable extractor functions (Gemini / Claude).
+Extractor = Callable[[str, List[NewsArticleSource], List[str]], NewsClaimExtractResponse]
 
-@router.post("/news/claims")
-def news_claim_extract(request: NewsClaimExtractRequest) -> JSONResponse:
+
+def _extract_and_respond(
+  extractor: Extractor,
+  request: NewsClaimExtractRequest,
+  provider: str,
+) -> JSONResponse:
+  """Shared request/response handling for both the Gemini and Claude
+  news-claim endpoints. Only the injected `extractor` differs — they run the
+  identical NEWS_CLAIM_EXTRACT_PROMPT and return the same schema."""
   logger.info(
-    f"News claim extract request - Headline: '{request.headline[:80]}', "
+    f"News claim extract ({provider}) - Headline: '{request.headline[:80]}', "
     f"Sources: {len(request.sources)}, "
     f"Topics: {len(request.topics)}"
   )
 
   try:
-    result = extract_news_claims(
-      headline=request.headline,
-      sources=request.sources,
-      topics=request.topics,
-    )
+    result = extractor(request.headline, request.sources, request.topics)
 
     response_data = result.model_dump()
     response_data["error"] = None
 
     logger.info(
-      f"News claim extract response - "
+      f"News claim extract ({provider}) response - "
       f"Claims: {len(result.claims)}, "
       f"Quotes: {len(result.quotes)}, "
       f"Collections: {len(result.collections)}, "
@@ -43,7 +56,9 @@ def news_claim_extract(request: NewsClaimExtractRequest) -> JSONResponse:
     )
   except Exception as e:
     error_msg = f"An internal error occurred: {str(e)}"
-    logger.error(f"News claim extract failed - {type(e).__name__}: {str(e)}")
+    logger.error(
+      f"News claim extract ({provider}) failed - {type(e).__name__}: {str(e)}"
+    )
 
     return JSONResponse(
       content={
@@ -56,3 +71,18 @@ def news_claim_extract(request: NewsClaimExtractRequest) -> JSONResponse:
       },
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
+
+
+@router.post("/news/claims")
+def news_claim_extract(request: NewsClaimExtractRequest) -> JSONResponse:
+  """Primary news-claim extraction via Gemini."""
+  return _extract_and_respond(extract_news_claims, request, "gemini")
+
+
+@router.post("/news/claims/claude")
+def news_claim_extract_claude(request: NewsClaimExtractRequest) -> JSONResponse:
+  """Fallback news-claim extraction via Claude on the SAME strong prompt.
+
+  Separate endpoint (not a flag on /news/claims) so the proven Gemini path is
+  untouched. news-worker calls this only when the Gemini path errors out."""
+  return _extract_and_respond(extract_news_claims_claude, request, "claude")
