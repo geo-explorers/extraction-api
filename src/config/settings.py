@@ -262,6 +262,21 @@ class Settings(BaseSettings):
         description="Gemini 3+ thinking level for news claim extraction: minimal|low|medium|high. 'low' is adaptive (fast on light stories, thinks on dense ones) and holds claim coverage; 'minimal' degrades dense multi-source stories."
     )
 
+    # News Claim Extraction — Claude fallback (POST /extract/news/claims/claude)
+    # Runs the EXACT SAME NEWS_CLAIM_EXTRACT_PROMPT as the Gemini endpoint, just
+    # on Anthropic Claude. news-worker calls this only when the Gemini path
+    # errors out, so a Gemini outage no longer drops the pipeline onto a weaker
+    # locally-defined prompt (root cause of the 2026-06-10 inverted-claim
+    # incident). Requires anthropic_api_key (ANTHROPIC_API_KEY env).
+    news_claim_claude_model: str = Field(
+        default="claude-sonnet-4-5",
+        description="Anthropic Claude model for the news-claim Claude fallback endpoint. Same strong prompt as the Gemini path."
+    )
+    news_claim_claude_max_tokens: int = Field(
+        default=32000,
+        description="Max output tokens for the Claude news-claim fallback (dense multi-source stories can produce many claims)."
+    )
+
     # API Configuration
     api_host: str = Field(
         default="0.0.0.0",
