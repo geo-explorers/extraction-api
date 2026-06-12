@@ -32,7 +32,7 @@ from src.database.claim_repository import ClaimRepository
 from src.database.tag_repository import TagRepository
 from src.preprocessing.transcript_parser import TranscriptParser
 from src.extraction.premium_claim_extractor import PremiumClaimExtractor
-from src.extraction.quote_finder import ClaimWithTopic
+from src.extraction.models import ClaimWithTopic
 from src.infrastructure.embedding_service import EmbeddingService
 from src.infrastructure.logger import get_logger
 

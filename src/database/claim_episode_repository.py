@@ -14,7 +14,7 @@ from typing import List, Dict
 from sqlalchemy.orm import Session
 
 from src.database.models import ClaimEpisode
-from src.extraction.quote_finder import ClaimWithTopic
+from src.extraction.models import ClaimWithTopic
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)

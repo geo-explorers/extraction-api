@@ -14,7 +14,7 @@ from typing import Dict, List, Tuple, Optional
 from sqlalchemy.orm import Session
 
 from src.database.models import TagMap
-from src.extraction.quote_finder import ClaimWithTopic
+from src.extraction.models import ClaimWithTopic
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
