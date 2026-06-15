@@ -42,6 +42,73 @@ class PremiumExtractionCoreResult:
     model_used: str
 
 
+@dataclass
+class TakeawayLink:
+    """A key takeaway resolved to the claim it restates (by exact text match)."""
+    text: str
+    claim_order: Optional[int]
+
+
+def build_claim_topics(
+    topics: List[str],
+    claims_with_topics: dict[str, list[str]],
+    episode_id: int,
+) -> tuple[List[str], dict[str, list[str]], List[ClaimWithTopic], int]:
+    """Filter sparse topics and assign sequential claim_order.
+
+    Pure, deterministic — the single source of truth shared by the in-process
+    pipeline and the DAG worker. Returns (ordered_topics, filtered_map,
+    claim_topics, claims_extracted).
+    """
+    filtered = {
+        topic: claims
+        for topic, claims in claims_with_topics.items()
+        if len(claims) >= MIN_CLAIMS_PER_TOPIC
+    }
+    ordered_topics = [t for t in topics if t in filtered]
+
+    claim_topics: List[ClaimWithTopic] = []
+    claim_order = 1
+    for topic in ordered_topics:
+        for claim in filtered.get(topic, []):
+            claim_topics.append(
+                ClaimWithTopic(
+                    claim_text=claim,
+                    topic=topic,
+                    episode_id=episode_id,
+                    claim_order=claim_order,
+                )
+            )
+            claim_order += 1
+
+    claims_extracted = sum(len(c) for c in filtered.values())
+    return ordered_topics, filtered, claim_topics, claims_extracted
+
+
+def format_topics_with_claims(claims_with_topics: dict[str, list[str]]) -> str:
+    """Render the topic->claims map into the prompt string for key takeaways."""
+    sections = []
+    for topic, claims in claims_with_topics.items():
+        section = f"Topic: {topic}\n"
+        for claim in claims:
+            section += f"- {claim}\n"
+        sections.append(section)
+    return "\n".join(sections)
+
+
+def link_takeaways_to_claims(
+    key_takeaways: List[str],
+    claim_topics: List[ClaimWithTopic],
+) -> List[TakeawayLink]:
+    """Resolve each takeaway to its claim's claim_order by exact text match.
+
+    Done in-process (where both lists are in memory) so downstream consumers
+    never have to re-run the fragile string match. Unmatched -> claim_order=None.
+    """
+    order_by_text = {c.claim_text: c.claim_order for c in claim_topics}
+    return [TakeawayLink(text=t, claim_order=order_by_text.get(t)) for t in key_takeaways]
+
+
 async def run_premium_extraction(
     *,
     episode_id: int,
@@ -110,41 +177,10 @@ async def run_premium_extraction(
         f"  ✓ Extracted {claims_extracted} claims in {time.time() - stage_start:.1f}s"
     )
 
-    # Drop topics with fewer than MIN_CLAIMS_PER_TOPIC claims.
-    filtered_claims_with_topics = {
-        topic: claims
-        for topic, claims in claims_with_topics.items()
-        if len(claims) >= MIN_CLAIMS_PER_TOPIC
-    }
-    filtered_out_topics = len(claims_with_topics) - len(filtered_claims_with_topics)
-    if filtered_out_topics > 0:
-        filtered_out_claims = claims_extracted - sum(
-            len(c) for c in filtered_claims_with_topics.values()
-        )
-        logger.info(
-            f"  Filtered out {filtered_out_topics} topics with "
-            f"<{MIN_CLAIMS_PER_TOPIC} claims ({filtered_out_claims} claims removed)"
-        )
-
-    claims_with_topics = filtered_claims_with_topics
-    topics = [t for t in topics if t in claims_with_topics]
-    claims_extracted = sum(len(c) for c in claims_with_topics.values())
-
-    # Build ClaimWithTopic list in LLM extraction order, assigning a sequential
-    # claim_order so the frontend can preserve ordering.
-    claim_topics: List[ClaimWithTopic] = []
-    claim_order = 1
-    for topic in topics:
-        for claim in claims_with_topics.get(topic, []):
-            claim_topics.append(
-                ClaimWithTopic(
-                    claim_text=claim,
-                    topic=topic,
-                    episode_id=episode_id,
-                    claim_order=claim_order,
-                )
-            )
-            claim_order += 1
+    # Filter sparse topics + assign claim_order (shared with the DAG worker).
+    topics, claims_with_topics, claim_topics, claims_extracted = build_claim_topics(
+        topics, claims_with_topics, episode_id
+    )
 
     if not claim_topics:
         logger.warning("No claims extracted, ending extraction")
@@ -160,16 +196,8 @@ async def run_premium_extraction(
     # Step 4: Extract key takeaways from the claim set
     logger.info("Step 4/5 Extract key takeaways...")
     stage_start = time.time()
-    formatted_topics_with_claims = []
-    for topic, claims in claims_with_topics.items():
-        topic_section = f"Topic: {topic}\n"
-        for claim in claims:
-            topic_section += f"- {claim}\n"
-        formatted_topics_with_claims.append(topic_section)
-    topics_with_claims_str = "\n".join(formatted_topics_with_claims)
-
     key_takeaways = await extractor.extract_key_takeaways_from_claims(
-        topics_with_claims=topics_with_claims_str
+        topics_with_claims=format_topics_with_claims(claims_with_topics)
     )
     logger.info(
         f"  ✓ Extracted {len(key_takeaways)} key takeaways in "

@@ -44,21 +44,21 @@ def enqueue_task(req: EnqueueRequest) -> dict:
         )
 
     raw = json.dumps(req.payload).encode()
-    if len(raw) > entry.spec.max_payload_bytes:
+    if len(raw) > entry.max_payload_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Payload {len(raw)} bytes exceeds cap {entry.spec.max_payload_bytes}",
+            detail=f"Payload {len(raw)} bytes exceeds cap {entry.max_payload_bytes}",
         )
 
     try:
-        input_obj = entry.spec.input_model(**req.payload)
+        input_obj = entry.input_model(**req.payload)
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid payload for {req.type}: {e.errors()}",
         )
 
-    ref = entry.task.run(input_obj, wait_for_result=False)
+    ref = entry.runnable.run(input_obj, wait_for_result=False)
     logger.info(f"Enqueued {req.type} -> run {ref.workflow_run_id}")
     return {"id": ref.workflow_run_id, "type": req.type, "status": "queued"}
 

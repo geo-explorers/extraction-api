@@ -109,7 +109,12 @@ class PremiumClaimExtractor:
         for attempt in range(1, APP_MAX_RETRIES + 1):
             try:
                 start = time.time()
-                response = self.client.models.generate_content(
+                # The google-genai call is blocking/synchronous; offload it to a
+                # thread so awaiting this coroutine never stalls the event loop
+                # (the Hatchet worker loop, or FastAPI's). Same result, just
+                # non-blocking.
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
                     model=self.model_name,
                     contents=prompt,
                     config=config,

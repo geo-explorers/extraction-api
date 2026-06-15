@@ -17,7 +17,7 @@ from hatchet_sdk import RateLimitDuration
 
 from src.hatchet_client import hatchet
 from src.config.settings import settings
-from src.tasks.registry import all_tasks, SPECS
+from src.tasks.registry import all_tasks, task_names
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -42,7 +42,7 @@ def main() -> None:
     logger.info("Extraction Worker starting")
     logger.info(f"Hatchet host: {os.getenv('HATCHET_CLIENT_HOST_PORT', 'unset')}")
     logger.info(f"Worker slots: {settings.hatchet_worker_slots}")
-    logger.info(f"Registered task types: {[s.name for s in SPECS]}")
+    logger.info(f"Registered task types: {task_names()}")
     logger.info("=" * 80)
 
     _declare_rate_limits()

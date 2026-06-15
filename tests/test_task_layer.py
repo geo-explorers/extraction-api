@@ -15,23 +15,40 @@ def test_registry_builds_expected_tasks():
     assert get_task("ping") is not None
     assert get_task("news.extract_claims") is not None
     assert get_task("news.extract_claims_claude") is not None
+    assert get_task("podcast.extract_claims") is not None
     assert get_task("does.not.exist") is None
-    # All specs built into task objects.
-    assert len(all_tasks()) >= 3
+    assert len(all_tasks()) >= 4
 
 
-def test_registry_specs_carry_contract():
+def test_registry_entries_carry_contract():
     from src.tasks.registry import get_task
     from src.api.schemas.news_claim_extract_schema import (
         NewsClaimExtractRequest,
         NewsClaimExtractResponse,
     )
+    from src.tasks.podcast_extract_claims import (
+        PodcastExtractInput,
+        PodcastExtractResult,
+    )
 
-    entry = get_task("news.extract_claims")
-    assert entry.spec.input_model is NewsClaimExtractRequest
-    assert entry.spec.output_model is NewsClaimExtractResponse
-    assert entry.spec.rate_limit_key == "gemini_global"
-    assert get_task("news.extract_claims_claude").spec.rate_limit_key == "claude_global"
+    news = get_task("news.extract_claims")
+    assert news.input_model is NewsClaimExtractRequest
+    assert news.output_model is NewsClaimExtractResponse
+    assert news.runnable is not None
+
+    podcast = get_task("podcast.extract_claims")
+    assert podcast.input_model is PodcastExtractInput
+    assert podcast.output_model is PodcastExtractResult
+
+
+def test_news_specs_use_distinct_rate_limit_keys():
+    from src.tasks.news_extract_claims import (
+        NEWS_EXTRACT_CLAIMS_SPEC,
+        NEWS_EXTRACT_CLAIMS_CLAUDE_SPEC,
+    )
+
+    assert NEWS_EXTRACT_CLAIMS_SPEC.rate_limit_key == "gemini_global"
+    assert NEWS_EXTRACT_CLAIMS_CLAUDE_SPEC.rate_limit_key == "claude_global"
 
 
 def test_spend_guard_disabled_is_noop():
@@ -50,8 +67,38 @@ def test_spend_guard_trips_after_budget():
     guard.check_and_record("claude")
 
 
-def test_payload_cap_is_enforced_by_spec():
+def test_payload_cap_is_present():
     from src.tasks.registry import get_task
 
-    entry = get_task("news.extract_claims")
-    assert entry.spec.max_payload_bytes > 0
+    assert get_task("news.extract_claims").max_payload_bytes > 0
+    assert get_task("podcast.extract_claims").max_payload_bytes > 0
+
+
+def test_build_claim_topics_filters_and_orders():
+    from src.pipeline.premium_extraction_core import build_claim_topics, MIN_CLAIMS_PER_TOPIC
+
+    cwt = {
+        "Topic A": ["a1", "a2", "a3"],   # kept (>= MIN)
+        "Topic B": ["b1"],               # dropped (sparse)
+    }
+    ordered_topics, filtered, claim_topics, count = build_claim_topics(
+        ["Topic A", "Topic B"], cwt, episode_id=42
+    )
+    assert MIN_CLAIMS_PER_TOPIC == 3
+    assert ordered_topics == ["Topic A"]
+    assert "Topic B" not in filtered
+    assert count == 3
+    # claim_order is sequential starting at 1; episode_id stamped through.
+    assert [c.claim_order for c in claim_topics] == [1, 2, 3]
+    assert all(c.episode_id == 42 for c in claim_topics)
+
+
+def test_link_takeaways_resolves_claim_order():
+    from src.pipeline.premium_extraction_core import build_claim_topics, link_takeaways_to_claims
+
+    _, _, claim_topics, _ = build_claim_topics(
+        ["T"], {"T": ["claim one", "claim two", "claim three"]}, episode_id=1
+    )
+    links = link_takeaways_to_claims(["claim two", "unmatched takeaway"], claim_topics)
+    assert links[0].text == "claim two" and links[0].claim_order == 2
+    assert links[1].text == "unmatched takeaway" and links[1].claim_order is None
