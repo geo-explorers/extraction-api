@@ -69,5 +69,32 @@ missing token degrades only `/tasks`, not the whole API.
 - The SDK reads `HATCHET_CLIENT_*` from the environment; it decodes the token as a
   JWT at construction to derive endpoints, so a real token is required wherever the
   client is constructed (worker always; API only when the facade is used).
-- Local dev: run `hatchet-lite` via its docker-compose for a real token, or skip
-  the worker and exercise extraction through the existing sync HTTP endpoints.
+
+## Local dev (run the whole stack on your machine)
+
+```bash
+# 1. Start a local Hatchet engine (dashboard http://localhost:8888,
+#    login admin@example.com / Admin123!!)
+docker compose -f docker-compose.hatchet.yml up -d
+
+# 2. Generate a tenant API token (default seeded tenant id shown)
+docker compose -f docker-compose.hatchet.yml exec hatchet-lite \
+  /hatchet-admin token create --config /config \
+  --tenant-id 707d0855-80ab-4e1f-a156-f1c4546cbf52
+
+# 3. Run the worker (export the token from step 2 first)
+export HATCHET_CLIENT_TOKEN=<token>
+export HATCHET_CLIENT_HOST_PORT=localhost:7077
+export HATCHET_CLIENT_TLS_STRATEGY=none
+uv run python -m src.worker
+
+# 4. Enqueue via the facade (separate shell; API_KEY can be any local value)
+API_KEY=local-dev-key uv run python -m src.api.server   # then:
+curl -X POST localhost:8000/tasks -H 'X-API-Key: local-dev-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"ping","payload":{"message":"hi"}}'
+# poll: curl localhost:8000/tasks/<id> -H 'X-API-Key: local-dev-key'
+```
+
+Runs appear in the dashboard at http://localhost:8888. Tear down with
+`docker compose -f docker-compose.hatchet.yml down -v`.

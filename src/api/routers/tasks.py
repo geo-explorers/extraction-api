@@ -67,8 +67,10 @@ def enqueue_task(req: EnqueueRequest) -> dict:
 def get_task_status(run_id: str) -> dict:
     """Return the current status (and result/error when terminal) of a run.
 
-    NOTE: the hatchet.runs.* getter names are documentation-verified but were not
-    source-confirmed; validate this mapping during the Phase 1 live smoke test.
+    Mapping verified against hatchet-sdk's V1WorkflowRunDetails: `.run` carries
+    status (a V1TaskStatus enum), output (dict), and error_message. For DAG
+    workflows `run.output` holds the terminal task's output; per-step outputs
+    are available under `details.tasks` if needed later.
     """
     from src.hatchet_client import hatchet  # lazy
 
@@ -80,13 +82,13 @@ def get_task_status(run_id: str) -> dict:
             detail=f"Run {run_id} not found or unavailable: {e}",
         )
 
-    # Best-effort, defensive extraction — exact field shapes confirmed live.
-    run_status = getattr(details, "status", None)
-    output = getattr(details, "output", None)
-    error = getattr(details, "error", None)
+    run = details.run
+    run_status = getattr(run.status, "value", str(run.status))
     return {
         "id": run_id,
-        "status": str(run_status) if run_status is not None else "unknown",
-        "result": output,
-        "error": error,
+        "status": run_status,
+        "result": run.output or None,
+        "error": run.error_message or None,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
     }
