@@ -64,6 +64,31 @@ class Settings(BaseSettings):
         description="Google Gemini API key"
     )
 
+    # Hatchet worker.
+    # The Hatchet client reads HATCHET_CLIENT_TOKEN / HATCHET_CLIENT_HOST_PORT /
+    # HATCHET_CLIENT_TLS_STRATEGY directly from the environment (see .env.example).
+    hatchet_worker_slots: int = Field(
+        default=10,
+        description="Max concurrent task runs per worker (the provider rate limit is the real throttle)"
+    )
+    # Global provider rate limits (calls/min), enforced by Hatchet across ALL
+    # workers via static keys. Set below the true provider quota — Hatchet uses
+    # fixed windows, so leave headroom vs Gemini's sliding-window quota.
+    gemini_global_rate_per_min: int = Field(
+        default=100,
+        description="Global Gemini calls/min across all workers (Hatchet static key 'gemini_global')"
+    )
+    claude_global_rate_per_min: int = Field(
+        default=100,
+        description="Global Claude calls/min across all workers (Hatchet static key 'claude_global')"
+    )
+    # Spend circuit breaker: hard hourly ceiling on LLM calls per provider.
+    # 0 disables it. Distinct from the rate limiter — this caps total volume/$.
+    llm_max_calls_per_hour: int = Field(
+        default=0,
+        description="Per-provider hourly LLM call ceiling (0 = disabled). Backstop against runaway loops."
+    )
+
     # Gemini Guest/Keyword Extraction
     gemini_extraction_model: str = Field(
         default="gemini-2.5-flash",

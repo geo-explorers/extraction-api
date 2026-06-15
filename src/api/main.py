@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 import requests
 
-from src.api.routers import extraction, guest_extraction, host_extraction, keyword_extraction, media_keyword_extraction, claim_keyword_extraction, news_claim_extract
+from src.api.routers import extraction, guest_extraction, host_extraction, keyword_extraction, media_keyword_extraction, claim_keyword_extraction, news_claim_extract, tasks
 from src.api.exceptions import (
     database_exception_handler,
     generic_exception_handler,
@@ -112,6 +112,7 @@ app.include_router(keyword_extraction.router, prefix="/extract", tags=["keywords
 app.include_router(media_keyword_extraction.router, prefix="/extract", tags=["keywords"])
 app.include_router(claim_keyword_extraction.router, prefix="/extract", tags=["claim-keywords"])
 app.include_router(news_claim_extract.router, prefix="/extract", tags=["news-claim-extract"])
+app.include_router(tasks.router, tags=["tasks"])
 
 # Register exception handlers
 app.add_exception_handler(SQLAlchemyError, database_exception_handler)
