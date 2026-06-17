@@ -32,6 +32,14 @@ from src.tasks.podcast_extract_claims import (
     PodcastExtractResult,
     PODCAST_MAX_PAYLOAD_BYTES,
 )
+from src.tasks.news_extract_topics_and_claims import (
+    news_topics_and_claims_workflow,
+    NEWS_TOPICS_AND_CLAIMS_MAX_PAYLOAD_BYTES,
+)
+from src.api.schemas.news_topics_and_claims_schema import (
+    NewsTopicsAndClaimsRequest,
+    NewsTopicsAndClaimsResponse,
+)
 
 # Standalone single tasks, declared as TaskSpecs and built via build_task.
 _STANDALONE_SPECS: list[TaskSpec] = [
@@ -72,6 +80,13 @@ def _build_registry() -> dict[str, RegisteredTask]:
         output_model=PodcastExtractResult,
         max_payload_bytes=PODCAST_MAX_PAYLOAD_BYTES,
         runnable=podcast_workflow,
+    )
+    registry["news.extract_topics_and_claims"] = RegisteredTask(
+        name="news.extract_topics_and_claims",
+        input_model=NewsTopicsAndClaimsRequest,
+        output_model=NewsTopicsAndClaimsResponse,
+        max_payload_bytes=NEWS_TOPICS_AND_CLAIMS_MAX_PAYLOAD_BYTES,
+        runnable=news_topics_and_claims_workflow,
     )
     return registry
 

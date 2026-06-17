@@ -102,3 +102,62 @@ def test_link_takeaways_resolves_claim_order():
     links = link_takeaways_to_claims(["claim two", "unmatched takeaway"], claim_topics)
     assert links[0].text == "claim two" and links[0].claim_order == 2
     assert links[1].text == "unmatched takeaway" and links[1].claim_order is None
+
+
+def test_news_topics_and_claims_dag_registered():
+    from src.tasks.registry import get_task
+    from src.api.schemas.news_topics_and_claims_schema import (
+        NewsTopicsAndClaimsRequest,
+        NewsTopicsAndClaimsResponse,
+    )
+    from src.tasks.base import DEFAULT_MAX_PAYLOAD_BYTES
+
+    t = get_task("news.extract_topics_and_claims")
+    assert t is not None
+    assert t.input_model is NewsTopicsAndClaimsRequest
+    assert t.output_model is NewsTopicsAndClaimsResponse
+    assert t.runnable is not None
+    # The request carries NO pre-extracted topics — they are derived in-task.
+    assert "topics" not in NewsTopicsAndClaimsRequest.model_fields
+    # Uses the 5MB default cap, NOT podcast's larger transcript-specific cap.
+    assert t.max_payload_bytes == DEFAULT_MAX_PAYLOAD_BYTES
+
+
+def test_derive_topics_uses_distinct_claim_topics_in_first_seen_order():
+    from src.tasks.news_extract_topics_and_claims import _derive_topics
+
+    claims = [
+        {"topic": "Event"},
+        {"topic": "Causes"},
+        {"topic": "Event"},     # dup collapsed
+        {"topic": ""},          # blank skipped
+        {"topic": "Context"},
+    ]
+    # Step-1 labels are ignored when claims carry topics (the claim pass may have
+    # relabeled/added topics) — order follows first appearance in the claims.
+    assert _derive_topics(["StepOne"], claims) == ["Event", "Causes", "Context"]
+
+
+def test_derive_topics_falls_back_to_step1_when_no_claims():
+    from src.tasks.news_extract_topics_and_claims import _derive_topics
+
+    assert _derive_topics(["A", "B"], []) == ["A", "B"]
+
+
+def test_response_accepts_dumped_claim_result():
+    # finalize builds the response from extract_news_claims(...).model_dump(), so
+    # the response model must coerce those plain dicts back into typed rows.
+    from src.api.schemas.news_topics_and_claims_schema import NewsTopicsAndClaimsResponse
+    from src.api.schemas.news_claim_extract_schema import (
+        NewsClaimExtractResponse,
+        ExtractedClaim,
+    )
+
+    dumped = NewsClaimExtractResponse(
+        claims=[ExtractedClaim(text="t", topic="Event")],
+        summary="s",
+    ).model_dump()
+    resp = NewsTopicsAndClaimsResponse(topics=["Event"], **dumped)
+    assert resp.claims[0].topic == "Event"
+    assert resp.topics == ["Event"]
+    assert resp.summary == "s"
