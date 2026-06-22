@@ -1,5 +1,0 @@
-Baseline Quality Score: 65.8%
-Claims with Issues: 34.2%
-Date: 2025-10-25
-Model: qwen2.5:7b-instruct-q4_0
-Examples: 21

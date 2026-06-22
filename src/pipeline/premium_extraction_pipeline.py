@@ -20,7 +20,7 @@ Usage:
 """
 
 from dataclasses import dataclass
-from typing import List, cast, Optional
+from typing import cast, Optional
 import time
 
 from src.config.settings import settings
@@ -32,7 +32,8 @@ from src.database.claim_repository import ClaimRepository
 from src.database.tag_repository import TagRepository
 from src.preprocessing.transcript_parser import TranscriptParser
 from src.extraction.premium_claim_extractor import PremiumClaimExtractor
-from src.extraction.quote_finder import ClaimWithTopic
+from src.extraction.models import ClaimWithTopic
+from src.pipeline.premium_extraction_core import run_premium_extraction
 from src.infrastructure.embedding_service import EmbeddingService
 from src.infrastructure.logger import get_logger
 
@@ -101,132 +102,42 @@ class PremiumExtractionPipeline:
 
         logger.info(f"Starting PREMIUM pipeline for episode {episode_id}")
 
-        # Step 1: Load episode
+        # Step 1: Load episode (DB). Orchestration stays here; the extraction
+        # itself is delegated to the DB-free core so it can also run in a worker.
         episode = self._load_episode(episode_id)
         transcript, transcript_format = self._select_transcript(episode)
-        transcript_length = len(transcript)
-
         logger.info(
             f"Loaded episode {episode_id}: '{episode.name}' "
-            f"({transcript_length} chars, {transcript_format} format)"
+            f"({len(transcript)} chars, {transcript_format} format)"
         )
 
-        # Step 2: Parse transcript
-        logger.info("Step 1/5: Parsing transcript...")
-        parsed_transcript = self.parser.parse(transcript, format=transcript_format)
-        logger.info(f"  ✓ Parsed {len(parsed_transcript.segments)} segments")
-
-        logger.info("Step 2/5: Extracting topics of discussion...")
-        stage_start = time.time()
-        topics = await self.premium_extractor.extract_topics_of_discussion_from_episode(
+        # Steps 1-4: DB-free extraction core (parse -> topics -> claims -> takeaways)
+        core = await run_premium_extraction(
+            episode_id=episode_id,
             title=episode.name,
             description=episode.description,
-            full_transcript=parsed_transcript.full_text
+            transcript=transcript,
+            transcript_format=transcript_format,
+            parser=self.parser,
+            extractor=self.premium_extractor,
         )
-        extraction_time = time.time() - stage_start
-        topics_extracted = len(topics)
-        logger.info(f"  ✓ Extracted {topics_extracted} topics in {extraction_time:.1f}s")
-        if not topics:
-            logger.warning("No topics extracted, ending pipeline")
-            processing_time = time.time() - start_time
-            return PremiumPipelineResult(
-                episode_id=episode_id,
-                claims=[],
-                processing_time_seconds=processing_time,
-                claims_extracted=0,
-                model_used=settings.gemini_premium_model,
-                topic_of_discussion=[],
-                claim_with_topic={},
-                key_takeaways=[]
-            )
 
-
-        logger.info("Step 3/5: Extracting claims with topics...")
-        stage_start = time.time()
-        claims_with_topics = await self.premium_extractor.extract_claims_with_topics_from_transcript(
-            full_transcript=parsed_transcript.full_text,
-            topics_of_discussion=topics
-        )
-        extraction_time = time.time() - stage_start
-
-        claims_extracted = 0
-        for _, claimList in claims_with_topics.items():
-            claims_extracted += len(claimList)
-
-        logger.info(f"  ✓ Extracted {claims_extracted} claims in {extraction_time:.1f}s")
-
-        # Post-processing: Filter out topics with fewer than 3 claims
-        min_claims_per_topic = 3
-        filtered_claims_with_topics = {
-            topic: claims for topic, claims in claims_with_topics.items()
-            if len(claims) >= min_claims_per_topic
-        }
-
-        filtered_out_topics = len(claims_with_topics) - len(filtered_claims_with_topics)
-        filtered_out_claims = claims_extracted - sum(len(c) for c in filtered_claims_with_topics.values())
-
-        if filtered_out_topics > 0:
-            logger.info(
-                f"  Filtered out {filtered_out_topics} topics with <{min_claims_per_topic} claims "
-                f"({filtered_out_claims} claims removed)"
-            )
-
-        # Update variables to use filtered data
-        claims_with_topics = filtered_claims_with_topics
-        topics = [t for t in topics if t in claims_with_topics]
-        claims_extracted = sum(len(c) for c in claims_with_topics.values())
-
-        # Build claim_topics in LLM extraction order:
-        # - Topics are ordered as returned by the LLM (preserved in `topics` list)
-        # - Claims within each topic are in LLM extraction order
-        # - claim_order is assigned sequentially to preserve this order for frontend display
-        claim_topics: List[ClaimWithTopic] = []
-        claim_order = 1
-        for topic in topics:
-            claims = claims_with_topics.get(topic, [])
-            for claim in claims:
-                claim_topics.append(
-                    ClaimWithTopic(
-                        claim_text=claim,
-                        topic=topic,
-                        episode_id=episode_id,
-                        claim_order=claim_order
-                    )
-                )
-                claim_order += 1
-
-        if not claim_topics:
+        # No topics or no surviving claims: nothing to persist.
+        if not core.claims:
             logger.warning("No claims extracted, ending pipeline")
-            processing_time = time.time() - start_time
             return PremiumPipelineResult(
                 episode_id=episode_id,
                 claims=[],
-                processing_time_seconds=processing_time,
-                claims_extracted=0,
-                model_used=settings.gemini_premium_model,
-                topic_of_discussion=topics,
-                claim_with_topic={},
-                key_takeaways=[]
+                processing_time_seconds=time.time() - start_time,
+                claims_extracted=core.claims_extracted,
+                model_used=core.model_used,
+                topic_of_discussion=core.topic_of_discussion,
+                claim_with_topic=core.claim_with_topic,
+                key_takeaways=core.key_takeaways,
             )
 
-        logger.info("Step 4/5 Extract key takeaways...")
-        stage_start = time.time()
-
-        # Format claims_with_topics into a structured string for the LLM
-        # Each topic with its claims listed below it
-        formatted_topics_with_claims = []
-        for topic, claims in claims_with_topics.items():
-            topic_section = f"Topic: {topic}\n"
-            for claim in claims:
-                topic_section += f"- {claim}\n"
-            formatted_topics_with_claims.append(topic_section)
-        topics_with_claims_str = "\n".join(formatted_topics_with_claims)
-
-        key_takeaways = await self.premium_extractor.extract_key_takeaways_from_claims(
-            topics_with_claims=topics_with_claims_str
-        )
-        extraction_time = time.time() - stage_start
-        logger.info(f"  ✓ Extracted {len(key_takeaways)} key takeaways in {extraction_time:.1f}s")
+        claim_topics = core.claims
+        key_takeaways = core.key_takeaways
 
         if save_to_db:
             logger.info("Step 5/5: Saving results to database...")
@@ -330,11 +241,11 @@ class PremiumExtractionPipeline:
             episode_id=episode_id,
             claims=claim_topics,
             processing_time_seconds=processing_time,
-            claims_extracted=claims_extracted,
-            model_used=settings.gemini_premium_model,
-            topic_of_discussion=topics,
-            claim_with_topic=claims_with_topics,
-            key_takeaways=key_takeaways
+            claims_extracted=core.claims_extracted,
+            model_used=core.model_used,
+            topic_of_discussion=core.topic_of_discussion,
+            claim_with_topic=core.claim_with_topic,
+            key_takeaways=key_takeaways,
         )
 
     def _load_episode(self, episode_id: int) -> PodcastEpisode:

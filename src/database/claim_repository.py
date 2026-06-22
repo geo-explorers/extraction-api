@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from src.database.models import Claim, Quote, ClaimQuote, ClaimEpisode
-from src.extraction.quote_finder import ClaimWithTopic, Quote as ExtractedQuote
+from src.extraction.models import ClaimWithTopic, Quote as ExtractedQuote
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)

@@ -8,7 +8,6 @@ Usage:
     from src.config.settings import settings
 
     print(settings.database_url)
-    print(settings.ollama_url)
 """
 
 from pydantic import Field
@@ -28,139 +27,20 @@ class Settings(BaseSettings):
         description="PostgreSQL connection string",
     )
 
-    # Ollama
-    ollama_url: str = Field(
-        default="http://localhost:11434",
-        description="Ollama API endpoint for LLM operations (qwen)",
+    # Embeddings (optional; used by the premium pipeline when enabled)
+    enable_embeddings: bool = Field(
+        default=True,
+        description="Enable embedding generation and storage (disable for deployment without embedding service)"
     )
     ollama_embedding_url: str = Field(
         default="http://localhost:11435",
         description="Ollama API endpoint for embedding operations",
     )
-    ollama_model: str = Field(
-        default="qwen2.5:7b-instruct-q4_0",
-        description="LLM model for claim extraction and entailment",
-    )
     ollama_embedding_model: str = Field(
         default="nomic-embed-text", description="Embedding model (768 dimensions)"
     )
 
-    # Reranker
-    enable_reranker: bool = Field(
-        default=True, description="Enable reranker service for high-precision scoring"
-    )
-    reranker_url: str = Field(
-        default="http://localhost:8080", description="Reranker service endpoint"
-    )
-    reranker_timeout: int = Field(
-        default=5000, description="Reranker request timeout in milliseconds"
-    )
-
-    # Quote Processing
-    enable_quote_processing: bool = Field(
-        default=True,
-        description="Enable quote finding and entailment validation (disable for faster extraction without quotes)"
-    )
-
-    # Embeddings
-    enable_embeddings: bool = Field(
-        default=True,
-        description="Enable embedding generation and storage (disable for deployment without embedding service)"
-    )
-
-    # Chunking
-    chunk_size: int = Field(
-        default=16000, description="Maximum chunk size in characters"
-    )
-    chunk_overlap: int = Field(
-        default=1000, description="Overlap between chunks in characters"
-    )
-
-    # Processing (DSPy asyncify concurrency limits)
-    max_claim_extraction_concurrency: int = Field(
-        default=3,
-        description="Maximum concurrent claim extraction calls (DSPy asyncify)",
-    )
-    max_entailment_concurrency: int = Field(
-        default=10,
-        description="Maximum concurrent entailment validation calls (DSPy asyncify)",
-    )
-    max_ad_classification_concurrency: int = Field(
-        default=10,
-        description="Maximum concurrent ad classification calls (DSPy asyncify)",
-    )
-    ad_classification_batch_size: int = Field(
-        default=10,
-        description="Number of claims to classify per LLM call (true batching)",
-    )
-
-    # Claim Quality Filtering
-    enable_claim_specificity_filter: bool = Field(
-        default=True,
-        description="Enable specificity filtering (requires numbers, proper nouns, or dates)",
-    )
-    filter_lowercase_claims: bool = Field(
-        default=True,
-        description="Filter out claims that start with a lowercase letter",
-    )
-    max_claims_per_chunk: int = Field(
-        default=10,
-        description="Maximum claims to extract per chunk (limits dense content, keeps longest claims)",
-    )
-
-    # Ad Classification
-    filter_advertisement_claims: bool = Field(
-        default=True,
-        description="Enable advertisement claim filtering in extraction pipeline",
-    )
-    ad_classifier_model_path: str = Field(
-        default="models/ad_classifier_v1.json",
-        description="Path to trained ad classification model",
-    )
-    ad_classification_threshold: float = Field(
-        default=0.7, description="Minimum confidence to classify claim as advertisement"
-    )
-
-    # DSPy Model Paths
-    claim_extractor_model_path: str = Field(
-        default="models/claim_extractor_llm_judge_v1.json",
-        description="Path to trained claim extraction model",
-    )
-    entailment_validator_model_path: str = Field(
-        default="models/entailment_validator_v1.json",
-        description="Path to trained entailment validation model",
-    )
-
-    # Deduplication Thresholds
-    enable_cross_episode_deduplication: bool = Field(
-        default=True,
-        description="Enable cross-episode claim deduplication via database similarity search"
-    )
-    embedding_similarity_threshold: float = Field(
-        default=0.85, description="Cosine similarity threshold for claim deduplication"
-    )
-    reranker_verification_threshold: float = Field(
-        default=0.9, description="Reranker score threshold for duplicate verification"
-    )
-    string_similarity_threshold: float = Field(
-        default=0.95, description="Jaccard similarity threshold for quote deduplication"
-    )
-    vector_distance_threshold: float = Field(
-        default=0.15, description="pgvector L2 distance threshold for database search"
-    )
-
-    # Scoring
-    min_confidence: float = Field(
-        default=0.3, description="Minimum confidence score to save claims"
-    )
-    max_quotes_per_claim: int = Field(
-        default=10, description="Maximum number of quotes to link per claim"
-    )
-    min_quote_relevance: float = Field(
-        default=0.85, description="Minimum relevance score to link quote to claim"
-    )
-
-    # Caching
+    # Caching (embedding service LRU cache)
     cache_max_size: int = Field(
         default=10000, description="Maximum number of entries in LRU caches"
     )
@@ -174,36 +54,39 @@ class Settings(BaseSettings):
     )
     log_file: str = Field(default="logs/extraction.log", description="Log file path")
 
-    # MIPROv2 Optimization (optional cloud model for instruction proposal)
-    mipro_prompt_model: str | None = Field(
-        default=None,
-        description="Anthropic model for MIPROv2 instruction proposal (e.g., 'anthropic/claude-3-5-sonnet-20241022')"
-    )
+    # API keys for LLM providers
     anthropic_api_key: str | None = Field(
         default=None,
         description="Anthropic API key for Claude models"
     )
-
-    # Gemini Claim Validation
     gemini_api_key: str | None = Field(
         default=None,
-        description="Google Gemini API key for claim validation"
+        description="Google Gemini API key"
     )
-    gemini_model: str = Field(
-        default="gemini-2.0-flash-exp",
-        description="Gemini model for claim validation (gemini-2.0-flash-exp recommended)"
+
+    # Hatchet worker.
+    # The Hatchet client reads HATCHET_CLIENT_TOKEN / HATCHET_CLIENT_HOST_PORT /
+    # HATCHET_CLIENT_TLS_STRATEGY directly from the environment (see .env.example).
+    hatchet_worker_slots: int = Field(
+        default=10,
+        description="Max concurrent task runs per worker (the provider rate limit is the real throttle)"
     )
-    gemini_validation_batch_size: int = Field(
-        default=50,
-        description="Number of claims to validate per Gemini API call"
+    # Global provider rate limits (calls/min), enforced by Hatchet across ALL
+    # workers via static keys. Set below the true provider quota — Hatchet uses
+    # fixed windows, so leave headroom vs Gemini's sliding-window quota.
+    gemini_global_rate_per_min: int = Field(
+        default=100,
+        description="Global Gemini calls/min across all workers (Hatchet static key 'gemini_global')"
     )
-    gemini_timeout: int = Field(
-        default=30,
-        description="Gemini API request timeout in seconds"
+    claude_global_rate_per_min: int = Field(
+        default=100,
+        description="Global Claude calls/min across all workers (Hatchet static key 'claude_global')"
     )
-    min_claims_for_validation: int = Field(
-        default=5,
-        description="Minimum number of unverified claims an episode must have to be eligible for validation"
+    # Spend circuit breaker: hard hourly ceiling on LLM calls per provider.
+    # 0 disables it. Distinct from the rate limiter — this caps total volume/$.
+    llm_max_calls_per_hour: int = Field(
+        default=0,
+        description="Per-provider hourly LLM call ceiling (0 = disabled). Backstop against runaway loops."
     )
 
     # Gemini Guest/Keyword Extraction

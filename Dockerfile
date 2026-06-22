@@ -16,8 +16,8 @@ ENV PATH="/root/.local/bin:$PATH"
 # Copy project files
 COPY . /app/
 
-# Install Python dependencies
-RUN uv sync --frozen
+# Install Python dependencies (production only — skip dev group)
+RUN uv sync --frozen --no-dev
 
 # Create logs directory
 RUN mkdir -p /app/logs

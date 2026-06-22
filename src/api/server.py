@@ -10,7 +10,7 @@ def main():
         "src.api.main:app",
         host=settings.api_host,
         port=settings.port,
-        reload=True,  # Set to True for development
+        reload=False,  # Set to True for local development only
         log_level="info",
         timeout_keep_alive=settings.api_timeout,
     )
