@@ -1,0 +1,138 @@
+# Production Hatchet (FULL self-hosted stack) + extraction worker — portable IaC.
+#
+# Adapted from Hatchet's official self-host compose
+# (https://docs.hatchet.run/self-hosting/docker-compose), hardened for prod:
+#   - Postgres as the message broker (SERVER_MSGQUEUE_KIND=postgres) — RabbitMQ removed
+#   - pinned image tags via ${HATCHET_VERSION}; signup disabled; admin seeded via ADMIN_*
+#   - persistent volumes (Postgres = task state; hatchet_config = keysets — back BOTH up)
+#   - extraction-worker (same image as extraction-api; only the command differs) w/ 600s drain
+#
+# Service config lives in the file `setup-config` generates into hatchet_config;
+# engine + dashboard read it (so their env stays minimal, matching upstream).
+# Runs on any Docker host (a VM, or Railway compose). Secrets via .env (gitignored).
+# Bring-up + token bootstrap: see README.md.
+
+name: hatchet-prod
+
+x-hatchet-db: &hatchet-db
+  DATABASE_URL: "postgres://${HATCHET_PG_USER}:${HATCHET_PG_PASSWORD}@postgres:5432/${HATCHET_PG_DB}"
+
+services:
+  postgres:
+    image: postgres:${HATCHET_PG_TAG:-15.6}
+    command: postgres -c 'max_connections=1000'
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${HATCHET_PG_USER}
+      POSTGRES_PASSWORD: ${HATCHET_PG_PASSWORD}
+      POSTGRES_DB: ${HATCHET_PG_DB}
+    volumes:
+      - hatchet_postgres_data:/var/lib/postgresql/data   # internal only — not exposed to the host
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d ${HATCHET_PG_DB} -U ${HATCHET_PG_USER}"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  # One-shot: create/upgrade the Hatchet DB schema.
+  migration:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-migrate:${HATCHET_VERSION}
+    command: /hatchet/hatchet-migrate
+    restart: on-failure
+    environment:
+      <<: *hatchet-db
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # One-shot: generate config + keysets into hatchet_config (skips TLS certs → insecure gRPC
+  # on the private network). All server config is set HERE and baked into the config file.
+  setup-config:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-admin:${HATCHET_VERSION}
+    command: /hatchet/hatchet-admin quickstart --skip certs --generated-config-dir /hatchet/config --overwrite=false
+    environment:
+      <<: *hatchet-db
+      SERVER_MSGQUEUE_KIND: "postgres"                    # Postgres broker — RabbitMQ removed
+      SERVER_AUTH_COOKIE_DOMAIN: ${HATCHET_COOKIE_DOMAIN}
+      SERVER_AUTH_COOKIE_INSECURE: ${HATCHET_COOKIE_INSECURE:-f}
+      SERVER_AUTH_COOKIE_SECRETS: ${HATCHET_COOKIE_SECRETS}
+      SERVER_AUTH_SET_EMAIL_VERIFIED: "t"
+      SERVER_ALLOW_SIGNUP: "false"                        # PROD: lock the dashboard down
+      ADMIN_EMAIL: ${HATCHET_ADMIN_EMAIL}                 # seeded admin (replaces admin@example.com)
+      ADMIN_PASSWORD: ${HATCHET_ADMIN_PASSWORD}
+      ADMIN_NAME: ${HATCHET_ADMIN_NAME:-Admin}
+      SERVER_URL: ${HATCHET_SERVER_URL}
+      SERVER_GRPC_BIND_ADDRESS: "0.0.0.0"
+      SERVER_GRPC_INSECURE: "t"                           # OK on a private net; keep :7077 private
+      SERVER_GRPC_BROADCAST_ADDRESS: ${HATCHET_GRPC_BROADCAST}   # what clients dial (default hatchet-engine:7070)
+      SERVER_INTERNAL_CLIENT_INTERNAL_GRPC_BROADCAST_ADDRESS: hatchet-engine:7070
+      SERVER_DEFAULT_ENGINE_VERSION: "V1"
+    volumes:
+      - hatchet_certs:/hatchet/certs
+      - hatchet_config:/hatchet/config
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  hatchet-engine:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-engine:${HATCHET_VERSION}
+    command: /hatchet/hatchet-engine --config /hatchet/config
+    restart: unless-stopped
+    depends_on:
+      setup-config:
+        condition: service_completed_successfully
+    ports:
+      - "${HATCHET_GRPC_PORT:-7077}:7070"   # keep on the PRIVATE network only
+    environment:
+      <<: *hatchet-db
+      SERVER_GRPC_BIND_ADDRESS: "0.0.0.0"
+      SERVER_GRPC_INSECURE: "t"
+    volumes:
+      - hatchet_certs:/hatchet/certs
+      - hatchet_config:/hatchet/config
+
+  hatchet-dashboard:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-dashboard:${HATCHET_VERSION}
+    command: sh ./entrypoint.sh --config /hatchet/config
+    restart: unless-stopped
+    depends_on:
+      setup-config:
+        condition: service_completed_successfully
+    ports:
+      - "${HATCHET_DASHBOARD_PORT:-8080}:80"   # front with an authenticated/TLS proxy
+    environment:
+      <<: *hatchet-db
+    volumes:
+      - hatchet_certs:/hatchet/certs
+      - hatchet_config:/hatchet/config
+
+  extraction-worker:
+    build:
+      context: ../..              # extraction-api repo root
+      dockerfile: Dockerfile
+    image: extraction-api:${EXTRACTION_API_TAG:-latest}
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "src.worker"]
+    stop_grace_period: 600s        # drain in-flight tasks before SIGKILL
+    depends_on:
+      hatchet-engine:
+        condition: service_started
+    environment:
+      HATCHET_CLIENT_TOKEN: ${HATCHET_CLIENT_TOKEN}          # from ./gen-token.sh (post-boot)
+      HATCHET_CLIENT_HOST_PORT: ${HATCHET_GRPC_BROADCAST}    # dials the engine (default hatchet-engine:7070)
+      HATCHET_CLIENT_TLS_STRATEGY: none
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GEMINI_GLOBAL_RATE_PER_MIN: ${GEMINI_GLOBAL_RATE_PER_MIN:-100}
+      CLAUDE_GLOBAL_RATE_PER_MIN: ${CLAUDE_GLOBAL_RATE_PER_MIN:-100}
+      HATCHET_WORKER_SLOTS: ${HATCHET_WORKER_SLOTS:-10}
+      LLM_MAX_CALLS_PER_HOUR: ${LLM_MAX_CALLS_PER_HOUR:-0}
+      # NO DATABASE_URL — the worker is stateless.
+
+volumes:
+  hatchet_postgres_data:   # task state + tenant — PERSIST + back up
+  hatchet_config:          # generated config + keysets — PERSIST + back up (losing it invalidates tokens)
+  hatchet_certs:           # empty with `--skip certs`; mounted for parity
