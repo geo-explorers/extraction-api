@@ -178,6 +178,21 @@ class Settings(BaseSettings):
         description="API key for authentication (X-API-Key header)"
     )
 
+    # Podcast publishing (postgres_to_geo "Export API").
+    # The podcast.export task forwards to this service's POST /api/export. In
+    # prod this MUST be the *.railway.internal address: a synchronous publish
+    # runs ~25 min, and only Railway's private network (no L7 edge proxy) lets a
+    # connection idle that long without a 502. The public *.up.railway.app URL
+    # would still time out.
+    postgrestogeo_url: str = Field(
+        default="http://localhost:3000",
+        description="Base URL of the postgres_to_geo export service (prod: http://postgrestogeo.railway.internal:3000)"
+    )
+    postgrestogeo_api_key: str | None = Field(
+        default=None,
+        description="X-API-Key for the postgres_to_geo /api/export endpoint"
+    )
+
 
 # Global settings instance
 settings = Settings()

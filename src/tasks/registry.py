@@ -26,6 +26,7 @@ from src.tasks.news_extract_claims import (
 from src.tasks.keyword_extract import KEYWORD_EXTRACT_SPEC
 from src.tasks.guest_extract import GUEST_EXTRACT_SPEC
 from src.tasks.host_extract import HOST_EXTRACT_SPEC
+from src.tasks.podcast_export import PODCAST_EXPORT_SPEC
 from src.tasks.news_extract_topics_and_entities import (
     NEWS_EXTRACT_TOPICS_AND_ENTITIES_SPEC,
 )
@@ -53,6 +54,7 @@ _STANDALONE_SPECS: list[TaskSpec] = [
     GUEST_EXTRACT_SPEC,
     HOST_EXTRACT_SPEC,
     NEWS_EXTRACT_TOPICS_AND_ENTITIES_SPEC,
+    PODCAST_EXPORT_SPEC,
 ]
 
 
