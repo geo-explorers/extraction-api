@@ -144,6 +144,115 @@ def test_derive_topics_falls_back_to_step1_when_no_claims():
     assert _derive_topics(["A", "B"], []) == ["A", "B"]
 
 
+def test_podcast_export_registered_with_contract():
+    from src.tasks.registry import get_task
+    from src.api.schemas.podcast_export_schema import (
+        PodcastExportRequest,
+        PodcastExportResult,
+    )
+
+    t = get_task("podcast.export")
+    assert t is not None
+    assert t.input_model is PodcastExportRequest
+    assert t.output_model is PodcastExportResult
+    assert t.runnable is not None
+
+
+def test_podcast_export_spec_is_single_consumer_no_retry():
+    from datetime import timedelta
+    from src.tasks.podcast_export import PODCAST_EXPORT_SPEC
+
+    # concurrency=1 makes it a single-consumer queue; retries=0 because the
+    # downstream publish is non-idempotent and must never auto-retry.
+    assert PODCAST_EXPORT_SPEC.concurrency == 1
+    assert PODCAST_EXPORT_SPEC.retries == 0
+    assert PODCAST_EXPORT_SPEC.rate_limit_key is None
+    assert PODCAST_EXPORT_SPEC.execution_timeout == timedelta(minutes=40)
+
+
+def test_concurrency_threads_into_build_task_kwargs(monkeypatch):
+    # build_task must forward `concurrency` to the Hatchet decorator only when set.
+    import src.tasks.base as base
+
+    captured = {}
+
+    def fake_task(**kwargs):
+        captured.update(kwargs)
+        def _decorator(fn):
+            return fn
+        return _decorator
+
+    monkeypatch.setattr(base.hatchet, "task", fake_task)
+
+    async def _h(inp, ctx):  # pragma: no cover - never called
+        return inp
+
+    from pydantic import BaseModel
+
+    class _In(BaseModel):
+        x: int = 0
+
+    base.build_task(base.TaskSpec(
+        name="t.with_conc", input_model=_In, output_model=_In, handler=_h, concurrency=1
+    ))
+    assert captured.get("concurrency") == 1
+
+    captured.clear()
+    base.build_task(base.TaskSpec(
+        name="t.without_conc", input_model=_In, output_model=_In, handler=_h
+    ))
+    assert "concurrency" not in captured  # omitted when None
+
+
+def test_podcast_export_handler_forwards_and_maps_response(monkeypatch):
+    import asyncio
+    import src.tasks.podcast_export as pe
+    from src.api.schemas.podcast_export_schema import PodcastExportRequest
+
+    monkeypatch.setattr(pe.settings, "postgrestogeo_url", "http://stub:3000")
+    monkeypatch.setattr(pe.settings, "postgrestogeo_api_key", "secret-key")
+
+    calls = {}
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "success": True,
+                "message": "ok",
+                "data": {"episodes_processed": 3, "ops_created": 7, "duration_ms": 1234},
+            }
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls.update(url=url, json=json, headers=headers, timeout=timeout)
+        return _FakeResp()
+
+    monkeypatch.setattr(pe.requests, "post", fake_post)
+
+    req = PodcastExportRequest(
+        podcast_name=["Bankless"], limit=5, num_episodes=10, date_filter="2020-01-01"
+    )
+    result = asyncio.run(pe._handle(req, ctx=None))
+
+    # Forwarded to the private /api/export with auth + verbatim body.
+    assert calls["url"] == "http://stub:3000/api/export"
+    assert calls["headers"]["X-API-Key"] == "secret-key"
+    assert calls["json"] == {
+        "podcast_name": ["Bankless"],
+        "limit": 5,
+        "num_episodes": 10,
+        "date_filter": "2020-01-01",
+    }
+    # Response `data` block mapped onto the flat result.
+    assert result.success is True
+    assert result.episodes_processed == 3
+    assert result.ops_created == 7
+    assert result.duration_ms == 1234
+    assert result.message == "ok"
+
+
 def test_response_accepts_dumped_claim_result():
     # finalize builds the response from extract_news_claims(...).model_dump(), so
     # the response model must coerce those plain dicts back into typed rows.

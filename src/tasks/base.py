@@ -39,6 +39,12 @@ class TaskSpec(Generic[TIn, TOut]):
     backoff_max_seconds: int = 60
     execution_timeout: timedelta = timedelta(minutes=10)
     max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES
+    # Engine-enforced ceiling on concurrent runs of this task type (global,
+    # across all workers). An int N is passed straight to Hatchet as a constant
+    # limit with the GROUP_ROUND_ROBIN strategy: at most N run at once and the
+    # rest QUEUE (they are not cancelled and not rejected). `concurrency=1` makes
+    # the type a single-consumer queue. None leaves it unlimited.
+    concurrency: Optional[int] = None
 
 
 def build_task(spec: TaskSpec):
@@ -56,6 +62,8 @@ def build_task(spec: TaskSpec):
         "backoff_max_seconds": spec.backoff_max_seconds,
         "execution_timeout": spec.execution_timeout,
     }
+    if spec.concurrency is not None:
+        kwargs["concurrency"] = spec.concurrency
     if spec.rate_limit_key:
         kwargs["rate_limits"] = [
             RateLimit(static_key=spec.rate_limit_key, units=spec.rate_limit_units)

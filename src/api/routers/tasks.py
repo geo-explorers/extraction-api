@@ -63,6 +63,44 @@ def enqueue_task(req: EnqueueRequest) -> dict:
     return {"id": ref.workflow_run_id, "type": req.type, "status": "queued"}
 
 
+@router.get("/stats")
+def task_stats(type: str) -> dict:
+    """Active-run counts for a task type: how many are QUEUED vs RUNNING.
+
+    The export consumer polls this to alert when the single-consumer
+    `podcast.export` queue backs up (publish slower than its trigger cadence).
+    Counts the type's currently-active runs from the last 24h (the engine's
+    default window; an export's 40-min timeout keeps live runs well inside it).
+
+    NOTE: declared BEFORE `GET /{run_id}` so the literal `/stats` path is not
+    captured as a run id.
+    """
+    from src.hatchet_client import hatchet  # lazy
+    from hatchet_sdk import V1TaskStatus
+
+    try:
+        summary = hatchet.runs.list(
+            statuses=[V1TaskStatus.QUEUED, V1TaskStatus.RUNNING]
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Could not list runs: {e}",
+        )
+
+    queued = running = 0
+    for row in summary.rows:
+        name = row.workflow_name or row.display_name or ""
+        if name != type and not name.startswith(type):
+            continue
+        st = getattr(row.status, "value", str(row.status))
+        if st == "QUEUED":
+            queued += 1
+        elif st == "RUNNING":
+            running += 1
+    return {"type": type, "queued": queued, "running": running}
+
+
 @router.get("/{run_id}")
 def get_task_status(run_id: str) -> dict:
     """Return the current status (and result/error when terminal) of a run.
