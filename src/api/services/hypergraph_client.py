@@ -1,25 +1,33 @@
 """Read-side client for the Geo/Hypergraph knowledge graph (GraphQL).
 
 A headless Hatchet worker cannot use the HyperGraph MCP, so it queries the Geo
-GraphQL API directly over HTTP. Endpoint + query shapes match the geo-explorers
-reference code (postgres_to_geo, spreadsheet-to-geo, geo_tech_demo):
+GraphQL API directly over HTTP. Endpoint + robustness patterns are grounded in
+the geo-explorers publishing code (postgres_to_geo), verified live against
+https://testnet-api.geobrowser.io/graphql (mainnet: https://api.geobrowser.io/graphql).
+Reads are UNAUTHENTICATED.
 
-  * Endpoint: https://testnet-api.geobrowser.io/graphql (mainnet:
-    https://api.geobrowser.io/graphql). Reads are UNAUTHENTICATED.
-  * A space's human name/description live on ``space(id){ page { name description } }``.
-    There is no "list all spaces" query, so canonical spaces are resolved by id
-    (aliased into a single request).
-  * Entities are read with the ``entities(typeId, spaceId, first)`` list query,
-    which returns ``id name description spaceIds types { id name }``. The type
-    filter is a Geo *type entity id* (32-hex), not a type name.
+Design notes:
+  * Canonical spaces are the **subspaces of the Geo root space**, fetched
+    dynamically via `subspaces(condition:{parentSpaceId})` -> `childSpaceId`, then
+    resolved to name/description via `spaces(filter:{id:{in}}){ page {...} }`.
+    (No hardcoded list of space ids.)
+  * Entities are read with the `entitiesConnection` cursor-paginated query using
+    the `typeId`/`spaceId` shortcut args, selecting `types { id name }` directly
+    (avoids the silent 100-cap on generic `relations`, see postgres_to_geo PR #13).
+  * `_post` mirrors postgres_to_geo's `fetchWithRetry` (PRs #10/#11): 5 retries,
+    exponential backoff + jitter, retry on network errors / 429 / 502 / 503 / 504
+    and on HTTP-200 responses carrying GraphQL errors with null `data` (a
+    transient the indexer emits under load).
+  * Bulk fetch mirrors `searchEntities` (PR #14): a descending page-size ladder
+    retried on a truncation error, a `totalCount` guard against silent
+    under-fetching, and a 200ms inter-page throttle.
 
-Two generic reads:
-  * fetch_spaces   — canonical spaces (+ detail) for the assignment vocabulary
-  * fetch_entities — entities of a Geo type id, parameterized by type_id + query
-
-Engine-agnostic (no Hatchet import). The ``requests`` calls are blocking, so
-callers on an event loop offload via ``asyncio.to_thread``.
+Engine-agnostic (no Hatchet import). The blocking calls are offloaded by callers
+via ``asyncio.to_thread``.
 """
+
+import random
+import time
 
 import requests
 
@@ -29,93 +37,139 @@ from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
 
-_HTTP_TIMEOUT = (10, 120)  # (connect, read) seconds
+# HTTP + retry policy (mirrors postgres_to_geo fetchWithRetry).
+_CONNECT_TIMEOUT = 10
+_READ_TIMEOUT = 30
+_RETRIES = 5
+_BASE_DELAY = 1.0
+_RETRYABLE_STATUS = {429, 502, 503, 504}
 
-# Default canonical spaces (Geo space ids, 32-hex) used when the caller passes
-# none and GEO_CANONICAL_SPACE_IDS is unset. Sourced from the live Geo graph.
-_DEFAULT_CANONICAL_SPACE_IDS = [
-    "a19c345ab9866679b001d7d2138d88a1",  # Geo
-    "41e851610e13a19441c4d980f2f2ce6b",  # AI
-    "c9f267dcb0d270718c2a3c45a64afd32",  # Crypto
-    "52c7ae149838b6d47ce0f3b2a5974546",  # Health
-    "d69608290513c2a91102c939b3265bd7",  # Industries
-    "870e3b3068661e6280fad2ab456829bc",  # Technology
-    "9b611b848b12491b9b6b43f3cf019b8b",  # Software
-    "720eb279c64d56735dccd17a2a416ba2",  # Geo Education
-    "5d3e53b46f2dd38caa231ccc763212f5",  # Healthcare
-    "b5a31f8182b042437ede0f84ee02f104",  # Podcast App
-]
+# Bulk entity fetch controls (mirrors searchEntities).
+_FALLBACK_PAGE_SIZES = [500, 250, 100]
+_PAGE_THROTTLE_SECONDS = 0.2
+_SAFETY_MAX_ENTITIES = 50_000
 
-# The `entities` list query with the top-level typeId/spaceId shortcut args.
-# `types { id name }` gives human-readable type names for the LLM + the sheet.
-_ENTITIES_QUERY = """
-query Entities($typeId: UUID, $spaceId: UUID, $first: Int!) {
-  entities(typeId: $typeId, spaceId: $spaceId, first: $first) {
+
+_SUBSPACES_QUERY = """
+query RootSubspaces($parentSpaceId: UUID!, $first: Int!) {
+  subspaces(condition: { parentSpaceId: $parentSpaceId }, first: $first) {
+    childSpaceId
+  }
+}
+"""
+
+_SPACES_BY_ID_QUERY = """
+query SpacesById($ids: [UUID!]) {
+  spaces(filter: { id: { in: $ids } }) {
     id
-    name
-    description
-    spaceIds
-    types { id name }
+    page { name description }
+  }
+}
+"""
+
+_ENTITIES_QUERY = """
+query Entities($typeId: UUID, $spaceId: UUID, $first: Int!, $after: Cursor) {
+  entitiesConnection(typeId: $typeId, spaceId: $spaceId, first: $first, after: $after) {
+    totalCount
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id
+      name
+      description
+      spaceIds
+      types { id name }
+    }
   }
 }
 """
 
 
 def _post(query: str, variables: dict) -> dict:
-    """POST a GraphQL query and return the ``data`` object, raising on transport
-    or GraphQL-level errors. Reads are unauthenticated; a key is sent only if one
-    is explicitly configured."""
+    """POST a GraphQL query with retries; return the ``data`` object.
+
+    Retries transient failures (network errors, 429/502/503/504, and HTTP-200
+    responses carrying GraphQL errors with null ``data``) with exponential
+    backoff + jitter. GraphQL errors that arrive WITH data are non-transient and
+    raised immediately.
+    """
     headers = {"Content-Type": "application/json"}
     if settings.hypergraph_api_key:
         headers["Authorization"] = f"Bearer {settings.hypergraph_api_key}"
-    resp = requests.post(
-        settings.hypergraph_graphql_url,
-        json={"query": query, "variables": variables},
-        headers=headers,
-        timeout=_HTTP_TIMEOUT,
+
+    last_error: Exception | None = None
+    for attempt in range(_RETRIES):
+        try:
+            resp = requests.post(
+                settings.hypergraph_graphql_url,
+                json={"query": query, "variables": variables},
+                headers=headers,
+                timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
+            )
+            if resp.status_code == 200:
+                body = resp.json()
+                errors = body.get("errors")
+                if errors and body.get("data") is None:
+                    last_error = RuntimeError(f"Geo GraphQL transient (null data): {errors}")
+                elif errors:
+                    raise RuntimeError(f"Geo GraphQL errors: {errors}")
+                else:
+                    return body.get("data") or {}
+            elif resp.status_code in _RETRYABLE_STATUS:
+                last_error = RuntimeError(f"Geo GraphQL HTTP {resp.status_code}")
+            else:
+                resp.raise_for_status()
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_error = e
+
+        if attempt < _RETRIES - 1:
+            delay = _BASE_DELAY * (2 ** attempt) * (0.5 + random.random() * 0.5)
+            logger.warning(
+                f"Geo GraphQL retry {attempt + 1}/{_RETRIES - 1} in {delay:.1f}s: {last_error}"
+            )
+            time.sleep(delay)
+
+    raise last_error or RuntimeError("Geo GraphQL request failed")
+
+
+# --- Spaces (canonical = subspaces of root) ----------------------------------
+
+
+def resolve_canonical_space_ids() -> list[str]:
+    """The default canonical space ids: an explicit GEO_CANONICAL_SPACE_IDS
+    override if set, otherwise the **subspaces of the Geo root space**, fetched
+    dynamically (no hardcoded list)."""
+    override = settings.geo_canonical_space_ids
+    if override:
+        return [s.strip() for s in override.split(",") if s.strip()]
+    data = _post(
+        _SUBSPACES_QUERY,
+        {"parentSpaceId": settings.geo_root_space_id, "first": 500},
     )
-    resp.raise_for_status()
-    body = resp.json()
-    if body.get("errors"):
-        raise RuntimeError(f"Geo GraphQL errors: {body['errors']}")
-    return body.get("data") or {}
-
-
-def canonical_space_ids() -> list[str]:
-    """The default set of canonical space ids: GEO_CANONICAL_SPACE_IDS
-    (comma-separated) when set, else the built-in default set."""
-    raw = settings.geo_canonical_space_ids
-    if raw:
-        return [s.strip() for s in raw.split(",") if s.strip()]
-    return list(_DEFAULT_CANONICAL_SPACE_IDS)
-
-
-def build_spaces_query(ids: list[str]) -> str:
-    """Build a single request that aliases one ``space(id)`` selection per id
-    (there is no list-all-spaces query on the Geo API). Pure — no I/O."""
-    parts = [
-        f'  s{i}: space(id: "{sid}") {{ id page {{ name description }} }}'
-        for i, sid in enumerate(ids)
+    ids = [
+        r["childSpaceId"]
+        for r in (data.get("subspaces") or [])
+        if r.get("childSpaceId")
     ]
-    return "query Spaces {\n" + "\n".join(parts) + "\n}"
+    logger.info(
+        f"canonical spaces = {len(ids)} subspaces of root {settings.geo_root_space_id}"
+    )
+    return ids
 
 
 def fetch_spaces(space_ids: list[str] | None = None) -> list[Space]:
-    """Fetch canonical spaces (name + description from each space's ``page``).
-    When ``space_ids`` is None, the configured canonical set is used."""
-    ids = space_ids or canonical_space_ids()
+    """Fetch spaces (name + description) for the assignment vocabulary. When
+    ``space_ids`` is None, the canonical set = subspaces of the Geo root space
+    (resolved dynamically)."""
+    ids = space_ids if space_ids is not None else resolve_canonical_space_ids()
     if not ids:
         return []
-    data = _post(build_spaces_query(ids), {})
+    data = _post(_SPACES_BY_ID_QUERY, {"ids": ids})
     out: list[Space] = []
-    for i, sid in enumerate(ids):
-        node = data.get(f"s{i}")
-        if not node:
-            continue  # unknown / missing space id
-        page = node.get("page") or {}
+    for s in data.get("spaces") or []:
+        page = s.get("page") or {}
         out.append(
             Space(
-                id=str(node.get("id") or sid),
+                id=str(s["id"]),
                 name=page.get("name") or "",
                 description=page.get("description") or "",
             )
@@ -124,38 +178,109 @@ def fetch_spaces(space_ids: list[str] | None = None) -> list[Space]:
     return out
 
 
-def build_entities_variables(type_id: str, query: EntityQuery | None = None) -> dict:
-    """Build the GraphQL variables for an entity read. Pure (no I/O), so it is
+# --- Entities (cursor-paginated) ---------------------------------------------
+
+
+def build_entities_variables(
+    type_id: str, query: EntityQuery | None = None, after: str | None = None
+) -> dict:
+    """Build the GraphQL variables for one entities page. Pure (no I/O), so it is
     unit-testable: the same key shape for every ``type_id``."""
     q = query or EntityQuery()
-    return {"typeId": type_id, "spaceId": q.space_id, "first": q.limit}
+    return {
+        "typeId": type_id,
+        "spaceId": q.space_id,
+        "first": q.page_size,
+        "after": after,
+    }
+
+
+def _entity_from_node(node: dict, type_id: str) -> Entity:
+    types = node.get("types") or []
+    # Dedup type names while preserving order (an entity can carry the same type
+    # via several relations).
+    type_names: list[str] = []
+    for t in types:
+        n = t.get("name")
+        if n and n not in type_names:
+            type_names.append(n)
+    return Entity(
+        id=str(node["id"]),
+        name=node.get("name") or "",
+        description=node.get("description") or "",
+        type=", ".join(type_names),
+        type_ids=[t["id"] for t in types if t.get("id")],
+        space_ids=node.get("spaceIds") or [],
+    )
+
+
+def _page_size_ladder(start: int) -> list[int]:
+    """The starting page size, then the standard smaller fallbacks below it. The
+    whole fetch is retried at the next smaller size on a truncation error (the
+    indexer is more reliable at smaller pages under load)."""
+    return [start] + [s for s in _FALLBACK_PAGE_SIZES if s < start]
+
+
+def _fetch_entities_once(type_id: str, q: EntityQuery, page_size: int) -> list[Entity]:
+    collected: list[Entity] = []
+    after: str | None = None
+    pages = 0
+    while True:
+        variables = {
+            "typeId": type_id,
+            "spaceId": q.space_id,
+            "first": page_size,
+            "after": after,
+        }
+        conn = _post(_ENTITIES_QUERY, variables).get("entitiesConnection") or {}
+        for node in conn.get("nodes") or []:
+            collected.append(_entity_from_node(node, type_id))
+            if q.max_entities is not None and len(collected) >= q.max_entities:
+                logger.info(f"fetch_entities: reached max_entities={q.max_entities}")
+                return collected[: q.max_entities]
+            if len(collected) >= _SAFETY_MAX_ENTITIES:
+                logger.warning(
+                    f"fetch_entities: hit safety ceiling {_SAFETY_MAX_ENTITIES} "
+                    f"(type_id={type_id}); returning a truncated set"
+                )
+                return collected
+        pages += 1
+        page_info = conn.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            total = conn.get("totalCount")
+            # Truncation guard (postgres_to_geo PR #14): a full fetch that stops
+            # short of totalCount means the indexer lied about hasNextPage — fail
+            # so the caller retries at a smaller page size instead of silently
+            # under-fetching.
+            if q.max_entities is None and isinstance(total, int) and len(collected) < total:
+                raise RuntimeError(
+                    f"fetch_entities: silent pagination truncation at "
+                    f"{len(collected)}/{total} (type_id={type_id}, page_size={page_size})"
+                )
+            break
+        after = page_info.get("endCursor")
+        if not after:
+            break
+        time.sleep(_PAGE_THROTTLE_SECONDS)
+    logger.info(
+        f"fetch_entities(type_id={type_id}): {len(collected)} entities across {pages} page(s)"
+    )
+    return collected
 
 
 def fetch_entities(type_id: str, query: EntityQuery | None = None) -> list[Entity]:
-    """Generic, parameterized entity read. ``type_id`` (a Geo type entity id)
-    selects the type; ``query`` carries the space filter + limit. One query serves
-    every type — no per-type code."""
-    variables = build_entities_variables(type_id, query)
-    data = _post(_ENTITIES_QUERY, variables)
-    out: list[Entity] = []
-    for e in data.get("entities") or []:
-        types = e.get("types") or []
-        # Dedup type names while preserving order (an entity can carry the same
-        # type via several relations, e.g. "Project" twice).
-        type_names: list[str] = []
-        for t in types:
-            n = t.get("name")
-            if n and n not in type_names:
-                type_names.append(n)
-        out.append(
-            Entity(
-                id=str(e["id"]),
-                name=e.get("name") or "",
-                description=e.get("description") or "",
-                type=", ".join(type_names),
-                type_ids=[t["id"] for t in types if t.get("id")],
-                space_ids=e.get("spaceIds") or [],
-            )
-        )
-    logger.info(f"fetch_entities(type_id={type_id}): {len(out)} entities")
-    return out
+    """Generic, parameterized entity read with robust cursor pagination.
+
+    Pages through ``entitiesConnection`` (typeId/spaceId shortcut args) until
+    complete, retrying transient failures per request and falling back to smaller
+    page sizes on a truncation error. ``query.max_entities`` caps the total; None
+    fetches all (bounded by a safety ceiling)."""
+    q = query or EntityQuery()
+    last_error: Exception | None = None
+    for page_size in _page_size_ladder(q.page_size):
+        try:
+            return _fetch_entities_once(type_id, q, page_size)
+        except RuntimeError as e:
+            last_error = e
+            logger.warning(f"fetch_entities: retrying at a smaller page size after: {e}")
+    raise last_error or RuntimeError("fetch_entities failed")

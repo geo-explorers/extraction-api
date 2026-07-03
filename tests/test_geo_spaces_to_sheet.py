@@ -1,7 +1,8 @@
 """Unit tests for the geo spaces -> entities -> sheet pipeline.
 
 No network and no Hatchet engine: registry wiring, the generic entity query
-builder + canonical-space-id resolution, the aliased spaces-query builder, the
+builder, dynamic canonical-space resolution (subspaces of root), the cursor
+pagination loop + page-size ladder + truncation guard, the batched
 space-assignment join (LLM mocked), the service-account credential loader, and
 the prompt builder.
 """
@@ -56,6 +57,18 @@ def test_standalone_specs_retry_policy():
     assert SHEETS_EXPORT_TABLE_SPEC.retries == 0
 
 
+def test_dag_default_bounds_entities_but_standalone_fetches_all():
+    from src.api.schemas.geo_spaces_schema import (
+        GeoSpaceAssignInput,
+        GeoFetchEntitiesRequest,
+    )
+
+    dag_in = GeoSpaceAssignInput(type_id="t")
+    assert dag_in.entity_query.max_entities == 2000  # assign path is bounded
+    fetch_in = GeoFetchEntitiesRequest(type_id="t")
+    assert fetch_in.query.max_entities is None  # standalone fetches all
+
+
 # --- Generic entity query builder --------------------------------------------
 
 
@@ -63,48 +76,131 @@ def test_build_entities_variables_shape():
     from src.api.services.hypergraph_client import build_entities_variables
 
     v = build_entities_variables("484a18c5030a499cb0f2ef588ff16d50")
-    assert v.keys() == {"typeId", "spaceId", "first"}
+    assert v.keys() == {"typeId", "spaceId", "first", "after"}
     assert v["typeId"] == "484a18c5030a499cb0f2ef588ff16d50"
-    assert v["spaceId"] is None  # no space filter by default
-    assert v["first"] == 50  # EntityQuery default limit
+    assert v["spaceId"] is None and v["after"] is None
+    assert v["first"] == 500  # EntityQuery default page_size
 
 
-def test_build_entities_variables_with_space_and_limit():
+def test_build_entities_variables_with_space_and_page_size():
     from src.api.services.hypergraph_client import build_entities_variables
     from src.api.schemas.geo_spaces_schema import EntityQuery
 
     v = build_entities_variables(
-        "t1", EntityQuery(space_id="c9f267dcb0d270718c2a3c45a64afd32", limit=10)
+        "t1", EntityQuery(space_id="c9f267dcb0d270718c2a3c45a64afd32", page_size=10), after="cur"
     )
-    assert v["typeId"] == "t1"
     assert v["spaceId"] == "c9f267dcb0d270718c2a3c45a64afd32"
     assert v["first"] == 10
+    assert v["after"] == "cur"
 
 
-def test_canonical_space_ids_default_and_override(monkeypatch):
+def test_page_size_ladder():
+    from src.api.services.hypergraph_client import _page_size_ladder
+
+    assert _page_size_ladder(500) == [500, 250, 100]
+    assert _page_size_ladder(1000) == [1000, 500, 250, 100]
+    assert _page_size_ladder(100) == [100]
+    assert _page_size_ladder(50) == [50]
+
+
+# --- Dynamic canonical spaces (subspaces of root) ----------------------------
+
+
+def test_resolve_canonical_space_ids_override(monkeypatch):
     import src.api.services.hypergraph_client as hg
 
-    # Default: the built-in set (includes the Geo space id).
-    monkeypatch.setattr(hg.settings, "geo_canonical_space_ids", None)
-    default_ids = hg.canonical_space_ids()
-    assert "a19c345ab9866679b001d7d2138d88a1" in default_ids  # Geo
-    assert len(default_ids) >= 10
-
-    # Override: comma-separated, whitespace-trimmed, empties dropped.
     monkeypatch.setattr(hg.settings, "geo_canonical_space_ids", "a, b ,, c")
-    assert hg.canonical_space_ids() == ["a", "b", "c"]
+
+    def no_net(*a, **k):
+        raise AssertionError("override must not hit the network")
+
+    monkeypatch.setattr(hg, "_post", no_net)
+    assert hg.resolve_canonical_space_ids() == ["a", "b", "c"]
 
 
-def test_build_spaces_query_aliases_each_id():
-    from src.api.services.hypergraph_client import build_spaces_query
+def test_resolve_canonical_space_ids_dynamic(monkeypatch):
+    import src.api.services.hypergraph_client as hg
 
-    q = build_spaces_query(["a1", "b2"])
-    assert 's0: space(id: "a1")' in q
-    assert 's1: space(id: "b2")' in q
-    assert "page { name description }" in q
+    monkeypatch.setattr(hg.settings, "geo_canonical_space_ids", None)
+    monkeypatch.setattr(hg.settings, "geo_root_space_id", "ROOT")
+    captured = {}
+
+    def fake_post(query, variables):
+        captured.update(variables)
+        return {"subspaces": [{"childSpaceId": "s1"}, {"childSpaceId": "s2"}, {"childSpaceId": None}]}
+
+    monkeypatch.setattr(hg, "_post", fake_post)
+    ids = hg.resolve_canonical_space_ids()
+    assert ids == ["s1", "s2"]  # None child dropped
+    assert captured["parentSpaceId"] == "ROOT"
 
 
-# --- Space assignment join (LLM mocked) --------------------------------------
+# --- Cursor pagination -------------------------------------------------------
+
+
+def _node(i):
+    return {
+        "id": f"e{i}",
+        "name": f"n{i}",
+        "description": "",
+        "spaceIds": [],
+        "types": [{"id": "t", "name": "T"}],
+    }
+
+
+def test_fetch_entities_paginates_by_cursor(monkeypatch):
+    import src.api.services.hypergraph_client as hg
+    from src.api.schemas.geo_spaces_schema import EntityQuery
+
+    pages = {
+        None: {"entitiesConnection": {"totalCount": 3, "pageInfo": {"hasNextPage": True, "endCursor": "c1"}, "nodes": [_node(1), _node(2)]}},
+        "c1": {"entitiesConnection": {"totalCount": 3, "pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [_node(3)]}},
+    }
+    seen_cursors = []
+
+    def fake_post(query, variables):
+        seen_cursors.append(variables.get("after"))
+        return pages[variables.get("after")]
+
+    monkeypatch.setattr(hg, "_post", fake_post)
+    monkeypatch.setattr(hg.time, "sleep", lambda s: None)
+
+    out = hg.fetch_entities("T", EntityQuery(page_size=2))
+    assert [e.id for e in out] == ["e1", "e2", "e3"]
+    assert seen_cursors == [None, "c1"]  # advanced by endCursor
+
+
+def test_fetch_entities_respects_max_entities(monkeypatch):
+    import src.api.services.hypergraph_client as hg
+    from src.api.schemas.geo_spaces_schema import EntityQuery
+
+    def fake_post(query, variables):
+        return {"entitiesConnection": {"totalCount": 10, "pageInfo": {"hasNextPage": True, "endCursor": "c"}, "nodes": [_node(1), _node(2), _node(3)]}}
+
+    monkeypatch.setattr(hg, "_post", fake_post)
+    monkeypatch.setattr(hg.time, "sleep", lambda s: None)
+
+    out = hg.fetch_entities("T", EntityQuery(page_size=3, max_entities=2))
+    assert [e.id for e in out] == ["e1", "e2"]  # capped mid-page, no truncation error
+
+
+def test_fetch_entities_truncation_guard(monkeypatch):
+    import src.api.services.hypergraph_client as hg
+    from src.api.schemas.geo_spaces_schema import EntityQuery
+
+    # totalCount says 5 but the page reports hasNextPage=False with only 2 nodes:
+    # a silent truncation. Every page size in the ladder raises, so fetch re-raises.
+    def fake_post(query, variables):
+        return {"entitiesConnection": {"totalCount": 5, "pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [_node(1), _node(2)]}}
+
+    monkeypatch.setattr(hg, "_post", fake_post)
+    monkeypatch.setattr(hg.time, "sleep", lambda s: None)
+
+    with pytest.raises(RuntimeError, match="truncation"):
+        hg.fetch_entities("T", EntityQuery(page_size=500))
+
+
+# --- Space assignment join + batching (LLM mocked) ---------------------------
 
 
 def _spaces():
@@ -136,14 +232,30 @@ def test_assign_spaces_joins_ids_to_names(monkeypatch):
     monkeypatch.setattr(svc, "classify_items", fake_classify)
 
     rows = svc.assign_spaces(_spaces(), _entities())
-    # Input order preserved; the unknown "ghost" id is dropped.
     assert [r.entity_id for r in rows] == ["e1", "e2"]
     r1 = rows[0]
-    # dedup ("s1" twice) + drop invalid ("bogus"); ids joined to names in order.
-    assert r1.assigned_space_ids == ["s1", "s2"]
+    assert r1.assigned_space_ids == ["s1", "s2"]  # dedup + drop invalid
     assert r1.assigned_space_names == ["Crypto", "Technology"]
-    # 0 spaces is a valid outcome.
     assert rows[1].assigned_space_ids == []
+
+
+def test_assign_spaces_batches_large_sets(monkeypatch):
+    import src.api.services.space_assignment_service as svc
+    from src.api.services.llm_classify_service import ItemAssignment
+
+    monkeypatch.setattr(svc.settings, "space_assignment_batch_size", 1)
+    calls = []
+
+    def fake_classify(*, prompt, model=None, temperature=None):
+        eid = "e1" if '"id": "e1"' in prompt else "e2"
+        calls.append(eid)
+        return [ItemAssignment(item_id=eid, category_ids=["s1"])]
+
+    monkeypatch.setattr(svc, "classify_items", fake_classify)
+
+    rows = svc.assign_spaces(_spaces(), _entities())
+    assert calls == ["e1", "e2"]  # one Gemini call per entity (batch_size=1)
+    assert all(r.assigned_space_ids == ["s1"] for r in rows)
 
 
 def test_assign_spaces_no_spaces_skips_llm(monkeypatch):
@@ -207,5 +319,4 @@ def test_prompt_includes_space_ids_entity_ids_and_contract():
     prompt = build_space_assignment_prompt(_spaces(), _entities())
     assert 'id="s1"' in prompt and 'id="s2"' in prompt
     assert '"id": "e1"' in prompt and '"id": "e2"' in prompt
-    # The model must return item_id + category_ids.
     assert "item_id" in prompt and "category_ids" in prompt

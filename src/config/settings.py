@@ -206,9 +206,13 @@ class Settings(BaseSettings):
         default=None,
         description="Optional bearer key for the Geo GraphQL endpoint. Reads are normally unauthenticated; leave unset."
     )
+    geo_root_space_id: str = Field(
+        default="a19c345ab9866679b001d7d2138d88a1",
+        description="Geo root space id (the 'Geo' space). Canonical spaces are its subspaces, fetched dynamically."
+    )
     geo_canonical_space_ids: str | None = Field(
         default=None,
-        description="Comma-separated canonical Geo space ids to assign against when a request passes none. Unset = the client's built-in default set."
+        description="Optional override: comma-separated space ids to assign against. Unset = subspaces of geo_root_space_id (dynamic)."
     )
 
     # Google Sheets export (service-account auth).
@@ -246,6 +250,10 @@ class Settings(BaseSettings):
     gemini_space_assignment_temperature: float = Field(
         default=0.0,
         description="Temperature for space assignment (0 = deterministic)"
+    )
+    space_assignment_batch_size: int = Field(
+        default=100,
+        description="Entities per Gemini call in the space-assignment step (batches large entity sets to keep prompts bounded)."
     )
 
 

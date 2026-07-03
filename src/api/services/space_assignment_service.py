@@ -38,25 +38,33 @@ def assign_spaces(spaces: list[Space], entities: list[Entity]) -> list[AssignedR
     valid_space_ids = {s.id for s in spaces}
     name_by_id = {s.id: s.name for s in spaces}
 
-    prompt = build_space_assignment_prompt(spaces, entities)
-    assignments = classify_items(
-        prompt=prompt,
-        model=settings.gemini_space_assignment_model,
-        temperature=settings.gemini_space_assignment_temperature,
-    )
-
-    for a in assignments:
-        row = rows_by_entity.get(a.item_id)
-        if row is None:
-            continue  # model returned an unknown entity id — ignore
-        seen: set[str] = set()
-        for sid in a.category_ids:
-            # Keep only valid space ids; dedup; preserve model order.
-            if sid in valid_space_ids and sid not in seen:
-                seen.add(sid)
-                row.assigned_space_ids.append(sid)
-                row.assigned_space_names.append(name_by_id[sid])
+    # Batch entities across Gemini calls so a large entity set never overflows a
+    # single prompt. Each batch gets the full spaces vocabulary + its slice of
+    # entities.
+    batch_size = max(1, settings.space_assignment_batch_size)
+    for start in range(0, len(entities), batch_size):
+        chunk = entities[start : start + batch_size]
+        prompt = build_space_assignment_prompt(spaces, chunk)
+        assignments = classify_items(
+            prompt=prompt,
+            model=settings.gemini_space_assignment_model,
+            temperature=settings.gemini_space_assignment_temperature,
+        )
+        for a in assignments:
+            row = rows_by_entity.get(a.item_id)
+            if row is None:
+                continue  # model returned an unknown entity id — ignore
+            seen = set(row.assigned_space_ids)
+            for sid in a.category_ids:
+                # Keep only valid space ids; dedup; preserve model order.
+                if sid in valid_space_ids and sid not in seen:
+                    seen.add(sid)
+                    row.assigned_space_ids.append(sid)
+                    row.assigned_space_names.append(name_by_id[sid])
 
     assigned = sum(1 for r in rows_by_entity.values() if r.assigned_space_ids)
-    logger.info(f"assign_spaces: {assigned}/{len(entities)} entities got >=1 space")
+    logger.info(
+        f"assign_spaces: {assigned}/{len(entities)} entities got >=1 space "
+        f"(batch_size={batch_size})"
+    )
     return list(rows_by_entity.values())

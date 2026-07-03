@@ -36,8 +36,13 @@ class EntityQuery(BaseModel):
     space_id: str | None = Field(
         default=None, description="Restrict to entities in this Geo space id"
     )
-    limit: int = Field(
-        default=50, ge=1, le=1000, description="Max entities to fetch (GraphQL `first`)"
+    page_size: int = Field(
+        default=500, ge=1, le=1000, description="Entities per page (GraphQL `first`)"
+    )
+    max_entities: int | None = Field(
+        default=None,
+        ge=1,
+        description="Cap on total entities fetched across pages; None = fetch all (bounded by a safety ceiling)",
     )
 
 
@@ -108,10 +113,14 @@ class GeoSpaceAssignInput(BaseModel):
     type_id: str = Field(
         ..., description="Geo type entity id to fetch and assign spaces to"
     )
-    entity_query: EntityQuery = Field(default_factory=EntityQuery)
+    # Bound the assign path by default so the LLM step stays feasible; the
+    # standalone geo.fetch_entities task fetches all (max_entities=None).
+    entity_query: EntityQuery = Field(
+        default_factory=lambda: EntityQuery(max_entities=2000)
+    )
     space_ids: list[str] | None = Field(
         default=None,
-        description="Canonical space ids to assign against; None = the configured canonical set",
+        description="Canonical space ids to assign against; None = subspaces of the Geo root space (dynamic)",
     )
     sheet_title: str | None = Field(
         default=None,

@@ -38,5 +38,5 @@ GEO_FETCH_ENTITIES_SPEC = TaskSpec(
     output_model=GeoFetchEntitiesResponse,
     handler=_handle,
     retries=3,  # idempotent read
-    execution_timeout=timedelta(minutes=3),
+    execution_timeout=timedelta(minutes=8),  # may page through large entity sets
 )
