@@ -193,6 +193,69 @@ class Settings(BaseSettings):
         description="X-API-Key for the postgres_to_geo /api/export endpoint"
     )
 
+    # Geo / Hypergraph knowledge graph (read side).
+    # geo.fetch_entities and the geo.assign_spaces_to_sheet DAG read canonical
+    # spaces and typed entities from the Geo GraphQL API. A headless worker cannot
+    # use the HyperGraph MCP, so it queries this HTTP endpoint directly. Reads are
+    # UNAUTHENTICATED (matching the geo-explorers reference clients).
+    hypergraph_graphql_url: str = Field(
+        default="https://testnet-api.geobrowser.io/graphql",
+        description="Geo GraphQL endpoint for reading spaces/entities (mainnet: https://api.geobrowser.io/graphql)"
+    )
+    hypergraph_api_key: str | None = Field(
+        default=None,
+        description="Optional bearer key for the Geo GraphQL endpoint. Reads are normally unauthenticated; leave unset."
+    )
+    geo_root_space_id: str = Field(
+        default="a19c345ab9866679b001d7d2138d88a1",
+        description="Geo root space id (the 'Geo' space). Canonical spaces are its subspaces, fetched dynamically."
+    )
+    geo_canonical_space_ids: str | None = Field(
+        default=None,
+        description="Optional override: comma-separated space ids to assign against. Unset = subspaces of geo_root_space_id (dynamic)."
+    )
+
+    # Google Sheets export (service-account auth).
+    # sheets.export_table and geo.assign_spaces_to_sheet create a NEW spreadsheet
+    # via gspread. A headless worker authenticates with a service-account key:
+    # provide it inline as JSON (preferred for Railway env vars) or as a file path.
+    # The created sheet lives in the service account's own Drive, so it is shared
+    # with google_sheets_share_email (and/or created inside google_drive_folder_id)
+    # to be visible to a human.
+    google_service_account_json: str | None = Field(
+        default=None,
+        description="Service-account key as inline JSON (preferred). Takes precedence over the file path."
+    )
+    google_service_account_file: str | None = Field(
+        default=None,
+        description="Path to a service-account JSON key file (fallback when google_service_account_json is unset)."
+    )
+    google_sheets_share_email: str | None = Field(
+        default=None,
+        description="Email the created spreadsheet is shared with (writer role), so it is visible outside the service account."
+    )
+    google_drive_folder_id: str | None = Field(
+        default=None,
+        description="Optional Drive/Shared-Drive folder ID to create the spreadsheet in."
+    )
+
+    # Geo entity->space assignment (Gemini, schema-enforced JSON).
+    # The assign_spaces step classifies each fetched entity against the fetched
+    # canonical spaces. Kept separate from the other Gemini model settings so this
+    # pipeline can be tuned independently.
+    gemini_space_assignment_model: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model for assigning canonical spaces to entities"
+    )
+    gemini_space_assignment_temperature: float = Field(
+        default=0.0,
+        description="Temperature for space assignment (0 = deterministic)"
+    )
+    space_assignment_batch_size: int = Field(
+        default=100,
+        description="Entities per Gemini call in the space-assignment step (batches large entity sets to keep prompts bounded)."
+    )
+
 
 # Global settings instance
 settings = Settings()
