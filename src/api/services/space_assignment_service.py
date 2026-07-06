@@ -6,6 +6,8 @@ produce table-ready ``AssignedRow`` objects (one per entity, in input order). No
 Hatchet import; the blocking Gemini call is offloaded by the caller.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+
 from src.api.schemas.geo_spaces_schema import AssignedRow, Entity, Space
 from src.api.services.llm_classify_service import classify_items
 from src.config.prompts.space_assignment_prompt import build_space_assignment_prompt
@@ -42,14 +44,28 @@ def assign_spaces(spaces: list[Space], entities: list[Entity]) -> list[AssignedR
     # single prompt. Each batch gets the full spaces vocabulary + its slice of
     # entities.
     batch_size = max(1, settings.space_assignment_batch_size)
-    for start in range(0, len(entities), batch_size):
-        chunk = entities[start : start + batch_size]
-        prompt = build_space_assignment_prompt(spaces, chunk)
-        assignments = classify_items(
-            prompt=prompt,
+    concurrency = max(1, settings.space_assignment_concurrency)
+    chunks = [
+        entities[i : i + batch_size] for i in range(0, len(entities), batch_size)
+    ]
+
+    def _classify(chunk: list[Entity]):
+        return classify_items(
+            prompt=build_space_assignment_prompt(spaces, chunk),
             model=settings.gemini_space_assignment_model,
             temperature=settings.gemini_space_assignment_temperature,
         )
+
+    # Run the per-batch Gemini calls in a bounded thread pool (each is a blocking
+    # SDK request) so large entity sets don't run serially. Results are merged
+    # sequentially afterwards, so no lock is needed on rows_by_entity.
+    if concurrency == 1 or len(chunks) <= 1:
+        results = [_classify(c) for c in chunks]
+    else:
+        with ThreadPoolExecutor(max_workers=min(concurrency, len(chunks))) as pool:
+            results = list(pool.map(_classify, chunks))
+
+    for assignments in results:
         for a in assignments:
             row = rows_by_entity.get(a.item_id)
             if row is None:
@@ -65,6 +81,6 @@ def assign_spaces(spaces: list[Space], entities: list[Entity]) -> list[AssignedR
     assigned = sum(1 for r in rows_by_entity.values() if r.assigned_space_ids)
     logger.info(
         f"assign_spaces: {assigned}/{len(entities)} entities got >=1 space "
-        f"(batch_size={batch_size})"
+        f"({len(chunks)} batches, batch_size={batch_size}, concurrency={concurrency})"
     )
     return list(rows_by_entity.values())

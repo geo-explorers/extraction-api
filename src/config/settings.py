@@ -255,6 +255,11 @@ class Settings(BaseSettings):
         default=100,
         description="Entities per Gemini call in the space-assignment step (batches large entity sets to keep prompts bounded)."
     )
+    space_assignment_concurrency: int = Field(
+        default=8,
+        ge=1,
+        description="Max concurrent Gemini calls in the space-assignment step (batches run in a bounded thread pool)."
+    )
 
 
 # Global settings instance

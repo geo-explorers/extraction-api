@@ -264,7 +264,31 @@ def test_assign_spaces_batches_large_sets(monkeypatch):
     monkeypatch.setattr(svc, "classify_items", fake_classify)
 
     rows = svc.assign_spaces(_spaces(), _entities())
-    assert calls == ["e1", "e2"]  # one Gemini call per entity (batch_size=1)
+    # one Gemini call per entity (batch_size=1); order not guaranteed (pooled)
+    assert sorted(calls) == ["e1", "e2"]
+    assert all(r.assigned_space_ids == ["s1"] for r in rows)
+    # rows preserve input order regardless of concurrent classify
+    assert [r.entity_id for r in rows] == ["e1", "e2"]
+
+
+def test_assign_spaces_runs_batches_concurrently(monkeypatch):
+    import threading
+    import src.api.services.space_assignment_service as svc
+    from src.api.services.llm_classify_service import ItemAssignment
+
+    monkeypatch.setattr(svc.settings, "space_assignment_batch_size", 1)
+    monkeypatch.setattr(svc.settings, "space_assignment_concurrency", 2)
+    # Both batch threads must be in-flight at once or barrier.wait() times out —
+    # which is exactly what would happen if the batches ran sequentially.
+    barrier = threading.Barrier(2, timeout=5)
+
+    def fake_classify(*, prompt, model=None, temperature=None):
+        barrier.wait()
+        eid = "e1" if '"id": "e1"' in prompt else "e2"
+        return [ItemAssignment(item_id=eid, category_ids=["s1"])]
+
+    monkeypatch.setattr(svc, "classify_items", fake_classify)
+    rows = svc.assign_spaces(_spaces(), _entities())
     assert all(r.assigned_space_ids == ["s1"] for r in rows)
 
 
