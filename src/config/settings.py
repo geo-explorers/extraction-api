@@ -252,8 +252,8 @@ class Settings(BaseSettings):
         description="Temperature for space assignment (0 = deterministic)"
     )
     space_assignment_batch_size: int = Field(
-        default=100,
-        description="Entities per Gemini call in the space-assignment step (batches large entity sets to keep prompts bounded)."
+        default=50,
+        description="Entities per Gemini call in the space-assignment step. Kept modest because each item now emits a reasoning field (larger output → truncation risk at big batches)."
     )
     space_assignment_concurrency: int = Field(
         default=8,

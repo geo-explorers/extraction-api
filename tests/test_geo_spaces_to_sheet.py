@@ -353,4 +353,5 @@ def test_prompt_includes_space_ids_entity_ids_and_contract():
     prompt = build_space_assignment_prompt(_spaces(), _entities())
     assert 'id="s1"' in prompt and 'id="s2"' in prompt
     assert '"id": "e1"' in prompt and '"id": "e2"' in prompt
-    assert "item_id" in prompt and "category_ids" in prompt
+    assert "item_id" in prompt and "category_ids" in prompt and "reasoning" in prompt
+    assert "DESCRIPTION" in prompt  # decision-by-description rubric
