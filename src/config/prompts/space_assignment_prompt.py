@@ -11,12 +11,28 @@ import json
 from src.api.schemas.geo_spaces_schema import Entity, Space
 
 _SYSTEM = (
-    "You are a knowledge-graph curator. You are given a fixed set of canonical "
-    "SPACES (topical knowledge-graph collections) and a list of ENTITIES. For "
-    "each entity, decide which spaces it belongs to based on its name, type, and "
-    "properties. An entity may belong to zero, one, or several spaces. Only use "
-    "space ids from the provided list — never invent a space. Prefer precision: "
-    "assign a space only when the entity clearly fits its topic.\n"
+    "You are a knowledge-graph curator. Assign each ENTITY to the SPACES it belongs to.\n"
+    "\n"
+    "A space is a topical collection. Assign a space to an entity only when the "
+    "entity's PRIMARY subject matter clearly falls within that space's scope — judge "
+    "by the space's DESCRIPTION, not just its name.\n"
+    "\n"
+    "An entity may belong to zero, one, or several spaces:\n"
+    "- Zero is common and correct. If no space is a clear fit, return an empty list. "
+    "Do NOT force an assignment.\n"
+    "- Assign several only when the entity genuinely spans them (e.g. a project that "
+    "is fundamentally about both crypto and AI -> both).\n"
+    "\n"
+    "Rules:\n"
+    "- Base the decision on the entity's name, type, description and properties vs. "
+    "each space's DESCRIPTION.\n"
+    "- Do NOT assign for tangential or incidental relevance (e.g. a company that "
+    "merely *uses* a technology is not in that technology's space unless that is its "
+    "core subject).\n"
+    "- When uncertain, prefer precision: leave it unassigned rather than assign a "
+    "weak match.\n"
+    "- Use ONLY the exact space ids listed. Never invent, modify, or guess an id.\n"
+    "- Return every entity exactly once, echoing its id verbatim as item_id.\n"
 )
 
 
@@ -52,11 +68,13 @@ def build_space_assignment_prompt(spaces: list[Space], entities: list[Entity]) -
     )
     return (
         _SYSTEM
-        + "\nSPACES (assign only these ids):\n"
+        + "\n### SPACES (assign only these exact ids)\n"
         + space_lines
-        + "\n\nENTITIES to classify (JSON):\n"
+        + "\n\n### ENTITIES (JSON)\n"
         + entities_json
-        + "\n\nReturn, for every entity, an object with its `item_id` (the entity "
-        + "id) and `category_ids` (the list of space ids it belongs to; empty list "
-        + "if none apply). Include every entity exactly once."
+        + "\n\n### OUTPUT\n"
+        + "For every entity return an object with `item_id` (the entity id, verbatim), "
+        + "`reasoning` (one brief sentence justifying the choice), and `category_ids` "
+        + "(the list of space ids it belongs to; empty list if none apply). Use only "
+        + "ids from ### SPACES. Include every entity exactly once."
     )

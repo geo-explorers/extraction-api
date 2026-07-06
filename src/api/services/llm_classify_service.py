@@ -24,9 +24,16 @@ _GEMINI_TIMEOUT_MS = 60 * 3 * 1000
 
 
 class ItemAssignment(BaseModel):
-    """One item's assigned category ids (0 or more)."""
+    """One item's assignment: a brief reasoning (generated first) then the assigned
+    category ids (0 or more)."""
 
     item_id: str = Field(description="The id of the item being classified")
+    # Ordered BEFORE category_ids so the model reasons before it commits (Gemini
+    # structured output generates fields in schema order — reason-then-decide).
+    reasoning: str = Field(
+        default="",
+        description="One brief sentence justifying the choice. Decide this BEFORE category_ids.",
+    )
     category_ids: list[str] = Field(
         default_factory=list,
         description="Ids of the categories assigned to this item (0 or more). "
