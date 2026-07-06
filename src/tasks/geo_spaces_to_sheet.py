@@ -43,7 +43,7 @@ logger = get_logger(__name__)
 GEO_MAX_PAYLOAD_BYTES = DEFAULT_MAX_PAYLOAD_BYTES
 _GEMINI = [RateLimit(static_key="gemini_global", units=1)]
 _FETCH_TIMEOUT = timedelta(minutes=5)
-_ASSIGN_TIMEOUT = timedelta(minutes=10)  # batched Gemini calls for large entity sets
+_ASSIGN_TIMEOUT = timedelta(minutes=15)  # pooled parallel Gemini batches for large entity sets
 _EXPORT_TIMEOUT = timedelta(minutes=2)
 
 _SHEET_COLUMNS = ["Entity", "Type", "Assigned Spaces"]
