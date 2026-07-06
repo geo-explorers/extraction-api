@@ -67,18 +67,16 @@ query SpacesById($ids: [UUID!]) {
 }
 """
 
+# entitiesConnection with typeId/spaceId shortcut args + cursor pagination. The
+# `filter` is a caller-supplied Postgraphile EntityFilter, passed as a typed
+# GraphQL variable (safe, arbitrary — null means no filter). `types { id name }`
+# gives human-readable type names for the LLM + the sheet.
 _ENTITIES_QUERY = """
-query Entities($typeId: UUID, $spaceId: UUID, $first: Int!, $after: Cursor) {
-  entitiesConnection(typeId: $typeId, spaceId: $spaceId, first: $first, after: $after) {
+query Entities($typeId: UUID, $spaceId: UUID, $first: Int!, $after: Cursor, $filter: EntityFilter) {
+  entitiesConnection(typeId: $typeId, spaceId: $spaceId, first: $first, after: $after, filter: $filter) {
     totalCount
     pageInfo { hasNextPage endCursor }
-    nodes {
-      id
-      name
-      description
-      spaceIds
-      types { id name }
-    }
+    nodes { id name description spaceIds types { id name } }
   }
 }
 """
@@ -192,6 +190,7 @@ def build_entities_variables(
         "spaceId": q.space_id,
         "first": q.page_size,
         "after": after,
+        "filter": q.filter,
     }
 
 
@@ -231,6 +230,7 @@ def _fetch_entities_once(type_id: str, q: EntityQuery, page_size: int) -> list[E
             "spaceId": q.space_id,
             "first": page_size,
             "after": after,
+            "filter": q.filter,
         }
         conn = _post(_ENTITIES_QUERY, variables).get("entitiesConnection") or {}
         for node in conn.get("nodes") or []:

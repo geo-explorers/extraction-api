@@ -76,9 +76,9 @@ def test_build_entities_variables_shape():
     from src.api.services.hypergraph_client import build_entities_variables
 
     v = build_entities_variables("484a18c5030a499cb0f2ef588ff16d50")
-    assert v.keys() == {"typeId", "spaceId", "first", "after"}
+    assert v.keys() == {"typeId", "spaceId", "first", "after", "filter"}
     assert v["typeId"] == "484a18c5030a499cb0f2ef588ff16d50"
-    assert v["spaceId"] is None and v["after"] is None
+    assert v["spaceId"] is None and v["after"] is None and v["filter"] is None
     assert v["first"] == 500  # EntityQuery default page_size
 
 
@@ -101,6 +101,16 @@ def test_page_size_ladder():
     assert _page_size_ladder(1000) == [1000, 500, 250, 100]
     assert _page_size_ladder(100) == [100]
     assert _page_size_ladder(50) == [50]
+
+
+def test_build_entities_variables_passes_filter_verbatim():
+    from src.api.services.hypergraph_client import build_entities_variables
+    from src.api.schemas.geo_spaces_schema import EntityQuery
+
+    filt = {"relations": {"some": {"toEntityId": {"is": "7f79"}}}}
+    v = build_entities_variables("t1", EntityQuery(filter=filt))
+    assert v["filter"] == filt  # arbitrary EntityFilter, passed through untouched
+    assert build_entities_variables("t1")["filter"] is None  # no filter -> None
 
 
 # --- Dynamic canonical spaces (subspaces of root) ----------------------------
