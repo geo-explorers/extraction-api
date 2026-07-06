@@ -44,6 +44,15 @@ class EntityQuery(BaseModel):
         ge=1,
         description="Cap on total entities fetched across pages; None = fetch all (bounded by a safety ceiling)",
     )
+    filter: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Arbitrary Geo GraphQL EntityFilter, passed verbatim as a typed variable "
+            "(None = no filter). Examples — curated topics: "
+            "{'relations': {'some': {'toEntityId': {'is': '7f796eb5bfc5449c98649bf7d996a2ca'}}}}; "
+            "by name: {'name': {'startsWithInsensitive': 'Ethereum'}}."
+        ),
+    )
 
 
 class Entity(BaseModel):
