@@ -160,6 +160,34 @@ class Settings(BaseSettings):
         description="Max output tokens for the Claude news-claim fallback (dense multi-source stories can produce many claims)."
     )
 
+    # Generalized claim extraction (claims.extract DAG) — one pipeline for any
+    # text media: debate transcripts, research papers, news articles, podcasts,
+    # talks, generic documents. Deliberately separate from gemini_premium_model
+    # and gemini_news_claim_model so each pipeline stays independently tunable.
+    # Defaults to the pro tier rather than flash: this endpoint serves
+    # unbenchmarked media (multi-hour debates, dense papers), so quality
+    # headroom beats the flash speedup. gemini-2.5-pro is the latest STABLE
+    # pro on the API as of 2026-07-13 (3.x pro exists only as -preview;
+    # gemini-3.5-pro not yet GA — swap it in via CLAIMS_EXTRACT_MODEL once
+    # released, and set CLAIMS_EXTRACT_THINKING_LEVEL=low with it).
+    # Cost/speed downshift: CLAIMS_EXTRACT_MODEL=gemini-3.5-flash
+    # (news-benchmark-proven, 2026-05-27).
+    claims_extract_model: str = Field(
+        default="gemini-2.5-pro",
+        description="Gemini model for the generalized claims.extract DAG"
+    )
+    claims_extract_temperature: float = Field(
+        default=0.2,
+        description="Temperature for generalized claim extraction"
+    )
+    # Empty by default because the default model is 2.5-era: thinking_level is
+    # a Gemini 3+ control and attaching it to a 2.5 model errors. Set to
+    # minimal|low|medium|high only alongside a Gemini 3+ CLAIMS_EXTRACT_MODEL.
+    claims_extract_thinking_level: str = Field(
+        default="",
+        description="Gemini 3+ thinking level for claims.extract: minimal|low|medium|high. Empty disables (required with 2.5-era models)."
+    )
+
     # API Configuration
     api_host: str = Field(
         default="0.0.0.0",

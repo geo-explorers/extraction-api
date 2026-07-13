@@ -40,6 +40,10 @@ from src.tasks.news_extract_topics_and_claims import (
     news_topics_and_claims_workflow,
     NEWS_TOPICS_AND_CLAIMS_MAX_PAYLOAD_BYTES,
 )
+from src.tasks.claims_extract import (
+    claims_workflow,
+    CLAIMS_EXTRACT_MAX_PAYLOAD_BYTES,
+)
 from src.tasks.geo_fetch_entities import GEO_FETCH_ENTITIES_SPEC
 from src.tasks.sheets_export_table import SHEETS_EXPORT_TABLE_SPEC
 from src.tasks.geo_spaces_to_sheet import (
@@ -51,6 +55,10 @@ from src.tasks.geo_spaces_to_sheet import (
 from src.api.schemas.news_topics_and_claims_schema import (
     NewsTopicsAndClaimsRequest,
     NewsTopicsAndClaimsResponse,
+)
+from src.api.schemas.claims_extract_schema import (
+    ClaimsExtractInput,
+    ClaimsExtractResult,
 )
 
 # Standalone single tasks, declared as TaskSpecs and built via build_task.
@@ -103,6 +111,13 @@ def _build_registry() -> dict[str, RegisteredTask]:
         output_model=NewsTopicsAndClaimsResponse,
         max_payload_bytes=NEWS_TOPICS_AND_CLAIMS_MAX_PAYLOAD_BYTES,
         runnable=news_topics_and_claims_workflow,
+    )
+    registry["claims.extract"] = RegisteredTask(
+        name="claims.extract",
+        input_model=ClaimsExtractInput,
+        output_model=ClaimsExtractResult,
+        max_payload_bytes=CLAIMS_EXTRACT_MAX_PAYLOAD_BYTES,
+        runnable=claims_workflow,
     )
     registry["geo.assign_spaces_to_sheet"] = RegisteredTask(
         name="geo.assign_spaces_to_sheet",
