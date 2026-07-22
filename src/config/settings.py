@@ -188,6 +188,24 @@ class Settings(BaseSettings):
         description="Gemini 3+ thinking level for claims.extract: minimal|low|medium|high. Empty disables (required with 2.5-era models)."
     )
 
+    # Claim entity linking (claims.link_entities) — index-selection over a
+    # caller-supplied vocabulary. A light classification task, so it defaults
+    # to the flash tier with adaptive low thinking (same pairing proven for
+    # news claim extraction, 2026-05-27); independently tunable per the
+    # one-knob-per-pipeline convention.
+    claims_link_model: str = Field(
+        default="gemini-3.5-flash",
+        description="Gemini model for claims.link_entities annotation"
+    )
+    claims_link_temperature: float = Field(
+        default=0.1,
+        description="Temperature for claim entity linking (index selection wants determinism)"
+    )
+    claims_link_thinking_level: str = Field(
+        default="low",
+        description="Gemini 3+ thinking level for claims.link_entities: minimal|low|medium|high. Empty disables (required if overriding to a 2.5-era model)."
+    )
+
     # API Configuration
     api_host: str = Field(
         default="0.0.0.0",
