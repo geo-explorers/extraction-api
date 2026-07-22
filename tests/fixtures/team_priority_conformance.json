@@ -1,0 +1,72 @@
+{
+  "description": "Team-wide canonical-selection (dedup) policy — conformance vectors. Every implementation of the team_priority cascade MUST pass these: geo-merge-topics/src/select_canonical.ts, postgres_to_geo buildPriorityComparator, extraction-api TeamPriorityStrategy. Signals are engine-agnostic; 'expected' is either {winner: id} or {escalate: true}. Policy version 1 (rules agreed for the 2026-07 migration, v3 Root-priority).",
+  "policy_version": 1,
+  "constants": {
+    "root_space": "a19c345ab9866679b001d7d2138d88a1",
+    "catchall_space": "b5a31f8182b042437ede0f84ee02f104",
+    "dataset_space_example": "5908c73ad336472ccbd983491d2d17e4"
+  },
+  "vectors": [
+    {"name": "root_resident_beats_catchall_only",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["b5a31f8182b042437ede0f84ee02f104"]},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["a19c345ab9866679b001d7d2138d88a1", "b5a31f8182b042437ede0f84ee02f104"]}],
+     "expected": {"winner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    {"name": "represents_canonical_space_beats_root_residency",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["a19c345ab9866679b001d7d2138d88a1"]},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["c9f267dcb0d270718c2a3c45a64afd32"], "represents_spaces": ["c9f267dcb0d270718c2a3c45a64afd32"], "canonical_spaces": ["c9f267dcb0d270718c2a3c45a64afd32"]}],
+     "expected": {"winner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    {"name": "featured_beats_scored_and_curated",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["x1"], "scored": true, "has_curated": true},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["x1"], "has_featured": true}],
+     "expected": {"winner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    {"name": "two_scored_escalates",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["x1"], "scored": true},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["x1"], "scored": true}],
+     "expected": {"escalate": true}},
+    {"name": "single_scored_beats_curated",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["x1"], "has_curated": true},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["x1"], "scored": true}],
+     "expected": {"winner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    {"name": "dataset_resident_excluded",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["5908c73ad336472ccbd983491d2d17e4"], "backlink_count": 999},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["x1"]}],
+     "expected": {"winner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    {"name": "root_residency_shields_dataset_resident_v3",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["5908c73ad336472ccbd983491d2d17e4", "a19c345ab9866679b001d7d2138d88a1"]},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["x1"]}],
+     "expected": {"winner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+    {"name": "personal_resident_excluded",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["personal1"], "backlink_count": 999},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["x1"]}],
+     "personal_spaces": ["personal1"],
+     "expected": {"winner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    {"name": "backlinks_break_equal_tiers",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["x1"], "backlink_count": 5},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["x1"], "backlink_count": 9}],
+     "expected": {"winner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    {"name": "data_count_breaks_backlink_tie",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["x1"], "backlink_count": 5, "data_count": 3},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["x1"], "backlink_count": 5, "data_count": 8}],
+     "expected": {"winner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    {"name": "older_wins_then_id_floor",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["x1"], "created_at": 200},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["x1"], "created_at": 50}],
+     "expected": {"winner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    {"name": "all_excluded_falls_back_to_full_pool",
+     "candidates": [
+       {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "space_ids": ["5908c73ad336472ccbd983491d2d17e4"], "created_at": 50},
+       {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "space_ids": ["5908c73ad336472ccbd983491d2d17e4"], "created_at": 200}],
+     "expected": {"winner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+  ]
+}

@@ -188,6 +188,43 @@ class Settings(BaseSettings):
         description="Gemini 3+ thinking level for claims.extract: minimal|low|medium|high. Empty disables (required with 2.5-era models)."
     )
 
+    # Geo entity resolution (geo.resolve_entities) — read-only matching knobs.
+    geo_resolve_match_threshold: float = Field(
+        default=0.85,
+        description="Similarity threshold for geo.resolve_entities name matching (news-worker parity)"
+    )
+    geo_resolve_max_candidates: int = Field(
+        default=30,
+        description="Candidates fetched per name query in geo.resolve_entities"
+    )
+    # Team-wide graph constants for the team_priority selection cascade —
+    # properties of the shared Geo graph (agreed dedup rules), not caller
+    # domain concepts. Overridable for other graph deployments.
+    geo_featured_tag_id: str = Field(
+        default="b69b8b1659df4e6d99d79956a30e8932",
+        description="Featured-marker tag entity id (cascade tier)"
+    )
+    geo_curated_tag_id: str = Field(
+        default="7f796eb5bfc5449c98649bf7d996a2ca",
+        description="Curated-marker tag entity id (cascade tier)"
+    )
+    geo_score_property_id: str = Field(
+        default="85a4668a42fa4f488969c0a9de0c294b",
+        description="Score property id; >=2 scored candidates escalate to ambiguous"
+    )
+    geo_catchall_space_id: str = Field(
+        default="b5a31f8182b042437ede0f84ee02f104",
+        description="Catch-all space demoted by the properly-placed cascade tier"
+    )
+    geo_dataset_space_ids: str = Field(
+        default="5908c73ad336472ccbd983491d2d17e4,941964642f4d3e70ef48f54a3915277d,44eb138f564fbed6ed9ce543de1b849c,da96a4c26e718bfa6c27c3b1f3c316cd,1b3d2963d14de99d4e440000125edb65",
+        description="Comma-separated dataset space ids (excluded from canonical selection)"
+    )
+
+    @property
+    def geo_dataset_space_ids_list(self) -> list[str]:
+        return [s.strip() for s in self.geo_dataset_space_ids.split(",") if s.strip()]
+
     # API Configuration
     api_host: str = Field(
         default="0.0.0.0",
