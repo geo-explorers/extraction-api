@@ -24,9 +24,13 @@ from typing import Dict, List
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.config.settings import settings
+
 MAX_CLAIMS = 200
 MAX_FACETS = 8
-MAX_VOCABULARY_ITEMS = 500
+# Contract cap per facet vocabulary — env-configurable
+# (CLAIMS_LINK_MAX_VOCABULARY), read once at import when the class is built.
+MAX_VOCABULARY_ITEMS = settings.claims_link_max_vocabulary
 
 _FACET_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 

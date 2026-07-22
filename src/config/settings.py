@@ -205,6 +205,10 @@ class Settings(BaseSettings):
         default="low",
         description="Gemini 3+ thinking level for claims.link_entities: minimal|low|medium|high. Empty disables (required if overriding to a 2.5-era model)."
     )
+    claims_link_max_vocabulary: int = Field(
+        default=2000,
+        description="Max vocabulary items per facet in claims.link_entities (contract cap, applied at import)"
+    )
 
     # API Configuration
     api_host: str = Field(
