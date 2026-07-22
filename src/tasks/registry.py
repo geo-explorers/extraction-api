@@ -30,6 +30,7 @@ from src.tasks.podcast_export import PODCAST_EXPORT_SPEC
 from src.tasks.news_extract_topics_and_entities import (
     NEWS_EXTRACT_TOPICS_AND_ENTITIES_SPEC,
 )
+from src.tasks.claims_link_entities import CLAIMS_LINK_ENTITIES_SPEC
 from src.tasks.podcast_extract_claims import (
     podcast_workflow,
     PodcastExtractInput,
@@ -70,6 +71,7 @@ _STANDALONE_SPECS: list[TaskSpec] = [
     GUEST_EXTRACT_SPEC,
     HOST_EXTRACT_SPEC,
     NEWS_EXTRACT_TOPICS_AND_ENTITIES_SPEC,
+    CLAIMS_LINK_ENTITIES_SPEC,
     PODCAST_EXPORT_SPEC,
     GEO_FETCH_ENTITIES_SPEC,
     SHEETS_EXPORT_TABLE_SPEC,
