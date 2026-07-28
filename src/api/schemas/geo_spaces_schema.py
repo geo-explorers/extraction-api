@@ -1,7 +1,7 @@
 """Pydantic contracts for the geo spaces -> entities -> sheet pipeline.
 
 `Space` and `Entity` mirror the Geo/Hypergraph knowledge-graph read API
-(https://testnet-api.geobrowser.io/graphql): a space's human name/description
+(https://api-testnet.geobrowser.io/graphql): a space's human name/description
 live on its `page`; an entity carries `types { id name }` and `spaceIds`, and is
 selected by a Geo *type entity id* (32-hex), not a type name. These models are
 deliberately generic and shared across the standalone tasks (`geo.fetch_entities`,

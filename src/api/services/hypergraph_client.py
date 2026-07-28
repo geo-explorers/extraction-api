@@ -3,7 +3,7 @@
 A headless Hatchet worker cannot use the HyperGraph MCP, so it queries the Geo
 GraphQL API directly over HTTP. Endpoint + robustness patterns are grounded in
 the geo-explorers publishing code (postgres_to_geo), verified live against
-https://testnet-api.geobrowser.io/graphql (mainnet: https://api.geobrowser.io/graphql).
+https://api-testnet.geobrowser.io/graphql (mainnet: https://api.geobrowser.io/graphql).
 Reads are UNAUTHENTICATED.
 
 Design notes:

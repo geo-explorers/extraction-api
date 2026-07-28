@@ -286,7 +286,7 @@ class Settings(BaseSettings):
     # use the HyperGraph MCP, so it queries this HTTP endpoint directly. Reads are
     # UNAUTHENTICATED (matching the geo-explorers reference clients).
     hypergraph_graphql_url: str = Field(
-        default="https://testnet-api.geobrowser.io/graphql",
+        default="https://api-testnet.geobrowser.io/graphql",
         description="Geo GraphQL endpoint for reading spaces/entities (mainnet: https://api.geobrowser.io/graphql)"
     )
     hypergraph_api_key: str | None = Field(
