@@ -51,6 +51,10 @@ class ClaimsExtractInput(BaseModel):
   custom_instructions: str = Field(
     default="", max_length=CUSTOM_INSTRUCTIONS_MAX_CHARS
   )
+  # When true, each claim is classified verifiable-fact vs opinion and surfaced
+  # as `is_factual` (True = verifiable fact, False = opinion). Off by default so
+  # existing callers keep the original claim shape (is_factual stays null).
+  classify_factuality: bool = False
 
   @model_validator(mode="after")
   def _validate_caps(self) -> "ClaimsExtractInput":
@@ -76,6 +80,9 @@ class ExtractedClaimOut(BaseModel):
   topic: Optional[str] = None  # None when grouping=false
   document_indices: List[int] = Field(default_factory=list)
   confidence: float = Field(ge=0.0, le=1.0, default=0.8)
+  # True = verifiable fact, False = opinion; None when factuality was not
+  # requested (classify_factuality=false).
+  is_factual: Optional[bool] = None
 
 
 class ExtractedQuoteOut(BaseModel):

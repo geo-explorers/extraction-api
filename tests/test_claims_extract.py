@@ -119,15 +119,19 @@ def test_optional_sections_appear_only_when_requested():
     bare = build_extract_prompt(_input(), [])
     assert "QUOTE EXTRACTION (REQUESTED)" not in bare
     assert "NARRATIVE SUMMARY (REQUESTED)" not in bare
+    assert "FACTUALITY CLASSIFICATION (REQUESTED)" not in bare
     assert "quotes were NOT requested".lower() in bare.lower()
     assert "summary was NOT requested".lower() in bare.lower()
+    assert "factuality classification was not requested" in bare.lower()
 
     full = build_extract_prompt(
-        _input(include_quotes=True, include_summary=True), []
+        _input(include_quotes=True, include_summary=True, classify_factuality=True), []
     )
     assert "QUOTE EXTRACTION (REQUESTED)" in full
     assert "NARRATIVE SUMMARY (REQUESTED)" in full
+    assert "FACTUALITY CLASSIFICATION (REQUESTED)" in full
     assert "NOT requested" not in full
+    assert "is_factual null" not in full  # keep-null line dropped when requested
 
 
 def test_custom_instructions_are_fenced_with_guardrail():
@@ -417,3 +421,36 @@ def test_result_accepts_dumped_extraction_rows():
     ).model_dump()
     result = ClaimsExtractResult(**dumped)
     assert result.claims[0].text == "t"
+
+
+# ── Factuality classification ────────────────────────────────────────────────
+
+
+def test_classify_factuality_defaults_off_and_field_defaults_null():
+    assert _input().classify_factuality is False
+    assert ExtractedClaimOut(text="x").is_factual is None
+
+
+def test_factuality_stripped_when_off_kept_when_on():
+    from src.pipeline.claims_extract_core import assemble_result
+
+    # The model emitted is_factual on both claims regardless of the request.
+    extraction = {
+        "claims": [
+            {"text": "Taxes rose 4% in 2025.", "confidence": 0.9, "is_factual": True},
+            {"text": "The policy is reckless.", "confidence": 0.9, "is_factual": False},
+        ],
+        "groups": [],
+        "quotes": [],
+        "summary": "",
+    }
+
+    # Not requested -> deterministically nulled even though the model set it.
+    off = assemble_result(_input(grouping=False), extraction, [], model_used="m")
+    assert [c.is_factual for c in off.claims] == [None, None]
+
+    # Requested -> preserved through sanitize + reindex.
+    on = assemble_result(
+        _input(grouping=False, classify_factuality=True), extraction, [], model_used="m"
+    )
+    assert [c.is_factual for c in on.claims] == [True, False]

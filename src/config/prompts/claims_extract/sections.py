@@ -84,6 +84,22 @@ Generate a 350-500 character narrative summary in the `summary` field:
   claim covers. Promote the fact to a claim or remove it from the summary."""
 
 
+FACTUALITY_SECTION = """─────────────────────────────────────────────
+FACTUALITY CLASSIFICATION (REQUESTED)
+─────────────────────────────────────────────
+
+For every claim, set `is_factual`:
+- true  — a verifiable statement of fact: it asserts something that could in
+  principle be checked against evidence (events, numbers, dated actions,
+  attributable statements), whether or not it happens to be correct.
+- false — an unverifiable opinion, value judgement, prediction, or normative
+  "should" statement.
+
+Classify each claim as written, without adding hedging. When this section is
+present, every claim must carry an explicit true or false — never leave
+`is_factual` null."""
+
+
 CONSOLIDATION_SECTION = """─────────────────────────────────────────────
 CROSS-DOCUMENT CONSOLIDATION
 ─────────────────────────────────────────────
@@ -160,3 +176,4 @@ Populate the structured response as follows:
 KEEP_GROUPS_EMPTY = "- Output an EMPTY groups array; leave every claim's topic empty."
 KEEP_QUOTES_EMPTY = "- Quotes were NOT requested: output an EMPTY quotes array."
 KEEP_SUMMARY_EMPTY = "- A summary was NOT requested: output an empty summary string."
+KEEP_FACTUALITY_NULL = "- Factuality classification was not requested: leave every claim's is_factual null."
