@@ -179,6 +179,9 @@ def assemble_result(
     if not input.grouping:
         for claim in claims:
             claim.topic = None
+    if not input.classify_factuality:
+        for claim in claims:
+            claim.is_factual = None
 
     claims, index_map = filter_and_reindex_claims(
         claims,

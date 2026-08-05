@@ -52,6 +52,14 @@ class LLMClaim(BaseModel):
         default=0.8,
         description="0.9+ explicitly stated, 0.7-0.9 strongly implied, 0.5-0.7 inferred.",
     )
+    is_factual: Optional[bool] = Field(
+        default=None,
+        description=(
+            "True if the claim is a verifiable statement of fact, False if it is "
+            "an unverifiable opinion or value judgement. Leave null unless "
+            "factuality classification was requested."
+        ),
+    )
 
 
 class LLMGroup(BaseModel):

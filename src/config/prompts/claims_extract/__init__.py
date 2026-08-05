@@ -13,6 +13,7 @@ from src.config.prompts.claims_extract.sections import (
     FLAT_SECTION,
     QUOTES_SECTION,
     SUMMARY_SECTION,
+    FACTUALITY_SECTION,
     CONSOLIDATION_SECTION,
     FOCUS_TOPICS_SECTION,
     LANGUAGE_SECTION,
@@ -22,6 +23,7 @@ from src.config.prompts.claims_extract.sections import (
     KEEP_GROUPS_EMPTY,
     KEEP_QUOTES_EMPTY,
     KEEP_SUMMARY_EMPTY,
+    KEEP_FACTUALITY_NULL,
 )
 
 __all__ = [
@@ -34,6 +36,7 @@ __all__ = [
     "FLAT_SECTION",
     "QUOTES_SECTION",
     "SUMMARY_SECTION",
+    "FACTUALITY_SECTION",
     "CONSOLIDATION_SECTION",
     "FOCUS_TOPICS_SECTION",
     "LANGUAGE_SECTION",
@@ -43,4 +46,5 @@ __all__ = [
     "KEEP_GROUPS_EMPTY",
     "KEEP_QUOTES_EMPTY",
     "KEEP_SUMMARY_EMPTY",
+    "KEEP_FACTUALITY_NULL",
 ]

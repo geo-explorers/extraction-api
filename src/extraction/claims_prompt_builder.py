@@ -23,6 +23,7 @@ from src.config.prompts.claims_extract import (
     FLAT_SECTION,
     QUOTES_SECTION,
     SUMMARY_SECTION,
+    FACTUALITY_SECTION,
     CONSOLIDATION_SECTION,
     FOCUS_TOPICS_SECTION,
     LANGUAGE_SECTION,
@@ -32,6 +33,7 @@ from src.config.prompts.claims_extract import (
     KEEP_GROUPS_EMPTY,
     KEEP_QUOTES_EMPTY,
     KEEP_SUMMARY_EMPTY,
+    KEEP_FACTUALITY_NULL,
 )
 
 _SECTION_SEP = "\n\n"
@@ -154,6 +156,10 @@ def _final_validation(input: ClaimsExtractInput, grouping: bool) -> str:
             "- The summary is 350-500 characters and asserts no specific fact "
             "that is missing from the claims."
         )
+    if input.classify_factuality:
+        checks.append(
+            "- Every claim has is_factual set to an explicit true or false."
+        )
     if len(input.documents) > 1:
         checks.append(
             "- The same fact does not appear as multiple near-duplicate claims "
@@ -170,6 +176,8 @@ def _output_contract(input: ClaimsExtractInput, grouping: bool) -> str:
         lines.append(KEEP_QUOTES_EMPTY)
     if not input.include_summary:
         lines.append(KEEP_SUMMARY_EMPTY)
+    if not input.classify_factuality:
+        lines.append(KEEP_FACTUALITY_NULL)
     return "\n".join(lines)
 
 
@@ -198,6 +206,8 @@ def build_extract_prompt(input: ClaimsExtractInput, topics: List[str]) -> str:
         sections.append(QUOTES_SECTION)
     if input.include_summary:
         sections.append(SUMMARY_SECTION)
+    if input.classify_factuality:
+        sections.append(FACTUALITY_SECTION)
     if input.focus_topics:
         sections.append(
             FOCUS_TOPICS_SECTION.format(focus_topics=", ".join(input.focus_topics))
