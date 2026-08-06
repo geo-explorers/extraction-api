@@ -57,12 +57,13 @@ Iterate through the topics in the order provided. Each topic has been selected u
 
 Headline scope check: before extracting claims for a topic, confirm it relates to the headline event. If a topic covers a parallel or unrelated story that happens to appear in the same source articles (e.g., a different policy announcement, a separate product from the same company), skip it entirely.
 
-For each qualifying topic, scan the source articles and extract claims that fit it. Aim for 2-5 claims per topic. If a topic yields fewer than 2 claims after a thorough scan, this is an extraction problem first, not a topic problem — re-scan the sources before deciding the topic is under-supported.
+For each qualifying topic, scan the source articles and extract claims that fit it. Aim for 4-7 substantive claims per topic when the sources support them — rich multi-source stories should land near the top of that range. Never pad toward a count: a restated or near-duplicate claim is worse than a missing one. If a topic yields fewer than 2 claims after a thorough scan, this is an extraction problem first, not a topic problem — re-scan the sources before deciding the topic is under-supported.
 
 Source completeness sweep (perform BEFORE moving to Step 4):
 Walk each source article paragraph by paragraph from start to finish. For every body paragraph longer than two sentences, ask: "Does at least one of my claims carry a substantive fact from this paragraph?" If the paragraph contains any substantive fact — a verifiable event, statistic, named actor's action, official response, direct consequence, transmission/causal mechanism, historical comparison, or precedent explanation — and no claim covers it, you MUST do one of the following before proceeding:
 (a) Add a claim under the nearest existing topic, even if the fit is loose. "Nearest" is the correct standard — do not require a perfect match.
 (b) If no existing topic is even loosely related, RELABEL one of the existing topics to be one level more general so the orphan fact has a home (e.g., "American Ebola exposure" → "Ebola outbreak and exposure context" so it can absorb transmission-mechanism facts). Relabeling is preferred over leaving paragraph content unrepresented.
+(c) Whichever option you choose, the resulting claim must still pass Step 4's Shuffle Rule. A paragraph is NOT covered by a claim that only makes sense in the source's narrative order. If covering a paragraph requires referencing another event, name that event explicitly inside the claim.
 
 Pay particular attention to:
 - Paragraphs in the second half of articles, where motive, related events, and official responses frequently appear.
@@ -76,13 +77,29 @@ Body-paragraph coverage requirement: when this sweep completes, no body paragrap
 STEP 4: CLAIM QUALITY CRITERIA
 ─────────────────────────────────────────────
 
-Every extracted claim must meet ALL of the following:
+Every extracted claim must meet ALL of the following.
+
+PRECEDENCE: when rules conflict, self-containment wins. It outranks the word
+targets in "Concise" and the coverage sweeps in Step 3. A claim that only makes
+sense inside the source's narrative order is a defect no matter how much
+coverage it adds — the coverage sweep NEVER justifies a context-dependent claim.
 
 Self-Contained (the Shuffle Rule)
 Write every claim as if it will be read in isolation, shuffled into a random order, without the headline or topic name visible.
-- Replace all pronouns (he, she, it, they) with explicit named entities.
+- Replace all pronouns (he, she, it, they) with explicit named entities. A possessive or pronoun ("its," "their") may only appear AFTER the entity it refers to has been named in that same claim.
 - Never use shorthand like "the company," "the agency," "the report." Write the full proper name every time.
 - Include the specific names, dates, locations, and quantities needed for a reader to understand the claim on its own.
+- Name the event inside the claim. A claim about an event must identify WHICH event by actor, name, or date — never by a bare definite reference ("the incident," "the incidents," "the breach," "the misconfiguration," "the deal," "the ruling," "the attempts") whose referent lives in a different claim or in the source's narrative flow. A definite reference is allowed only when the same claim has already introduced its referent.
+- Never open a claim with a discourse connective that presumes narrative order: "In a separate incident," "In another case," "In one incident," "Following the ...," "After the announcement," "Meanwhile," "Separately," "In response." The claims will be shuffled — for the reader there is no "separate," "another," or "following."
+- Multi-incident and series coverage: when the sources cover several related events (a wave of incidents, a string of lawsuits, back-to-back announcements), anchor EVERY claim to its specific event (actor + event + date or venue). Two claims about two different events in the series must each be readable alone and distinguishable from each other.
+
+Shuffle Rule examples:
+BAD: "Both companies stated the incidents occurred in testing environments with reduced safeguards." (Which companies? Which incidents? Meaningless in isolation.)
+GOOD: "Refinery operators Petrova Energy and Coastal Fuels stated that the March 2026 fires at their Gulf Coast plants occurred during maintenance shutdowns with reduced safety staffing."
+BAD: "In a separate incident, the exchange froze withdrawals after its hot wallet was drained." (Separate from what? Which exchange?)
+GOOD: "The Singapore-based exchange Meridex froze customer withdrawals on April 3, 2026 after attackers drained $40 million from its hot wallet."
+BAD: "When its filing was challenged, the company amended the disclosure to appear compliant." (Whose filing?)
+GOOD: "When the SEC challenged Halcyon Therapeutics' October 2025 filing, Halcyon amended the disclosure to appear compliant."
 
 Atomic — the Split Test
 Each claim should express one coherent fact with its essential identifiers (who, where, when, how many).
@@ -104,10 +121,11 @@ Claim A: "A bomb blast occurred in Quetta." Claim B: "9 people were killed." Cla
 Protect High-Value Standalone Facts
 Do not merge a fact into another claim if doing so buries it. Named statistics, named actors' official responses, specific laws or dates, and concrete consequences each deserve their own claim when they are independently informative.
 
-Attribution Stripping
-- Remove reporting verbs: do NOT preface claims with "X said that," "according to X."
-- Extract the fact itself, not the fact-of-statement.
-- Exception: keep attribution when the act of stating IS the news (e.g., "The Secretary testified before Congress that...").
+Attribution — strip only what is independently established
+- Strip reporting-verb scaffolding ("X said that," "according to X") ONLY when the underlying fact is corroborated by 2+ independent outlets, official records, or direct observation. For those facts, extract the fact itself, not the fact-of-statement.
+- KEEP attribution when the statement is a party's characterization, denial, estimate, accusation, or defense ("Regulators described the outage as preventable," "The airline disputed the casualty figure"). Converting an attributed characterization into a bare assertion of fact is a factuality error — the most common one in news extraction.
+- KEEP attribution when the fact rests on a single source's account, and pair it with conditional language per "Evidence-Appropriate Language" below.
+- Always keep attribution when the act of stating IS the news (e.g., "The Secretary testified before Congress that...").
 
 Temporally Grounded
 - Use absolute dates ("May 12, 2026") instead of relative references ("Monday," "yesterday").
@@ -119,14 +137,22 @@ Evidence-Appropriate Language
 - This is especially important for health, science, and medical claims where overstatement carries real-world risk.
 
 Concise
-- Target 15-25 words per claim. Hard maximum 35 words.
-- If a claim exceeds 30 words, re-examine it with the split test.
+- Target 15-25 words per claim. Hard maximum 35 words — except when the words needed to name a claim's event (Shuffle Rule anchoring) push it over; self-containment outranks the cap, up to 40 words.
+- If a claim exceeds 30 words, re-examine it with the split test — but never delete an event anchor to fit the target.
 
 Verifiable & Source-Grounded
 - Must be checkable against the source articles. Do not extract opinions, anecdotes, or hypotheticals without factual grounding.
 - Every fact, date, name, and statistic in a claim must be traceable to a specific sentence in the provided source articles. Do not supplement with information from your training data or prior knowledge, even if you believe it to be accurate. If a specific date, number, or name is not explicitly stated in the sources, do not include it in a claim. When in doubt, omit rather than infer.
 - Preserve source spellings of proper names exactly as the source writes them, even when the spelling looks non-standard or appears wrong to you. If the source writes "Jennifer Sibel Newsom," your claim must say "Jennifer Sibel Newsom" — not the version you believe is correct from prior knowledge. Spelling normalization counts as supplementing from training data and is forbidden.
 - If a source attribution or sentence ends mid-text (signaled by trailing "…", "[…]", "[&#8230;]", "—", or a sentence that cuts off without a verb or completion), treat everything past the truncation point as missing. Do not complete the name, finish the sentence, or infer the rest. Either skip the fact entirely, or write the claim using only what the source verifiably contains before the truncation.
+
+Importance-Graded
+Assign each claim an "importance" score: how central it is to THIS story. Downstream systems rank and cap claims by this score — a mis-graded claim is a mis-ranked claim.
+- 0.9-1.0 — the core event itself: what the headline announces. At most 2-3 claims belong here.
+- 0.7-0.85 — major causes, direct consequences, and key actors' official responses.
+- 0.5-0.65 — supporting detail, mechanism, and load-bearing background.
+- 0.3-0.45 — peripheral context a reader could skip without losing the story.
+Grade RELATIVE to this story's claim set, not on an absolute scale: the scores across your claims should span at least 0.3, and must not cluster at one value. Importance is not confidence — a well-sourced but peripheral fact is high-confidence, low-importance.
 
 ─────────────────────────────────────────────
 STEP 5: CROSS-SOURCE CONSOLIDATION
@@ -135,7 +161,9 @@ STEP 5: CROSS-SOURCE CONSOLIDATION
 After gathering all candidate claims:
 - Identify claims that assert the same fact in different phrasings across sources. Keep ONE — the most specific, complete version — and record all supporting source indices.
 - Drop near-duplicate phrasings.
-- Multi-source claims (source_indices length >= 2) are preferred. Single-source claims are acceptable when the source is an official statement, filing, or a named expert providing unique technical detail.
+- Cite honestly: include a source index in source_indices ONLY if that specific source actually states the claim's fact. Do not add indices to make a claim look better-evidenced, and do not omit a source that does state the fact. Every number, date, and named actor in the claim must appear in every source you cite for it — if a source states only part of the fact, cite it only when the part it states is the claim's core assertion.
+- Count outlets, not URLs: when several provided sources share the same publisher or domain (e.g., three bloomberg.com links), treat them as ONE outlet when judging evidence strength. Corroboration means independent outlets, not syndicated or repeated copies.
+- Multi-source claims (2+ independent outlets) are preferred. Single-outlet claims are acceptable when the source is an official statement, filing, or a named expert providing unique technical detail.
 
 ─────────────────────────────────────────────
 STEP 6: QUOTE EXTRACTION
@@ -167,6 +195,8 @@ HARD RULE: Every collection in the final output must contain at least 2 claims. 
 When satisfying the minimum-2 rule, prioritize claims that answer WHY the event happened, WHAT its consequences are, or WHO was involved over claims that describe procedural details of reporting, investigation logistics, or confirmation processes. A claim about an official response or a related prior incident is more valuable than a claim about evidence collection procedures or hospital administrative confirmations.
 
 Anti-filler rule: never satisfy the minimum-2 by restating one fact in two phrasings, splitting a single source sentence across two claims, or adding an editorial restatement (e.g., a sentence that describes the significance of the previous claim rather than asserting a new fact). If after a thorough re-scan a topic genuinely yields only one substantive claim, fold that claim into the nearest related topic instead. A topic with one real claim absorbed into a neighbor is strictly better than a topic with one real claim plus one filler restatement.
+
+Pairwise paraphrase test: within each collection, compare every pair of claims and ask "would a reader learn anything from the second claim after reading the first?" If not, the pair is a paraphrase — merge into the more specific version. If the merge drops the collection below 2 claims, fold the survivor into the nearest related collection rather than keeping a padded pair.
 
 Perspective collections (optional):
 - Include perspective collections only when the story has genuinely distinct stakeholder framings that add value beyond what the topic collections already convey.
@@ -226,12 +256,20 @@ Collection integrity:
 - Does any collection have fewer than 2 claims? If yes, merge it into another collection or add a missing claim from the sources. Do not output single-claim collections.
 - Are perspective collections separated by topic collections in collection_order? Move perspectives to the end.
 
+Shuffle audit (mandatory, claim by claim):
+- Read each claim ALONE, imagining every other claim has been deleted. Flag any claim that:
+  (a) opens with a discourse connective ("In a separate incident," "In another case," "Following the ...," "Meanwhile," "Separately," "In response," "Also,"),
+  (b) contains a definite event reference ("the incident(s)," "the breach," "the misconfiguration," "the deal," "the lawsuit," "the ruling," "the attempts," "the project") whose referent is not named earlier in that same claim, or
+  (c) uses a pronoun or possessive ("its," "their," "his," "her") before the entity it refers to has been named in that claim.
+- Rewrite every flagged claim to name its referent explicitly (actor + event + date or venue). Rewrite, do not delete — drop a flagged claim only when the sources cannot support the explicit version.
+
 Structural checks:
 - Does any claim contain unresolved pronouns or generic noun phrases? Replace with proper names.
 - Does any claim use a relative date that can be resolved? Resolve it.
-- Does any claim exceed 35 words? Apply the split test and split if possible.
+- Does any claim exceed 35 words (40 when the extra words are its Shuffle Rule event anchor)? Apply the split test and split if possible — but never by deleting the event anchor.
 - Does any claim_index in a collection, quote, or perspective point to the wrong claim? Fix it.
 - Is the summary within 350-500 characters? Rewrite if not.
+- Do the importance scores span at least 0.3 and avoid clustering at one value? Re-grade relative to the story if not — the headline's core event claims must outrank peripheral context.
 
 OUTPUT FORMAT (STRICT)
 
@@ -243,7 +281,8 @@ Return only valid JSON without markdown block fencing, in this exact shape:
       "text": "Self-contained, verifiable claim.",
       "topic": "Exact topic label from the provided list",
       "source_indices": [0, 2],
-      "confidence": 0.9
+      "confidence": 0.9,
+      "importance": 0.85
     }}
   ],
   "quotes": [
@@ -277,6 +316,7 @@ claim_index values refer to the 0-based position in the "claims" array.
 Quotes must be verbatim from source text.
 source_indices must be valid integer indices into the provided "sources" list.
 Confidence values: 0.9+ = explicitly stated, 0.7-0.9 = strongly implied, 0.5-0.7 = inferred.
+Importance values follow the Importance-Graded rubric in Step 4 (0.9+ core event, 0.7-0.85 causes/consequences/responses, 0.5-0.65 supporting detail, 0.3-0.45 peripheral context).
 Do not invent claims, topics, perspectives, or collections.
 Do not include explanations, metadata, or commentary outside the JSON.
 

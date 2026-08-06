@@ -35,10 +35,13 @@ LABEL_MAX_WORDS = 5
 MIN_OVERVIEW_TOPICS = 3
 MAX_OVERVIEW_TOPICS = 6
 
-# Longest source >= this many chars (or a single source) -> use it alone;
-# otherwise pool every source so a thin multi-source story still shows all
-# angles. Mirrors enrich.ts LONG_PRIMARY_THRESHOLD.
-_LONG_PRIMARY_THRESHOLD = 1500
+# Per-source floor when pooling multi-source stories: every source keeps at
+# least this many chars even when the fair share (_CONTENT_CHAR_LIMIT / n)
+# would be smaller, so thin-but-distinct outlets still contribute signal.
+# (Replaces the old LONG_PRIMARY_THRESHOLD single-source shortcut, which fed
+# Pass 1 only the longest outlet's angle on 90%+ of multi-source stories and
+# skewed every downstream claim toward that one outlet's framing.)
+_POOL_PER_SOURCE_MIN_CHARS = 1500
 # The prompt sees at most this many characters of pooled content (char-based
 # slice, multibyte-safe — matches content.slice(0, 12_000) in enrich.ts).
 _CONTENT_CHAR_LIMIT = 12_000
@@ -109,19 +112,24 @@ def validate_overview_topics_response(value) -> List[str]:
 
 
 def pool_source_content(headline: str, sources: List[NewsArticleSource]) -> str:
-  """Adaptive content selection mirroring enrich.ts.
+  """Multi-source content selection for the topic pass.
 
   - Each source contributes its body content (or its title, when the body is
     empty but the title carries some signal).
-  - If the longest source is rich (>= _LONG_PRIMARY_THRESHOLD chars) or there is
-    only one source, use that source alone — pooling syndicated copies just
-    inflates redundant claims.
-  - Otherwise pool ALL sources as "Source {{i}} ({{url}}):\\n{{text}}" joined by
-    a separator, so a story whose sources are individually thin still exposes
-    every distinct angle.
+  - A single source is used alone, untruncated.
+  - Multiple sources are ALWAYS pooled, longest first, as
+    "Source {{i}} ({{url}}):\\n{{text}}" joined by a separator. Each source is
+    capped to a fair share of the prompt budget
+    (max(_CONTENT_CHAR_LIMIT / n, _POOL_PER_SOURCE_MIN_CHARS)) so one long
+    article cannot crowd the other outlets out of the topic pass. Topics must
+    see every outlet's angle — the topic prompt's redundancy test handles
+    syndicated near-copies; the old use-the-longest-alone shortcut instead
+    locked topics (and every claim grouped under them) to one outlet's framing.
   - Last resort (no usable source text): the headline.
 
-  Returns the pooled text BEFORE the prompt char-limit slice (the caller slices).
+  Returns the pooled text BEFORE the prompt char-limit slice (the caller
+  slices to _CONTENT_CHAR_LIMIT; sources are longest-first, so that final
+  slice can only trim the thinnest tail source).
   """
   contents: List[tuple[str, str]] = []
   for s in sources:
@@ -137,11 +145,13 @@ def pool_source_content(headline: str, sources: List[NewsArticleSource]) -> str:
     return f"{headline}\n\n"
 
   contents.sort(key=lambda kv: len(kv[1]), reverse=True)
-  _, longest_text = contents[0]
-  if len(longest_text) >= _LONG_PRIMARY_THRESHOLD or len(contents) == 1:
-    return longest_text
+  if len(contents) == 1:
+    return contents[0][1]
+
+  per_source = max(_CONTENT_CHAR_LIMIT // len(contents), _POOL_PER_SOURCE_MIN_CHARS)
   return "\n\n---\n\n".join(
-    f"Source {i + 1} ({url}):\n{text}" for i, (url, text) in enumerate(contents)
+    f"Source {i + 1} ({url}):\n{text[:per_source]}"
+    for i, (url, text) in enumerate(contents)
   )
 
 

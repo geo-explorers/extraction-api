@@ -113,19 +113,42 @@ def test_pool_single_short_source_used_alone():
     assert pool_source_content("H", [_src("u1", body)]) == body
 
 
-def test_pool_uses_longest_alone_when_above_threshold():
-    long_body = "a" * 1600  # >= 1500 threshold
+def test_pool_multi_source_always_pools_even_with_rich_primary():
+    # A rich primary no longer crowds out the other outlets: every source
+    # appears, longest first (this replaced the use-the-longest-alone shortcut).
+    long_body = "a" * 1600
     short_body = "b" * 100
     out = pool_source_content("H", [_src("u1", long_body), _src("u2", short_body)])
-    assert out == long_body
+    assert out.startswith("Source 1 (u1):\n")
+    assert "\n\n---\n\nSource 2 (u2):\n" in out
+    assert short_body in out
 
 
 def test_pool_combines_thin_multi_sources_in_length_order():
     s_short = _src("u-short", "b" * 100)
-    s_long = _src("u-long", "a" * 300)  # both < 1500 -> pool, longest first
+    s_long = _src("u-long", "a" * 300)  # pooled, longest first
     out = pool_source_content("H", [s_short, s_long])
     assert out.startswith("Source 1 (u-long):\n")
     assert "\n\n---\n\nSource 2 (u-short):\n" in out
+
+
+def test_pool_caps_each_source_to_fair_share():
+    # 3 sources -> per-source cap is max(12000 // 3, 1500) = 4000 chars; a
+    # 10k-char primary is trimmed so the tail outlets keep their budget.
+    huge = _src("u1", "x" * 10_000)
+    mid = _src("u2", "y" * 3_000)
+    small = _src("u3", "z" * 2_000)
+    out = pool_source_content("H", [small, huge, mid])
+    assert out.count("x") == 4_000
+    assert out.count("y") == 3_000
+    assert out.count("z") == 2_000
+
+
+def test_pool_fair_share_never_drops_below_min():
+    # 10 sources -> 12000 // 10 = 1200 < 1500 floor; each keeps up to 1500.
+    sources = [_src(f"u{i}", chr(ord("a") + i) * 1_600) for i in range(10)]
+    out = pool_source_content("H", sources)
+    assert out.count("a") == 1_500
 
 
 def test_pool_falls_back_to_title_when_body_empty():
