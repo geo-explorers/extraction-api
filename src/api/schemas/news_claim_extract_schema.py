@@ -28,6 +28,10 @@ class ExtractedClaim(BaseModel):
   topic: str
   source_indices: List[int] = Field(default_factory=list)
   confidence: float = Field(ge=0.0, le=1.0, default=0.8)
+  importance: Optional[float] = Field(
+    ge=0.0, le=1.0, default=None,
+    description="How central this claim is to the story (1.0 = the core event itself). Graded relative to THIS story's claim set; consumers rank/cap claims by it."
+  )
 
 
 class ExtractedQuote(BaseModel):
