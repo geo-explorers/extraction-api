@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 from src.config.prompts.keyword_extraction_prompt import KEYWORD_EXTRACTION_PROMPT
 from src.api.utils import llm_model
 from src.infrastructure.logger import get_logger
@@ -10,14 +10,12 @@ logger = get_logger(__name__)
 MAX_RETRIES = 3
 
 
-def extract_keyword_and_topics(
+def extract_topics(
     episode: Dict[str, Any],
     topics_list: List[str],
-    min_keywords: int,
-    max_keywords: int,
     min_topics: int,
     max_topics: int
-) -> Tuple[List[str], List[str], Dict[str, List[str]]]:
+) -> List[str]:
   try:
     chain = llm_model.build_chain(
       prompt=KEYWORD_EXTRACTION_PROMPT
@@ -28,8 +26,6 @@ def extract_keyword_and_topics(
   invoke_params = {
     "episode": episode,
     "topics_list": topics_list,
-    "min_keywords": min_keywords,
-    "max_keywords": max_keywords,
     "min_topics": min_topics,
     "max_topics": max_topics,
   }
@@ -42,24 +38,29 @@ def extract_keyword_and_topics(
       break
     except Exception as e:
       last_error = e
-      logger.warning(f"Keyword extraction attempt {attempt}/{MAX_RETRIES} failed: {e}")
+      logger.warning(f"Topic extraction attempt {attempt}/{MAX_RETRIES} failed: {e}")
       if attempt == MAX_RETRIES:
-        raise Exception(f"Keyword extraction failed after {MAX_RETRIES} attempts") from last_error
-  
-  
-  try:
-    keywords =  response["keywords"]
-  except KeyError:
-    raise Exception("Failed extracting keywords")
+        raise Exception(f"Topic extraction failed after {MAX_RETRIES} attempts") from last_error
 
   try:
-    topics =  response["topics"]
+    topics = response["topics"]
   except KeyError:
     raise Exception("Failed extracting topics")
 
-  topic_keywords = response.get("topic_keywords", {})
+  # Hard validation against the curated topics list. Even with the prompt
+  # explicitly forbidding invention, Gemini occasionally hallucinates a topic
+  # that matches strong episode cues (e.g. emits "Cholesterol" when the title
+  # mentions cholesterol). Drop any returned topic that isn't in the input
+  # list so no LLM invention can ever leak past this boundary.
+  allowed = set(topics_list)
+  filtered = [t for t in topics if t in allowed]
+  invented = [t for t in topics if t not in allowed]
+  if invented:
+    logger.warning(
+      f"Dropped {len(invented)} LLM-invented topic(s) not in curated list: {invented}"
+    )
 
-  return keywords, topics, topic_keywords
+  return filtered
 
 
 def _parse_llm_response(raw_response: str) -> dict:
