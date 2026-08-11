@@ -49,6 +49,10 @@ From the non-commercial, topic-aligned content, extract objective, verifiable cl
 
 Criteria for Valid Claims
 
+PRECEDENCE: when rules conflict, self-containment wins — it outranks
+conciseness and coverage. A claim that only makes sense inside the episode's
+conversational flow is a defect no matter what it adds.
+
 Atomic
 - Each claim must express exactly one fact.
 - Split compound sentences into multiple claims.
@@ -58,17 +62,19 @@ De-Referenced & Self-Contained (CRUCIAL)
 - NO Shorthand for Main Subjects: If the topic is about a specific concept (e.g., "Dollar Milkshake Theory"), you are PROHIBITED from referring to it as "The theory," "The model," or "The framework." You must write the full name in every single claim.
     - BAD: "The theory predicted rising interest rates."
     - GOOD: "The Dollar Milkshake Theory predicted rising rates."
-- Ban Generic Subjects: Never start a claim with "The company," "The founder," "The legislation," or "The plan." Substitute these with the specific entity name (e.g., "Santiago Capital," "Brent Johnson," "The Dodd-Frank Act").
-- Absolute Pronoun Replacement: Replace all pronouns (he, she, it, they) with explicit entities.
+- Ban Generic Subjects: Never start a claim with "The company," "The founder," "The legislation," or "The plan." Substitute these with the specific entity name (e.g., "Santiago Capital," "Brent Johnson," "The Dodd-Frank Act"). This applies to definite references anywhere in the claim ("the program," "the fund," "the study"), and to the episode's own main subject — re-name it in every claim, however repetitive that feels; the claims will be read separately.
+- Absolute Pronoun Replacement: Replace all pronouns (he, she, it, they) with explicit entities. A possessive ("its," "their") may only appear AFTER the entity it refers to has been named in that same claim.
+- No Conversational Order: Never open a claim with a connective that presumes the episode's flow — "Later in the episode," "Returning to," "As mentioned," "In response," "Following that." The claims will be shuffled.
 
-Attribution Stripping (Direct Assertions)
-- Remove Reporting Verbs: Do NOT preface claims with "The speaker said," "Dr. [Name] stated," "He claimed," "They noted," or "[Name] cited evidence that."
-- Extract the Content, Not the Quote: Extract the fact itself, not the fact that someone said it.
-    - BAD: "Dr. Mark Hyman stated that 60% of the American diet is ultra-processed."
-    - GOOD: "60% of the American diet consists of ultra-processed food."
-    - BAD: "He cited evidence that EMFs negatively affect fertility."
-    - GOOD: "EMFs from devices like laptops can negatively affect fertility."
-- Exception: If the claim is explicitly about the person's biography or actions (e.g., "Dr. Mark Hyman founded Function Health"), keep the name as the subject.
+Attribution — strip only what is independently established
+- A podcast is one speaker's account. Strip reporting-verb scaffolding ("Dr. [Name] stated," "He claimed") ONLY for facts that are independently verifiable public record: dates, biographical facts, published statistics from named sources, historical events.
+    - GOOD (public record, strip): "Dr. Mark Hyman founded Function Health."
+    - GOOD (named public statistic, strip): "The USDA reported that ultra-processed food makes up 60% of the American diet."
+- KEEP attribution (or use conditional language) when a speaker asserts an empirical, scientific, or contested fact on their own authority. Converting a guest's assertion into a bare declarative fact is a factuality error — the most common one in claim extraction.
+    - BAD: "EMFs from devices like laptops can negatively affect fertility." (a guest's contested assertion, stated as fact)
+    - GOOD: "Physician Mark Hyman argued that EMFs from devices like laptops may negatively affect fertility."
+- Name the evidence when a speaker cites it: never "He cited evidence that..." — write "a [institution/journal] study, cited by [speaker], found..." If the speaker never identifies the study, attribute the speaker and use conditional language.
+- Keep attribution when the act of stating IS the fact (a commitment, a prediction, an official position).
 
 Temporally Accurate
 - Distinguish between when a fact happened and when it was simply discussed.
@@ -98,8 +104,10 @@ CONTENT VALIDATION CHECKLIST
 Before finalizing each claim:
 - Is this sentence free of promotional intent?
 - Does it contain exactly one factual assertion?
-- Does the claim start with "X stated," "X said," or "X claimed"? If yes, REMOVE the attribution.
-- Does the claim start with a generic noun phrase like "The theory," "The report," or "The strategy"? If yes, REPLACE it with the full proper name.
+- Is the attribution right for the evidence? Independently verifiable public record → no attribution. A speaker's own empirical or contested assertion → attributed or conditional ("argued that," "may"). Never a bare declarative for a one-speaker claim.
+- Does the claim cite research without naming the study or its citer ("studies show," "he cited evidence")? If yes, name the study's institution/journal or attribute the speaker.
+- Does the claim start with a generic noun phrase like "The theory," "The report," or "The strategy" — or contain one anywhere referring to the episode's main subject? If yes, REPLACE it with the full proper name.
+- Does the claim open with conversational-order language ("Later in the episode," "As mentioned")? If yes, remove it and anchor the claim.
 - Are all pronouns replaced with specific named entities?
 - If I read this claim in isolation without seeing the Topic Name, do I know exactly what it refers to?
 
