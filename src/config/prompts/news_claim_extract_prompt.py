@@ -88,8 +88,10 @@ Self-Contained (the Shuffle Rule)
 Write every claim as if it will be read in isolation, shuffled into a random order, without the headline or topic name visible.
 - Replace all pronouns (he, she, it, they) with explicit named entities. A possessive or pronoun ("its," "their") may only appear AFTER the entity it refers to has been named in that same claim.
 - Never use shorthand like "the company," "the agency," "the report." Write the full proper name every time.
+- The story's own protagonist is NOT exempt. Source articles refer to their subject pronominally after first mention ("the company," "the program," "the startup," "the project," "the fund"); claims must not. If the headline names Few and Far, no claim may say "the company" — write "Few and Far" in every claim that concerns it, however repetitive that feels. Repetition across claims is correct; the claims will be read separately.
 - Include the specific names, dates, locations, and quantities needed for a reader to understand the claim on its own.
 - Name the event inside the claim. A claim about an event must identify WHICH event by actor, name, or date — never by a bare definite reference ("the incident," "the incidents," "the breach," "the misconfiguration," "the deal," "the ruling," "the attempts") whose referent lives in a different claim or in the source's narrative flow. A definite reference is allowed only when the same claim has already introduced its referent.
+- Planned, threatened, or predicted events are events too: name who plans or threatens them and who reported the plan ("attacks planned by Iran-backed Houthi militias, according to Saudi and U.S. intelligence reports") — never "the planned attacks" or "the expected ruling."
 - Never open a claim with a discourse connective that presumes narrative order: "In a separate incident," "In another case," "In one incident," "Following the ...," "After the announcement," "Meanwhile," "Separately," "In response." The claims will be shuffled — for the reader there is no "separate," "another," or "following."
 - Multi-incident and series coverage: when the sources cover several related events (a wave of incidents, a string of lawsuits, back-to-back announcements), anchor EVERY claim to its specific event (actor + event + date or venue). Two claims about two different events in the series must each be readable alone and distinguishable from each other.
 
@@ -130,11 +132,13 @@ Attribution — strip only what is independently established
 Temporally Grounded
 - Use absolute dates ("May 12, 2026") instead of relative references ("Monday," "yesterday").
 - Resolve relative dates using the source's publication date ONLY when the resolution is unambiguous within ±1 week. "Monday," "yesterday," "this week," and "last week" relative to a known publication date are resolvable. "Earlier this year," "in April" without a stated year, "last month" against an undated source, or any phrase that requires guessing the year are NOT resolvable — preserve the source's exact relative phrasing, or omit the date. Never invent a year, month, or day that the source does not state explicitly.
+- Domain periods follow the same rule: resolve "last season," "last year," "this quarter" to the named period ("the 2025-26 Süper Lig season," "fiscal Q1 2026," "2025") when the sources or publication date make the resolution unambiguous; otherwise keep the source's phrasing but anchor it with a year.
 
 Evidence-Appropriate Language
 - When a claim is based on a single study, preliminary research, or one unconfirmed source, use conditional language: "A study suggests...," "Research indicates...," "may," "could."
 - Reserve declarative language ("X causes Y," "X predicts Y") for claims supported by multiple independent sources, official statements, or established scientific consensus.
 - This is especially important for health, science, and medical claims where overstatement carries real-world risk.
+- Research claims carry their evidence identity: name the study's institution, journal, or lead author in each claim that asserts a finding — "a University of Cambridge study found...," never a bare "Researchers found..." or "Participants rated...". If the sources never identify the study beyond the reporting outlet, attribute the outlet ("a study reported by Nature News..."). The study's identity is part of the fact, not optional framing — the headline naming the study does not excuse the claim from naming it.
 
 Concise
 - Target 15-25 words per claim. Hard maximum 35 words — except when the words needed to name a claim's event (Shuffle Rule anchoring) push it over; self-containment outranks the cap, up to 40 words.
@@ -164,6 +168,7 @@ After gathering all candidate claims:
 - Cite honestly: include a source index in source_indices ONLY if that specific source actually states the claim's fact. Do not add indices to make a claim look better-evidenced, and do not omit a source that does state the fact. Every number, date, and named actor in the claim must appear in every source you cite for it — if a source states only part of the fact, cite it only when the part it states is the claim's core assertion.
 - Count outlets, not URLs: when several provided sources share the same publisher or domain (e.g., three bloomberg.com links), treat them as ONE outlet when judging evidence strength. Corroboration means independent outlets, not syndicated or repeated copies.
 - Multi-source claims (2+ independent outlets) are preferred. Single-outlet claims are acceptable when the source is an official statement, filing, or a named expert providing unique technical detail.
+- Never fuse attributions: when sources attribute the same fact to different speakers ("an official said" in one outlet, "a pilot announcement indicated" in another), do not merge them into one clause ("An official and a pilot announcement suggested..."). Keep the single most authoritative attribution — or, when 2+ independent outlets corroborate the fact itself, state the fact declaratively per Step 4's attribution rules.
 
 ─────────────────────────────────────────────
 STEP 6: QUOTE EXTRACTION
@@ -259,8 +264,9 @@ Collection integrity:
 Shuffle audit (mandatory, claim by claim):
 - Read each claim ALONE, imagining every other claim has been deleted. Flag any claim that:
   (a) opens with a discourse connective ("In a separate incident," "In another case," "Following the ...," "Meanwhile," "Separately," "In response," "Also,"),
-  (b) contains a definite event reference ("the incident(s)," "the breach," "the misconfiguration," "the deal," "the lawsuit," "the ruling," "the attempts," "the project") whose referent is not named earlier in that same claim, or
-  (c) uses a pronoun or possessive ("its," "their," "his," "her") before the entity it refers to has been named in that claim.
+  (b) contains a definite event or entity reference ("the incident(s)," "the breach," "the misconfiguration," "the deal," "the lawsuit," "the ruling," "the attempts," "the project," "the company," "the startup," "the firm," "the program," "the fund," "the planned attacks") whose referent is not named earlier in that same claim — the story's protagonist included,
+  (c) uses a pronoun or possessive ("its," "their," "his," "her") before the entity it refers to has been named in that claim, or
+  (d) asserts a research finding without naming the study's institution, journal, lead author, or reporting outlet (a bare "Researchers found..." or "Participants rated...").
 - Rewrite every flagged claim to name its referent explicitly (actor + event + date or venue). Rewrite, do not delete — drop a flagged claim only when the sources cannot support the explicit version.
 
 Structural checks:
