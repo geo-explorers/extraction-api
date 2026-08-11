@@ -140,8 +140,8 @@ single primary speaker.
 - Filter promotion: book plugs, course offers, company pitches, and
   calls-to-action follow the same exclusion rule as advertisements.
 - The speaker's novel frameworks or theses are extractable as attributed
-  positions when concrete ("Jane Smith argues that...") — the biography/
-  position exception to attribution stripping applies."""
+  positions when concrete ("Jane Smith argues that...") — per the
+  attribution rules, a speaker's own thesis always keeps its attribution."""
 
 
 _GENERIC_LAYER = """─────────────────────────────────────────────
