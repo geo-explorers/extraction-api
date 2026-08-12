@@ -66,15 +66,16 @@ De-Referenced & Self-Contained (CRUCIAL)
 - Absolute Pronoun Replacement: Replace all pronouns (he, she, it, they) with explicit entities. A possessive ("its," "their") may only appear AFTER the entity it refers to has been named in that same claim.
 - No Conversational Order: Never open a claim with a connective that presumes the episode's flow — "Later in the episode," "Returning to," "As mentioned," "In response," "Following that." The claims will be shuffled.
 
-Attribution — strip only what is independently established
-- A podcast is one speaker's account. Strip reporting-verb scaffolding ("Dr. [Name] stated," "He claimed") ONLY for facts that are independently verifiable public record: dates, biographical facts, published statistics from named sources, historical events.
-    - GOOD (public record, strip): "Dr. Mark Hyman founded Function Health."
-    - GOOD (named public statistic, strip): "The USDA reported that ultra-processed food makes up 60% of the American diet."
-- KEEP attribution (or use conditional language) when a speaker asserts an empirical, scientific, or contested fact on their own authority. Converting a guest's assertion into a bare declarative fact is a factuality error — the most common one in claim extraction.
-    - BAD: "EMFs from devices like laptops can negatively affect fertility." (a guest's contested assertion, stated as fact)
-    - GOOD: "Physician Mark Hyman argued that EMFs from devices like laptops may negatively affect fertility."
-- Name the evidence when a speaker cites it: never "He cited evidence that..." — write "a [institution/journal] study, cited by [speaker], found..." If the speaker never identifies the study, attribute the speaker and use conditional language.
-- Keep attribution when the act of stating IS the fact (a commitment, a prediction, an official position).
+Attribution — extract the asserted claim, not the act of asserting
+- A claim records WHAT is asserted, not that someone asserted it. Strip all reporting-verb scaffolding: never write "The speaker said," "Dr. [Name] stated," "He argued," "They suggested." Extract the content of the assertion.
+    - BAD: "The speaker asserts the United States lacks the military means to force the reopening of the Strait of Hormuz."
+    - GOOD: "The United States lacks the military means to force the reopening of the Strait of Hormuz."
+    - BAD: "He cited evidence that EMFs negatively affect fertility."
+    - GOOD: "EMFs from devices like laptops can negatively affect fertility."
+- A claim is an assertion, not a verified fact — that is exactly what makes it debatable. Preserve the strength of the claim as the speaker asserted it: do not soften it with hedges they did not use, and do not harden a hedged assertion into certainty.
+- Exception — the statement IS the fact: keep attribution when the act of saying it is itself the noteworthy fact: a head of state or official announcing, committing, threatening, or conceding; sworn testimony; a company's on-record response to a controversy. ("French President Emmanuel Macron announced France will recognize the State of Palestine" — the announcement is the fact.) This requires a name from the transcript; if the person making the statement cannot be named, extract the underlying content per the rule above instead.
+- Never write anonymous attribution: "The speaker," "the host," "the guest," "the interviewee" must never appear in a claim. If you find yourself writing one, either strip the frame and keep the asserted content, or the claim is not extractable.
+- Biography stays biographical: "Dr. Mark Hyman founded Function Health" keeps the name as subject — that is the fact itself, not attribution.
 
 Temporally Accurate
 - Distinguish between when a fact happened and when it was simply discussed.
@@ -104,8 +105,8 @@ CONTENT VALIDATION CHECKLIST
 Before finalizing each claim:
 - Is this sentence free of promotional intent?
 - Does it contain exactly one factual assertion?
-- Is the attribution right for the evidence? Independently verifiable public record → no attribution. A speaker's own empirical or contested assertion → attributed or conditional ("argued that," "may"). Never a bare declarative for a one-speaker claim.
-- Does the claim cite research without naming the study or its citer ("studies show," "he cited evidence")? If yes, name the study's institution/journal or attribute the speaker.
+- Does the claim contain "The speaker," "the host," "the guest," or reporting-verb framing ("X stated that," "X suggests")? If yes, strip the frame and keep the asserted content — unless the statement itself is the noteworthy fact and the person is NAMED in the transcript.
+- Does the speaker name a study or source ("a Stanford study")? Preserve it — named evidence is part of the claim. If no study is named, extract the asserted content without inventing a source.
 - Does the claim start with a generic noun phrase like "The theory," "The report," or "The strategy" — or contain one anywhere referring to the episode's main subject? If yes, REPLACE it with the full proper name.
 - Does the claim open with conversational-order language ("Later in the episode," "As mentioned")? If yes, remove it and anchor the claim.
 - Are all pronouns replaced with specific named entities?

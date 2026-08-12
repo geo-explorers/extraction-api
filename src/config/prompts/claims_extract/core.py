@@ -65,29 +65,27 @@ the parts belong together.
   official responses, specific laws or dates, and concrete consequences each
   deserve their own claim when independently informative.
 
-Attribution — strip only what is independently established
-- Strip reporting-verb scaffolding ("X said that," "according to X") ONLY
-  when the underlying fact is corroborated by independent sources, official
-  records, or established consensus. For those facts, extract the fact
-  itself, not the fact-of-statement.
-- KEEP attribution when the statement is a party's characterization,
-  estimate, prediction, accusation, defense, or contested position.
-  Converting an attributed position into a bare assertion of fact is a
-  factuality error — the most common one in claim extraction.
-- KEEP attribution when the fact rests on one speaker's or one document's
-  account, and pair it with conditional language per "Evidence-Appropriate
-  Language" below. A single speaker asserting an empirical fact ("60% of the
-  American diet is ultra-processed") yields an attributed or conditional
-  claim, not a bare declarative one.
-- Keep attribution when the act of stating IS the significant fact (e.g., an
-  official testifying, a party committing to a position).
-- Keep the person as subject when the claim is genuinely about their
-  biography or actions (e.g., "Jane Smith founded Acme Corp in 2019").
-- Never fuse attributions: when different passages attribute the same fact
-  to different speakers, do not merge them into one clause ("An official and
-  an announcement suggested..."). Keep the single most authoritative
-  attribution, or state the fact declaratively only if independently
-  corroborated.
+Attribution — extract the asserted claim, not the act of asserting
+- A claim records WHAT is asserted, not that someone asserted it. Strip
+  reporting-verb scaffolding ("X said that," "according to X," "X argued"):
+  extract the content of the assertion.
+- A claim is an assertion, not a verified fact — that is what makes it
+  debatable. Preserve the strength of the claim as the source asserted it:
+  do not add hedges the source did not use, and do not harden a hedged
+  assertion into certainty.
+- Exception — the statement IS the fact: keep attribution when the act of
+  saying it is itself the noteworthy fact: an official or head of state
+  announcing, committing, threatening, conceding, or testifying; a named
+  party's on-record response in a dispute. This requires the actor's name —
+  if the person or body making the statement cannot be named from the
+  documents, extract the underlying content instead.
+- When keeping a statement-event, attribute it to ONE named actor — never
+  merge different speakers' attributions into a single clause ("An official
+  and an announcement suggested...").
+- Never write anonymous attribution: "the speaker," "the host," "the
+  guest," "the author," "the interviewee" must never appear in a claim.
+- Biography stays biographical: "Jane Smith founded Acme Corp in 2019"
+  keeps the name as subject — that is the fact itself, not attribution.
 
 Temporally Grounded
 - Use absolute dates ("May 12, 2026") instead of relative references
@@ -150,8 +148,10 @@ any claim that:
     the material's protagonist included,
 (c) uses a pronoun or possessive ("its," "their," "his," "her") before the
     entity it refers to has been named in that claim, or
-(d) asserts a research finding without naming the study's institution,
-    journal, lead author, or the person/outlet citing it.
+(d) frames a research finding as "Researchers found..." or "Studies show..."
+    when the sources identify the study — name the study's institution,
+    journal, or lead author; if the sources never identify it, extract the
+    asserted finding itself without inventing a source.
 Rewrite every flagged claim to name its referent explicitly. Rewrite, do
 not delete — drop a flagged claim only when the sources cannot support the
 explicit version."""

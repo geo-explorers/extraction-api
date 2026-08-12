@@ -139,9 +139,11 @@ single primary speaker.
   outcome); skip purely illustrative or humorous anecdotes.
 - Filter promotion: book plugs, course offers, company pitches, and
   calls-to-action follow the same exclusion rule as advertisements.
-- The speaker's novel frameworks or theses are extractable as attributed
-  positions when concrete ("Jane Smith argues that...") — per the
-  attribution rules, a speaker's own thesis always keeps its attribution."""
+- The speaker's novel frameworks or theses are extractable when concrete —
+  as the asserted content itself ("Deliberate practice outperforms raw
+  talent over ten-year horizons"), not as a report of who argued it. Keep
+  the person as subject only for biography or when their taking of the
+  position is itself the noteworthy fact."""
 
 
 _GENERIC_LAYER = """─────────────────────────────────────────────
