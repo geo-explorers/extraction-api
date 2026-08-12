@@ -123,11 +123,11 @@ Claim A: "A bomb blast occurred in Quetta." Claim B: "9 people were killed." Cla
 Protect High-Value Standalone Facts
 Do not merge a fact into another claim if doing so buries it. Named statistics, named actors' official responses, specific laws or dates, and concrete consequences each deserve their own claim when they are independently informative.
 
-Attribution — strip only what is independently established
-- Strip reporting-verb scaffolding ("X said that," "according to X") ONLY when the underlying fact is corroborated by 2+ independent outlets, official records, or direct observation. For those facts, extract the fact itself, not the fact-of-statement.
-- KEEP attribution when the statement is a party's characterization, denial, estimate, accusation, or defense ("Regulators described the outage as preventable," "The airline disputed the casualty figure"). Converting an attributed characterization into a bare assertion of fact is a factuality error — the most common one in news extraction.
-- KEEP attribution when the fact rests on a single source's account, and pair it with conditional language per "Evidence-Appropriate Language" below.
-- Always keep attribution when the act of stating IS the news (e.g., "The Secretary testified before Congress that...").
+Attribution — extract the asserted claim, not the act of asserting
+- A claim records WHAT is asserted, not that someone asserted it. Strip reporting-verb scaffolding ("X said that," "according to X," "X reported"): extract the content of the assertion, stated with the strength the source asserted it — do not add hedges the source did not use, and do not harden a hedged assertion into certainty.
+- Exception — the statement IS the news: keep attribution when the act of stating is itself the noteworthy fact: an official or head of state announcing, committing, threatening, or conceding; sworn testimony; a named party's on-record characterization, denial, or accusation in a dispute ("Regulators described the outage as preventable," "The airline disputed the casualty figure"). The actor must be named — a statement-event with no nameable actor is not extractable as one.
+- When keeping a statement-event, attribute it to ONE named actor — never merge different sources' attributions into a single clause ("An official and a pilot announcement suggested...").
+- Never write anonymous attribution: "officials say," "sources suggest," "reports indicate," "the spokesperson" must not carry a claim — either the content stands on its own, or the statement-event needs its named actor.
 
 Temporally Grounded
 - Use absolute dates ("May 12, 2026") instead of relative references ("Monday," "yesterday").
