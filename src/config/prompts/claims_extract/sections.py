@@ -98,7 +98,7 @@ evidence could in principle confirm or refute — or is it a judgement of
 value, a prescription, a forecast, or a side in the argument?"
 
 true — empirical propositions, whether or not they are correct, hedged, or
-stated from memory by a debater:
+stated from memory by a speaker or author:
 - events, actions, and decisions, dated or named ("The WHO declared the
   DRC Ebola outbreak a public health emergency on May 1, 2026")
 - quantities, measurements, statistics, prices, dates
@@ -121,9 +121,10 @@ false — propositions evidence cannot settle:
 - prescriptions and policy positions: "should," "must," "ought to,"
   "deserve"
 - forecasts about the future
-- the motion itself and each side's thesis about it ("Waking with the sun,
-  not simply waking early, is what improves health," "AI chatbots are an
-  effective tool for mental health support")
+- the material's central proposition — a debate motion, an op-ed's thesis,
+  an episode's overarching argument — and each side's stance on it ("Waking
+  with the sun, not simply waking early, is what improves health," "AI
+  chatbots are an effective tool for mental health support")
 - generalizations whose content is an appraisal rather than a mechanism
   ("Human therapists are limited," "AI is too simplistic")
 - statements about the argument itself: who bears the burden of proof,
@@ -136,13 +137,17 @@ Tie-breakers:
 - The main predicate decides. If it is a value word (effective, better,
   key, dangerous, worth it, too much), the claim is false even when its
   subject is concrete. If it describes a state, event, mechanism, or
-  quantity, the claim is true even when the speaker is arguing a side.
+  quantity, the claim is true even when the speaker is arguing for a
+  position. A modal or frequency softener ("can be," "tends to be," "is
+  often") does not change the kind: "can be overly agreeable" is still a
+  degree judgement.
 - An evaluation wrapped around a mechanism splits when the split test
   allows: "Sunlight is good for you because it provides vitamin D" is an
   appraisal (false) around a mechanism (true) — extract the mechanism as
   its own claim.
-- Expect a mix. Debates and opinion pieces usually yield both kinds; a run
-  where nearly every claim is one kind is a sign of misfiling — re-check.
+- Expect a mix. Debates, opinion pieces, interviews, and talks usually
+  yield both kinds; a run where nearly every claim is one kind is a sign of
+  misfiling — re-check.
 
 Classify each claim as written, without adding hedging. When this section is
 present, every claim must carry an explicit true or false — never leave
