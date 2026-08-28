@@ -454,3 +454,103 @@ def test_factuality_stripped_when_off_kept_when_on():
         _input(grouping=False, classify_factuality=True), extraction, [], model_used="m"
     )
     assert [c.is_factual for c in on.claims] == [True, False]
+
+
+# ── Debate attribution + factuality calibration ──────────────────────────────
+# Regression guards for the 2026-08-28 debate report: every extracted claim
+# came back is_factual=true, and one was "Preston Mantel questioned if...".
+
+
+def test_debate_layer_forbids_speech_act_claims():
+    from src.extraction.claims_prompt_builder import build_extract_prompt
+
+    prompt = build_extract_prompt(_input(grouping=False), [])
+    assert "Propositions, never speech acts" in prompt
+    # The old exception let "a debater's stated position" keep its attribution.
+    assert "attribution-keeping exception" not in prompt
+    assert "No claim reports a speech act" in prompt  # final validation line
+    # The motion is the debate's seed claim; re-extracting it duplicates it.
+    assert "The motion itself is not a claim to extract" in prompt
+
+
+def test_speech_act_validation_is_debate_only():
+    from src.extraction.claims_prompt_builder import build_extract_prompt
+
+    prompt = build_extract_prompt(_input(media_type="news", grouping=False), [])
+    assert "No claim reports a speech act" not in prompt
+
+
+def test_factuality_rubric_names_non_factual_classes_and_calibration():
+    from src.extraction.claims_prompt_builder import build_extract_prompt
+
+    on = build_extract_prompt(_input(grouping=False, classify_factuality=True), [])
+    # "attributable statements" made "X said Y" trivially factual — gone.
+    assert "attributable statements" not in on
+    for needle in (
+        "hedged or contested empirical hypotheses",
+        "prescriptions and policy positions",
+        "Classify the content, never the act of saying it",
+        "Expect a mix",
+        "is_factual is true for every empirical proposition",
+    ):
+        assert needle in on, needle
+
+    off = build_extract_prompt(_input(grouping=False), [])
+    assert "is_factual is true for every empirical proposition" not in off
+
+
+def test_eval_harness_metrics_flag_speech_acts():
+    from src.cli.eval_claims_extract import run_metrics
+
+    m = run_metrics(
+        [
+            {"text": "Preston Mantel questioned if night owls are real.", "is_factual": True},
+            {"text": "Night owl behavior may be caused by overwork.", "is_factual": False},
+            {"text": "Arturas Vil lives in Norway.", "is_factual": True},
+        ],
+        ["Preston Mantel", "Arturas Vil"],
+    )
+    assert (m["speech_acts"], m["name_mentions"], m["false"], m["claims"]) == (1, 2, 1, 3)
+
+
+def test_motion_restatement_dropped_for_debates_only():
+    from src.pipeline.claims_extract_core import assemble_result, restates_title
+
+    title = "AI chatbots are an effective tool for mental health support"
+    assert restates_title("AI chatbots are an effective tool for mental health support.", title)
+    # A qualifier adds enough new words to survive: it is a position, not the motion.
+    assert not restates_title(
+        "AI chatbots could be effective for mental health in very specific, correctly configured setups.",
+        title,
+    )
+    assert not restates_title("anything", None)
+
+    extraction = {
+        "claims": [
+            {"text": "AI chatbots are an effective tool for mental health support.", "confidence": 0.9},
+            {"text": "Human therapists are often specialized in only one type of therapy.", "confidence": 0.9},
+        ],
+        "groups": [],
+        "quotes": [{"text": "q", "claim_index": 1}],
+        "summary": "",
+    }
+    debate = assemble_result(
+        _input(grouping=False, title=title, include_quotes=True), extraction, [], model_used="m"
+    )
+    assert [c.text for c in debate.claims] == [
+        "Human therapists are often specialized in only one type of therapy."
+    ]
+    # The quote followed its claim through the reindex.
+    assert [q.claim_index for q in debate.quotes] == [0]
+
+    news = assemble_result(
+        _input(media_type="news", grouping=False, title=title), extraction, [], model_used="m"
+    )
+    assert len(news.claims) == 2
+
+
+def test_motion_validation_line_needs_a_title():
+    from src.extraction.claims_prompt_builder import build_extract_prompt
+
+    assert "No claim restates the overall title" in build_extract_prompt(_input(title="Motion"), [])
+    assert "No claim restates the overall title" not in build_extract_prompt(_input(), [])

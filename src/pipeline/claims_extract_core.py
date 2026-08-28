@@ -10,6 +10,7 @@ max_claims truncation -> remap quote/group indices -> drop small groups ->
 derive topics -> link takeaways.
 """
 
+import re
 from typing import Dict, List, Optional, Tuple
 
 from src.api.schemas.claims_extract_schema import (
@@ -27,6 +28,32 @@ logger = get_logger(__name__)
 # Groups with fewer claims than this are dropped (the news prompt's HARD RULE:
 # no collection with fewer than 2 claims).
 MIN_CLAIMS_PER_GROUP = 2
+
+# A debate's title is its motion — a claim that already exists and is linked to
+# the debate. Re-extracting it would publish a duplicate Claim entity, so
+# claims that merely restate the title are dropped. Token-set overlap at or
+# above this ratio counts as a restatement ("... is an effective tool for
+# mental health support." vs the same words without the period).
+TITLE_RESTATEMENT_MIN_OVERLAP = 0.85
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokens(text: str) -> set:
+    return set(_WORD_RE.findall(text.lower()))
+
+
+def restates_title(claim_text: str, title: Optional[str]) -> bool:
+    """True when the claim is the title (or a near-verbatim rewording of it):
+    Jaccard overlap of word sets >= TITLE_RESTATEMENT_MIN_OVERLAP. Anything
+    that adds a qualifier ("...does not apply to everyone") keeps enough new
+    words to fall below the bar and survives."""
+    if not title:
+        return False
+    a, b = _tokens(claim_text), _tokens(title)
+    if not a or not b:
+        return False
+    return len(a & b) / len(a | b) >= TITLE_RESTATEMENT_MIN_OVERLAP
 
 
 def sanitize_claims(raw_claims: List[dict], num_documents: int) -> List[ExtractedClaimOut]:
@@ -53,14 +80,18 @@ def filter_and_reindex_claims(
     *,
     min_confidence: float,
     max_claims: Optional[int],
+    exclude_title: Optional[str] = None,
 ) -> Tuple[List[ExtractedClaimOut], Dict[int, int]]:
-    """Apply the confidence floor, then the claim budget, preserving narrative
-    order. Returns the surviving claims and an old-index -> new-index map for
-    remapping quotes and groups."""
+    """Apply the confidence floor, the title-restatement guard, then the claim
+    budget, preserving narrative order. Returns the surviving claims and an
+    old-index -> new-index map for remapping quotes and groups."""
     kept: List[ExtractedClaimOut] = []
     index_map: Dict[int, int] = {}
     for old_index, claim in enumerate(claims):
         if claim.confidence < min_confidence:
+            continue
+        if restates_title(claim.text, exclude_title):
+            logger.info(f"Dropping claim that restates the title: {claim.text!r}")
             continue
         if max_claims is not None and len(kept) >= max_claims:
             break
@@ -183,10 +214,13 @@ def assemble_result(
         for claim in claims:
             claim.is_factual = None
 
+    # Only debates carry a motion as the title; a news headline or episode
+    # title is not a claim that already exists elsewhere.
     claims, index_map = filter_and_reindex_claims(
         claims,
         min_confidence=input.min_confidence,
         max_claims=input.max_claims,
+        exclude_title=input.title if input.media_type == "debate" else None,
     )
 
     quotes = remap_quotes(raw_quotes, index_map, num_documents)

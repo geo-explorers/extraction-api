@@ -88,12 +88,61 @@ FACTUALITY_SECTION = """──────────────────�
 FACTUALITY CLASSIFICATION (REQUESTED)
 ─────────────────────────────────────────────
 
-For every claim, set `is_factual`:
-- true  — a verifiable statement of fact: it asserts something that could in
-  principle be checked against evidence (events, numbers, dated actions,
-  attributable statements), whether or not it happens to be correct.
-- false — an unverifiable opinion, value judgement, prediction, or normative
-  "should" statement.
+For every claim, set `is_factual`. The flag decides how readers engage with
+the claim: a factual claim is verified or disputed against evidence; a
+non-factual claim is agreed or disagreed with. The question is about the
+KIND of proposition — never about who said it or how confidently:
+
+"Is this a statement about how the world is, was, or works — something
+evidence could in principle confirm or refute — or is it a judgement of
+value, a prescription, a forecast, or a side in the argument?"
+
+true — empirical propositions, whether or not they are correct, hedged, or
+stated from memory by a debater:
+- events, actions, and decisions, dated or named ("The WHO declared the
+  DRC Ebola outbreak a public health emergency on May 1, 2026")
+- quantities, measurements, statistics, prices, dates
+- mechanisms, causes, and regularities about the world ("Forcing an
+  evening chronotype to wake at 5 a.m. causes social jetlag," "Chronotype
+  is largely genetic," "Sunlight exposure can cause skin cancer")
+- what exists, is available, or is used ("People in Norway use lamps that
+  brighten gradually to mimic sunrise")
+- cited studies, rulings, documents, and official statements, with the
+  finding they report
+- hedged or contested empirical hypotheses ("Night owl behavior may be
+  caused by overwork rather than being an innate trait") — a hedge lowers
+  confidence; it does not change the kind of proposition
+
+false — propositions evidence cannot settle:
+- evaluations and value judgements: "key," "better," "effective,"
+  "dangerous," "toxic," "good for the soul," "the main thing"
+- degree judgements: "too," "overly," "not enough," "simplistic," "more
+  dangerous than useful"
+- prescriptions and policy positions: "should," "must," "ought to,"
+  "deserve"
+- forecasts about the future
+- the motion itself and each side's thesis about it ("Waking with the sun,
+  not simply waking early, is what improves health," "AI chatbots are an
+  effective tool for mental health support")
+- generalizations whose content is an appraisal rather than a mechanism
+  ("Human therapists are limited," "AI is too simplistic")
+- statements about the argument itself: who bears the burden of proof,
+  what has or has not been demonstrated, whether it is premature to
+  conclude
+
+Tie-breakers:
+- Classify the content, never the act of saying it. "X argued Y" is not
+  factual because X said it — classify Y.
+- The main predicate decides. If it is a value word (effective, better,
+  key, dangerous, worth it, too much), the claim is false even when its
+  subject is concrete. If it describes a state, event, mechanism, or
+  quantity, the claim is true even when the speaker is arguing a side.
+- An evaluation wrapped around a mechanism splits when the split test
+  allows: "Sunlight is good for you because it provides vitamin D" is an
+  appraisal (false) around a mechanism (true) — extract the mechanism as
+  its own claim.
+- Expect a mix. Debates and opinion pieces usually yield both kinds; a run
+  where nearly every claim is one kind is a sign of misfiling — re-check.
 
 Classify each claim as written, without adding hedging. When this section is
 present, every claim must carry an explicit true or false — never leave
