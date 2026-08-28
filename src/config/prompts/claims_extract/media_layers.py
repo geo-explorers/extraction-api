@@ -12,28 +12,57 @@ _DEBATE_LAYER = """────────────────────�
 DEBATE-SPECIFIC GUIDANCE
 ─────────────────────────────────────────────
 
-The documents are debate transcripts with multiple speakers holding opposing
-positions.
+The documents are debate transcripts with speakers holding opposing
+positions on a motion. Each document is typically one speaker's turn; the
+motion and the participants with their sides are given under INPUTS when
+the caller supplied them.
 
-Factual assertions vs. rhetoric:
-- Extract the verifiable factual assertions debaters make in support of their
-  positions (statistics, historical events, policy contents, study results).
-- Do NOT extract rhetorical flourishes, applause lines, insults, hypotheticals,
-  or pure value judgments ("this is simply wrong," "the American people
-  deserve better").
-- A debater's stated position or commitment IS itself an extractable fact when
-  concrete ("Candidate X pledged to veto any bill that...") — this is the
-  attribution-keeping exception: the act of committing is the fact.
+What to extract — both evidence and positions:
+- The evidence debaters bring in support of their side: statistics,
+  historical events, policy contents, study results, mechanisms.
+- The substantive positions themselves — the propositions each side
+  advances about the motion ("Waking with the sun, rather than simply
+  waking early, is what improves health and productivity"). These are the
+  claims a debate exists to produce; extract them as claims and let the
+  factuality rubric (when requested) classify them.
+- Do NOT extract contentless rhetoric: applause lines, insults, sarcasm,
+  hypotheticals with no proposition inside, or bare evaluations with no
+  arguable content ("this is simply wrong," "the American people deserve
+  better").
+- The motion itself is not a claim to extract: it is the overall title and
+  is already recorded with the debate. A speaker restating the motion in
+  their own words ("waking up early is good for you") or simply negating
+  it is still the motion — skip it and extract the propositions they
+  advance for or against it instead.
+
+Propositions, never speech acts:
+- Extract WHAT a debater asserts, never THAT they asserted it. A debate is
+  a dispute by definition, so the "on-record response in a dispute"
+  exception in the attribution rules does NOT apply to debaters' arguments.
+  "Preston Mantel argued that X," "Arturas Vil questioned whether Y," and
+  "the opposing side suggested Z" are all defects — write X, Y, and Z as
+  claims.
+- A participant's name may appear in a claim only as biography ("Arturas
+  Vil lives in Norway"), never as the subject of a reporting verb (said,
+  argued, questioned, suggested, claimed, conceded, pointed out...).
+- Questions and doubts: when a debater raises a doubt or a rhetorical
+  question, extract the proposition they are advancing, hedged as they
+  hedged it. "Is being a night owl really a thing, or is it just overwork
+  and screens?" becomes "Night owl behavior may be caused by overwork and
+  late-night computer use rather than being a natural trait." If no
+  proposition can be recovered, extract nothing from that passage.
+- Concessions and pledges: extract the conceded or pledged content ("Later
+  school start times would benefit students"), not the act of conceding.
 
 Balanced coverage:
-- Cover the factual assertions of EVERY participant and side. Do not let one
-  side's claims dominate because that speaker talked more or was more
-  quotable. After extraction, verify each named participant with substantive
-  factual content is represented.
+- Cover the claims of EVERY participant and side. Do not let one side
+  dominate because that speaker talked more or was more quotable. After
+  extraction, verify each participant with substantive content is
+  represented.
 
 Contested facts:
 - When two speakers assert contradictory facts, extract BOTH as separate
-  claims with evidence-appropriate hedging where warranted; do not adjudicate
+  claims, each with the strength its speaker gave it; do not adjudicate
   which is true or silently drop one side.
 
 Exclude entirely:

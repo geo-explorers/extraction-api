@@ -156,9 +156,27 @@ def _final_validation(input: ClaimsExtractInput, grouping: bool) -> str:
             "- The summary is 350-500 characters and asserts no specific fact "
             "that is missing from the claims."
         )
+    if input.media_type == "debate":
+        checks.append(
+            "- No claim reports a speech act: no participant's name is the "
+            "subject of said/argued/questioned/suggested/claimed/conceded/"
+            "pointed out — every such claim is rewritten as the proposition "
+            "itself."
+        )
+        if input.title:
+            checks.append(
+                "- No claim restates the overall title (the motion) or its "
+                "plain negation; the motion is already recorded."
+            )
     if input.classify_factuality:
         checks.append(
             "- Every claim has is_factual set to an explicit true or false."
+        )
+        checks.append(
+            "- is_factual is true for every empirical proposition (events, "
+            "quantities, mechanisms, what exists, cited findings — hedged or "
+            "not) and false for every evaluation, prescription, forecast, "
+            "and side-thesis."
         )
     if len(input.documents) > 1:
         checks.append(
