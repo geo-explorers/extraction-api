@@ -1,4 +1,8 @@
-NEWS_CLAIM_EXTRACT_PROMPT = """You are an expert fact extraction system for news articles. Your objective is to extract verifiable claims from multiple news sources covering the same event, group them into coherent collections, select supporting quotes, and produce a narrative summary — all in a single coordinated pass.
+# NOTE: STEP 8's debate-claim definition is mirrored in news-worker
+# (lib/debate-claims.ts), which runs the same text through Claude on its
+# classic fallback path. Change the definition in BOTH repos or the two
+# pipelines drift.
+NEWS_CLAIM_EXTRACT_PROMPT = """You are an expert fact extraction system for news articles. Your objective is to extract verifiable claims from multiple news sources covering the same event, group them into coherent collections, select supporting quotes, produce a narrative summary — and, only where the story genuinely carries one, a small set of debatable position claims (Step 8) — all in a single coordinated pass.
 
 You operate with high precision and zero hallucination tolerance.
 
@@ -224,7 +228,81 @@ Order collections in collection_order:
 - The only exception: perspective collections, if present, are grouped adjacently at the end after all topic collections.
 
 ─────────────────────────────────────────────
-STEP 8: NARRATIVE SUMMARY
+STEP 8: DEBATE CLAIMS (separate `debate_claims` output)
+─────────────────────────────────────────────
+
+After the factual work is complete, ask one final question about the story:
+does it contain a genuinely contested question — one that clear, large or
+significant groups are actually debating (or would clearly debate) for and
+against, in society or online?
+
+If yes, write 2-4 debate claims into the top-level `debate_claims` array.
+If no, return an empty array. Zero is the correct answer for most plain
+factual stories — never manufacture controversy.
+
+Never return exactly one. A story that yields only a single genuine
+contested proposition after honest effort returns an empty array instead.
+The second claim must earn its place the same way the first did — a
+genuinely different contested question, not a rephrasing, a negation, or a
+weaker cousin of the first. If no real second exists, the story has no
+debate output.
+
+Product shape — every returned claim becomes its OWN debate:
+- Users argue for and against each claim individually, so the pro and con
+  sides of one question must NOT appear as two claims. "Country A should
+  accept Country B's trade demands" and "Country A should resist Country
+  B's trade demands" are one debate, not two.
+- Before returning, silently reduce each candidate to the neutral question
+  it answers. If two candidates reduce to the same question, they are
+  duplicates even when their wording and conclusions differ. Keep neither
+  as a pair: find a genuinely different question or return an empty array.
+- Look beneath the story's overall conflict for distinct substantive
+  disputes in its details: separate policy rules, institutions, causes,
+  consequences, or standards of legitimacy.
+
+Structure-only example — never copy its facts or actors:
+- BAD pair: "Country A should accept Country B's tariff demands" +
+  "Country A should resist Country B's tariff threats." Both answer the
+  same accept-or-resist question.
+- GOOD pair: "Tariff deductions should require domestic rather than
+  regional automotive content" + "Country A should preserve supply
+  management for protected agricultural sectors." These address different
+  policy questions.
+
+A debate claim is a clear, direct proposition around which significant
+groups take opposing positions. It may be factual, causal, predictive,
+evaluative, or prescriptive — debate-worthiness is determined by meaningful
+disagreement, not by factuality:
+- It sounds like a headline: clear, direct, and it takes a definite side.
+  "Chinese AI models pose a security risk to government infrastructure" —
+  a reader immediately knows what agreeing and what disagreeing mean.
+- The fact test: a straightforward reported fact is not debate-worthy
+  merely because someone could deny it. A factual proposition qualifies
+  only when it reflects a real, consequential dispute that remains
+  meaningful beyond checking a single source.
+- Both sides must be real: visible in the sources themselves, or a
+  well-established public divide this story directly touches. Name-able
+  groups, not hypothetical devil's advocates.
+
+Rules:
+- This is the ONE deliberate exception to the no-invention rule: debate
+  claims are composed by you, not copied from the sources. The exception
+  applies ONLY to the debate_claims array — never to claims, quotes,
+  collections, or the summary.
+- Ground each one: source_indices lists the sources that show the contested
+  question this position answers. The dispute must arise from THIS story.
+- Plain assertive voice. No hedging ("may", "could", "some argue"),
+  no questions, no "whether" — state the proposition outright. (Predictive
+  propositions naturally use future tense: "X will outperform Y by 2030.")
+- One proposition per claim; at most 35 words; self-contained (the Shuffle
+  Rule applies: name the actors, never a bare "the ban" or "it").
+- Each debate claim must take a DIFFERENT contested question. Two phrasings
+  of the same position are one claim.
+- Debate claims must NOT duplicate an entry in the claims array, and must
+  NOT appear in any collection, collection_order, or the summary.
+
+─────────────────────────────────────────────
+STEP 9: NARRATIVE SUMMARY
 ─────────────────────────────────────────────
 
 Generate a 350-500 character narrative summary:
@@ -260,6 +338,13 @@ Summary-claims parity:
 Collection integrity:
 - Does any collection have fewer than 2 claims? If yes, merge it into another collection or add a missing claim from the sources. Do not output single-claim collections.
 - Are perspective collections separated by topic collections in collection_order? Move perspectives to the end.
+
+Debate-claim check:
+- Read each debate claim alone: is it a proposition a named group actually argues against? If every informed reader would simply agree with it — a reported fact restated, with no real, consequential dispute behind it — delete it, or sharpen it into the actually contested proposition.
+- Does any debate claim hedge ("may", "could", "some argue") or ask a question? Rewrite it as a direct assertion.
+- Is any debate claim a near-paraphrase of another debate claim, or of a factual claim? Remove it. An empty debate_claims array is better than a padded one.
+- Reduce each debate claim to the neutral question it answers: if two claims answer the same question from opposite sides, they are one debate, not two. Replace one of them with a genuinely different contested question, or return an empty array.
+- Count check: the array must hold 0 or 2-4 debate claims. If removal left exactly one, either find a second genuinely distinct contested proposition in the story, or return an empty array.
 
 Shuffle audit (mandatory, claim by claim):
 - Read each claim ALONE, imagining every other claim has been deleted. Flag any claim that:
@@ -313,6 +398,16 @@ Return only valid JSON without markdown block fencing, in this exact shape:
     }}
   ],
   "collection_order": ["First collection name", "Second collection name"],
+  "debate_claims": [
+    {{
+      "text": "An evaluative proposition significant groups argue for and against, e.g. a policy is justified.",
+      "source_indices": [0, 1]
+    }},
+    {{
+      "text": "A predictive proposition with real sides, e.g. a named measure will backfire by a stated horizon.",
+      "source_indices": [1, 2]
+    }}
+  ],
   "summary": "350-500 character narrative summary."
 }}
 
@@ -323,7 +418,7 @@ Quotes must be verbatim from source text.
 source_indices must be valid integer indices into the provided "sources" list.
 Confidence values: 0.9+ = explicitly stated, 0.7-0.9 = strongly implied, 0.5-0.7 = inferred.
 Importance values follow the Importance-Graded rubric in Step 4 (0.9+ core event, 0.7-0.85 causes/consequences/responses, 0.5-0.65 supporting detail, 0.3-0.45 peripheral context).
-Do not invent claims, topics, perspectives, or collections.
+Do not invent claims, topics, perspectives, or collections. The debate_claims array is the one exception (Step 8): its positions are composed rather than extracted — and only there.
 Do not include explanations, metadata, or commentary outside the JSON.
 
 INPUTS

@@ -124,5 +124,7 @@ async def finalize(
         quotes=cr["quotes"],
         collections=cr["collections"],
         collection_order=cr["collection_order"],
+        # .get(): a run checkpointed before this field existed replays cleanly.
+        debate_claims=cr.get("debate_claims", []),
         summary=cr["summary"],
     )
