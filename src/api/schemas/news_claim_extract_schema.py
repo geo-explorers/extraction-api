@@ -70,15 +70,13 @@ class ExtractedDebateClaim(BaseModel):
 def normalize_debate_claims(
   items: List[ExtractedDebateClaim],
 ) -> List[ExtractedDebateClaim]:
-  """Deterministic enforcement of the Step-8 contract: 0 or 2-4 claims.
+  """Deterministic enforcement of the Debate collection contract: 0 or 3-5.
 
-  The prompt asks for this, but a count is exactly the kind of instruction a
-  model occasionally ignores — and rejecting the response would re-run the
-  whole billed extraction over a count violation (validation happens inside
-  the service's retry loop). So the contract is repaired, never refused:
-  duplicates collapse first (so a pair of identical texts becomes zero, not
-  a surviving "pair"), then the strongest four survive (the model lists in
-  order of strength), and a lone remainder becomes none at all.
+  The product requirement is a useful collection of 3-5 independent
+  debates, never a one- or two-card collection. Duplicates collapse first and
+  producers list strongest first. An underfilled result becomes empty so the
+  consumer omits the Debate collection rather than padding it with weak or
+  mirrored claims.
   """
   seen: set[str] = set()
   unique: List[ExtractedDebateClaim] = []
@@ -87,8 +85,8 @@ def normalize_debate_claims(
     if key and key not in seen:
       seen.add(key)
       unique.append(c)
-  unique = unique[:4]
-  return [] if len(unique) == 1 else unique
+  unique = unique[:5]
+  return unique if len(unique) >= 3 else []
 
 
 class NewsClaimExtractResponse(BaseModel):
