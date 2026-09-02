@@ -54,22 +54,13 @@ class Settings(BaseSettings):
     )
     log_file: str = Field(default="logs/extraction.log", description="Log file path")
 
-    # geo-lens (github.com/geobrowser/geo-lens): cached Geo subgraphs with query strategies.
-    # claims.judge_duplicates reads candidate claims from its claims cache.
-    geo_lens_url: str = Field(
-        default="http://localhost:8000", description="geo-lens base URL (no trailing /)"
-    )
-    geo_lens_api_key: str | None = Field(
-        default=None, description="X-API-Key for geo-lens (identifies this service as a consumer)"
-    )
-    geo_lens_claims_cache: str = Field(
-        default="claims", description="geo-lens cache handle holding the Claim entities"
-    )
-    claims_dedup_model: str = Field(
+    # claims.judge_equivalence: one Gemini call judges which candidates are logically
+    # equivalent to a claim. Candidates come from the caller (typically geo-lens).
+    claims_equivalence_model: str = Field(
         default="gemini-2.5-flash",
-        description="Gemini model for claims.judge_duplicates (one call per claim, all candidates)",
+        description="Gemini model for claims.judge_equivalence (one call per claim, all candidates)",
     )
-    claims_dedup_temperature: float = Field(default=0.0)
+    claims_equivalence_temperature: float = Field(default=0.0)
 
     # API keys for LLM providers
     anthropic_api_key: str | None = Field(
