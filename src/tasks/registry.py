@@ -46,6 +46,7 @@ from src.tasks.claims_extract import (
     CLAIMS_EXTRACT_MAX_PAYLOAD_BYTES,
 )
 from src.tasks.geo_fetch_entities import GEO_FETCH_ENTITIES_SPEC
+from src.tasks.claims_judge_duplicates import CLAIMS_JUDGE_DUPLICATES_SPEC
 from src.tasks.geo_resolve_entities import GEO_RESOLVE_ENTITIES_SPEC
 from src.tasks.sheets_export_table import SHEETS_EXPORT_TABLE_SPEC
 from src.tasks.geo_spaces_to_sheet import (
@@ -77,6 +78,7 @@ _STANDALONE_SPECS: list[TaskSpec] = [
     GEO_FETCH_ENTITIES_SPEC,
     GEO_RESOLVE_ENTITIES_SPEC,
     SHEETS_EXPORT_TABLE_SPEC,
+    CLAIMS_JUDGE_DUPLICATES_SPEC,
 ]
 
 
