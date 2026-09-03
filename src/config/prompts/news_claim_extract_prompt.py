@@ -1,4 +1,7 @@
-NEWS_CLAIM_EXTRACT_PROMPT = """You are an expert fact extraction system for news articles. Your objective is to extract verifiable claims from multiple news sources covering the same event, group them into coherent collections, select supporting quotes, and produce a narrative summary — all in a single coordinated pass.
+# The historical Step 8 text remains below while the news-worker classic prompt
+# is still being migrated. It is stripped from the exported factual prompt at
+# import time; only NEWS_DEBATE_CLAIM_PROMPT owns final debate generation.
+_NEWS_CLAIM_EXTRACT_PROMPT_WITH_PROVISIONAL_DEBATES = """You are an expert fact extraction system for news articles. Your objective is to extract verifiable claims from multiple news sources covering the same event, group them into coherent collections, select supporting quotes, produce a narrative summary — and, only where the story genuinely carries one, a small set of debatable position claims (Step 8) — all in a single coordinated pass.
 
 You operate with high precision and zero hallucination tolerance.
 
@@ -224,7 +227,157 @@ Order collections in collection_order:
 - The only exception: perspective collections, if present, are grouped adjacently at the end after all topic collections.
 
 ─────────────────────────────────────────────
-STEP 8: NARRATIVE SUMMARY
+STEP 8: DEBATE CLAIMS (separate `debate_claims` output)
+─────────────────────────────────────────────
+
+After the factual work is complete, ask one final question about the story:
+does it contain a genuinely contested question — one that clear, large or
+significant groups are actually debating (or would clearly debate) for and
+against, in society or online?
+
+Candidate-discovery sweep (mandatory before returning zero):
+- Do not decide from the headline alone. Revisit every major factual topic,
+  collection, actor, consequence, and unresolved tension you extracted.
+- Test each one through these lenses:
+  1. Policy or response — what should a named government, company,
+     institution, or community do next?
+  2. Rights, ethics, or legitimacy — is the reported action justified,
+     proportionate, fair, or acceptable?
+  3. Tradeoffs — which concrete value should take priority when safety,
+     cost, privacy, growth, innovation, fairness, or liberty conflict?
+  4. Cause or forecast — what consequential interpretation or likely outcome
+     do informed groups genuinely disagree about?
+  5. Rules or accountability — what standard should govern the named actor,
+     technology, market, institution, or conduct?
+- A debate claim may state a grounded implication of the reported facts; the
+  exact sentence need not appear in a source. But its actors, situation, and
+  factual premise must come from this story, and the opposing constituencies
+  must be real rather than imagined for the exercise.
+
+Candidate-qualification gate (mandatory after the sweep):
+- Exploration may be broad; publication is narrow. A surviving candidate must
+  arise from the headline event, one of the story's major factual collections,
+  or a direct consequence needed to understand that event.
+- Reject a candidate based only on an incidental paragraph, background aside,
+  neighboring event, or newsletter/market-roundup item. Appearing somewhere in
+  a source is not enough when it is outside the story's central scope.
+- The sources must support the exact bridge from the reported facts to the
+  contested proposition. Reusing the story's actors and terminology to invent
+  a merely conceivable policy, comparison, or tradeoff does not count.
+- Never manufacture a comparison from co-occurrence. Claims framed as "A over
+  B," "A is superior to B," "replace A with B," or "prioritize A instead of B"
+  qualify only when the sources themselves present A and B as competing
+  choices or when that exact competition is a well-established public divide
+  directly raised by the story. Two related things are not automatically
+  alternatives.
+- Ask: "Would the target audience recognize this as a debate raised by THIS
+  story?" If the answer needs unrelated context or a long explanation, reject
+  the candidate.
+- Only return zero after this full sweep produces no strong debatable
+  candidate that passes this gate.
+
+If the story supports at least three independent axes, write 3-5 debate claims
+into the top-level `debate_claims` array. Otherwise return an empty array. Never
+publish one or two claims, and never invent, weaken, or mirror claims merely to
+reach the collection minimum.
+
+Product shape — every returned claim becomes its OWN debate:
+- Users argue for and against each claim individually, so the pro and con
+  sides of one question must NOT appear as two claims. "Country A should
+  accept Country B's trade demands" and "Country A should resist Country
+  B's trade demands" are one debate, not two.
+- Before returning, silently reduce each candidate to the neutral question
+  it answers. If two candidates reduce to the same question, they are
+  duplicates even when their wording and conclusions differ. Keep only the
+  strongest version; do not discard it merely because no second question
+  survives.
+- Look beneath the story's overall conflict for distinct substantive
+  disputes in its details: separate policy rules, institutions, causes,
+  consequences, or standards of legitimacy.
+
+Structure-only example — never copy its facts or actors:
+- BAD pair: "Country A should accept Country B's tariff demands" +
+  "Country A should resist Country B's tariff threats." Both answer the
+  same accept-or-resist question.
+- GOOD pair: "Tariff deductions should require domestic rather than
+  regional automotive content" + "Country A should preserve supply
+  management for protected agricultural sectors." These address different
+  policy questions.
+
+A debate claim is a clear, direct proposition around which significant
+groups take opposing positions. It may be factual, causal, predictive,
+evaluative, or prescriptive — debate-worthiness is determined by meaningful
+disagreement, not by factuality:
+- It sounds like a headline: clear, direct, and it takes a definite side.
+  "Chinese AI models pose a security risk to government infrastructure" —
+  a reader immediately knows what agreeing and what disagreeing mean.
+- The fact test: a straightforward reported fact is not debate-worthy
+  merely because someone could deny it. A factual proposition qualifies
+  only when it reflects a real, consequential dispute that remains
+  meaningful beyond checking a single source.
+- Both sides must be real: visible in the sources themselves, or a
+  well-established public divide this story directly touches. Name-able
+  groups, not hypothetical devil's advocates.
+
+Rules:
+- This is the ONE deliberate exception to the no-invention rule: debate
+  claims are composed by you, not copied from the sources. The exception
+  applies ONLY to the debate_claims array — never to claims, quotes,
+  collections, or the summary.
+- Ground each one: source_indices lists the sources that show the contested
+  question this position answers. The dispute must arise from THIS story.
+- Plain assertive voice. No hedging ("may", "could", "some argue"),
+  no questions, no "whether" — state the proposition outright. (Predictive
+  propositions naturally use future tense: "X will outperform Y by 2030.")
+- Debate-card test: a member of the story's target audience should understand
+  the proposition in one reading, immediately see what agreeing and
+  disagreeing mean, and be able to make a meaningful short argument for
+  either side. A technically valid but bureaucratic, memo-like, or trivial
+  proposition fails this test.
+
+Geo card register — match this product style, not a news-summary style:
+- A debate claim is the motion itself, not the article's explanation of it.
+- Aim for 6-10 words. Use 11-14 only when a named actor or essential
+  distinction cannot be removed. Lengths of 15-20 are exceptional and require
+  that every remaining word is necessary to avoid ambiguity. There is no
+  minimum; hard maximum 20 words.
+- Keep only the named actor or subject plus the contested action, judgment, or
+  forecast. The story and source links provide the evidence and background;
+  do not repeat that rationale on the card.
+- Prefer familiar short public names and abbreviations ("U.S.", "DOJ", "AI",
+  "NATO", "CFTC", "Alibaba") over formal institutional names. Remove dates,
+  amounts, motivations, consequences, implementation detail, and supporting
+  explanations unless that detail is itself the contested issue.
+- STYLE-ONLY examples of the Geo card shape — never copy their subject matter
+  unless this story independently supports it:
+  "Museums should return contested cultural artifacts."
+  "Professional sports leagues should permit salary caps."
+  "Cities should charge drivers for downtown congestion."
+  "Schools should replace final exams with project assessments."
+- One proposition per claim. If deleting a clause beginning with "because",
+  "despite", "to", "in order to", or "rather than" leaves another complete
+  arguable proposition, remove or split the extra thought. A debate claim is
+  a motion, not its supporting argument.
+- Keep every claim self-contained (the Shuffle Rule applies: name the actors,
+  never a bare "the ban" or "it"). Simplify the scope rather than exceeding
+  the 20-word maximum to carry every detail from the source.
+- Compression pass (mandatory): delete trailing purpose, consequence, or
+  justification phrases beginning with "to," "in order to," "so that,"
+  "because," or "despite" whenever the agree/disagree axis remains clear
+  without them. If the sentence before that phrase is already a complete
+  motion, return the shorter sentence. Context belongs in the story, not on
+  the debate card. Silently compare the full draft with its shortest rewrite:
+  if the rewrite preserves who or what the debate concerns and the position it
+  takes, return the rewrite.
+- Each debate claim must take a DIFFERENT contested question. Two phrasings
+  of the same position are one claim.
+- List surviving candidates strongest first, prioritizing clarity, meaningful
+  stakes, audience relevance, and strength of the real-world disagreement.
+- Debate claims must NOT duplicate an entry in the claims array, and must
+  NOT appear in any collection, collection_order, or the summary.
+
+─────────────────────────────────────────────
+STEP 9: NARRATIVE SUMMARY
 ─────────────────────────────────────────────
 
 Generate a 350-500 character narrative summary:
@@ -260,6 +413,22 @@ Summary-claims parity:
 Collection integrity:
 - Does any collection have fewer than 2 claims? If yes, merge it into another collection or add a missing claim from the sources. Do not output single-claim collections.
 - Are perspective collections separated by topic collections in collection_order? Move perspectives to the end.
+
+Debate-claim check:
+- Trace every candidate back to the headline event, a major factual collection,
+  or a direct consequence of the event. If it comes only from incidental
+  background or requires an invented bridge from the news to the motion,
+  delete it.
+- For every comparison or preference, point to where the sources establish
+  the named options as genuine alternatives. If they merely mention both—or
+  mention only one—delete the comparison rather than inventing the other side.
+- Perform the compression pass again. Remove every trailing rationale that is
+  not required to understand what the reader is agreeing or disagreeing with.
+- Read each debate claim alone: is it a proposition a named group actually argues against? If every informed reader would simply agree with it — a reported fact restated, with no real, consequential dispute behind it — delete it, or sharpen it into the actually contested proposition.
+- Does any debate claim hedge ("may", "could", "some argue") or ask a question? Rewrite it as a direct assertion.
+- Is any debate claim a near-paraphrase of another debate claim, or of a factual claim? Remove it. An empty debate_claims array is better than a padded one.
+- Reduce each debate claim to the neutral question it answers: if two claims answer the same question from opposite sides, they are one debate, not two. Replace one of them with a genuinely different contested question, or return an empty array.
+- Count check: the array must hold either zero or 3-5 debate claims. Never add a weaker or mirrored claim to reach three.
 
 Shuffle audit (mandatory, claim by claim):
 - Read each claim ALONE, imagining every other claim has been deleted. Flag any claim that:
@@ -313,6 +482,12 @@ Return only valid JSON without markdown block fencing, in this exact shape:
     }}
   ],
   "collection_order": ["First collection name", "Second collection name"],
+  "debate_claims": [
+    {{
+      "text": "An evaluative proposition significant groups argue for and against, e.g. a policy is justified.",
+      "source_indices": [0, 1]
+    }}
+  ],
   "summary": "350-500 character narrative summary."
 }}
 
@@ -323,7 +498,7 @@ Quotes must be verbatim from source text.
 source_indices must be valid integer indices into the provided "sources" list.
 Confidence values: 0.9+ = explicitly stated, 0.7-0.9 = strongly implied, 0.5-0.7 = inferred.
 Importance values follow the Importance-Graded rubric in Step 4 (0.9+ core event, 0.7-0.85 causes/consequences/responses, 0.5-0.65 supporting detail, 0.3-0.45 peripheral context).
-Do not invent claims, topics, perspectives, or collections.
+Do not invent claims, topics, perspectives, or collections. The debate_claims array is the one exception (Step 8): its positions are composed rather than extracted — and only there.
 Do not include explanations, metadata, or commentary outside the JSON.
 
 INPUTS
@@ -337,3 +512,82 @@ sources
 topics
 {topics}
 """
+
+
+def _factual_only_prompt(prompt: str) -> str:
+  """Remove provisional debate work from the first-pass prompt.
+
+  Keeping this transformation next to the legacy text makes the temporary
+  compatibility boundary explicit and, importantly, guarantees that Gemini
+  does not spend attention or output tokens generating debates twice.
+  """
+  debate_step = (
+    "─────────────────────────────────────────────\n"
+    "STEP 8: DEBATE CLAIMS (separate `debate_claims` output)\n"
+    "─────────────────────────────────────────────"
+  )
+  summary_step = (
+    "─────────────────────────────────────────────\n"
+    "STEP 9: NARRATIVE SUMMARY\n"
+    "─────────────────────────────────────────────"
+  )
+  before_debate, marker, after_debate = prompt.partition(debate_step)
+  _, summary_marker, after_summary_marker = after_debate.partition(summary_step)
+  if not marker or not summary_marker:
+    raise RuntimeError("News prompt step markers changed; factual/debate split is unsafe")
+
+  factual = (
+    before_debate
+    + "─────────────────────────────────────────────\n"
+      "STEP 8: DEBATE PLACEHOLDER\n"
+      "─────────────────────────────────────────────\n\n"
+      "Debate generation runs in a dedicated evidence-first pass after this "
+      "response. Always return an empty `debate_claims` array here. Do not "
+      "discover, draft, or validate debate propositions in this factual pass.\n\n"
+    + summary_marker
+    + after_summary_marker
+  )
+
+  # The old final-validation block and cardinality examples belong to the removed
+  # Step 8. Replace both so no contradictory instruction reaches the model.
+  before_check, check_marker, after_check = factual.partition("Debate-claim check:\n")
+  _, shuffle_marker, after_shuffle_marker = after_check.partition(
+    "Shuffle audit (mandatory, claim by claim):"
+  )
+  if not check_marker or not shuffle_marker:
+    raise RuntimeError("News prompt debate-check markers changed; split is unsafe")
+  factual = (
+    before_check
+    + "Debate output check:\n- Is `debate_claims` empty? If not, empty it.\n\n"
+    + shuffle_marker
+    + after_shuffle_marker
+  )
+
+  before_output, output_marker, after_output = factual.partition(
+    '  "debate_claims": [\n'
+  )
+  _, summary_output_marker, after_summary_output = after_output.partition(
+    '  "summary":'
+  )
+  if not output_marker or not summary_output_marker:
+    raise RuntimeError("News prompt output markers changed; split is unsafe")
+  factual = (
+    before_output
+    + '  "debate_claims": [],\n'
+    + summary_output_marker
+    + after_summary_output
+  )
+
+  factual = factual.replace(
+    "Do not invent claims, topics, perspectives, or collections. The debate_claims array is the one exception (Step 8): its positions are composed rather than extracted — and only there.",
+    "Do not invent claims, topics, perspectives, collections, or debate claims.",
+  )
+  return factual.replace(
+    "produce a narrative summary — and, only where the story genuinely carries one, a small set of debatable position claims (Step 8) — all in a single coordinated pass",
+    "produce a narrative summary, all in a single coordinated pass",
+  )
+
+
+NEWS_CLAIM_EXTRACT_PROMPT = _factual_only_prompt(
+  _NEWS_CLAIM_EXTRACT_PROMPT_WITH_PROVISIONAL_DEBATES
+)

@@ -49,6 +49,10 @@ def test_news_specs_use_distinct_rate_limit_keys():
 
     assert NEWS_EXTRACT_CLAIMS_SPEC.rate_limit_key == "gemini_global"
     assert NEWS_EXTRACT_CLAIMS_CLAUDE_SPEC.rate_limit_key == "claude_global"
+    # Standalone endpoints reserve factual + candidate + semantic review plus
+    # the maximum two-call conditional underfilled-collection pass.
+    assert NEWS_EXTRACT_CLAIMS_SPEC.rate_limit_units == 5
+    assert NEWS_EXTRACT_CLAIMS_CLAUDE_SPEC.rate_limit_units == 5
 
 
 def test_spend_guard_disabled_is_noop():
