@@ -64,10 +64,6 @@ See `.env.example` for all settings. Key flags:
 
 - `GEMINI_PREMIUM_MODEL` — model for podcast claim extraction
 - `GEMINI_NEWS_CLAIM_MODEL` / `GEMINI_NEWS_CLAIM_THINKING_LEVEL` — news claim extraction (scoped separately from the podcast pipeline)
-- `GEMINI_NEWS_DEBATE_MODEL` / `GEMINI_NEWS_DEBATE_THINKING_LEVEL` — dedicated news debate-generation pass
-- `GEMINI_NEWS_DEBATE_REVIEW_MODEL` / `NEWS_DEBATE_SEMANTIC_REVIEW_ENFORCED` — reject-only semantic review (set enforcement false for shadow mode)
-- `NEWS_DEBATE_UNDERFILLED_RESCUE_ENABLED` — one best-effort extra candidate/review pass when one or two debates survive
-- `NEWS_DEBATE_ZERO_RETRY_ENABLED` — one fresh generation+review draw when review approves zero candidates despite generation producing some
 - `NEWS_CLAIM_CLAUDE_MODEL` — Claude fallback for news claims
 - `ENABLE_EMBEDDINGS` — optional claim embeddings via an Ollama embedding service (off in production)
 

@@ -12,10 +12,6 @@ from src.api.schemas.news_claim_extract_schema import (
 from src.config.prompts.news_claim_extract_prompt import NEWS_CLAIM_EXTRACT_PROMPT
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
-from src.api.services.news_debate_claim_service import (
-  extract_news_debate_claims,
-  extract_news_debate_claims_claude,
-)
 
 logger = get_logger(__name__)
 
@@ -51,12 +47,12 @@ def _build_prompt(
   )
 
 
-def extract_news_claims_factual(
+def extract_news_claims(
   headline: str,
   sources: List[NewsArticleSource],
   topics: List[str],
 ) -> NewsClaimExtractResponse:
-  """First-pass news extraction via a single Gemini call.
+  """Fresh news-claim extraction via a single Gemini call.
 
   Combines what news-worker currently does as Pass 2 (claims by topic) +
   Pass 3 (cross-source verification) + Pass 4 (perspectives + summary)
@@ -107,12 +103,7 @@ def extract_news_claims_factual(
         config=config,
       )
       parsed = _parse_llm_response(response.text)
-      result = NewsClaimExtractResponse.model_validate(parsed)
-      # Step-8 output from the overloaded first pass is only provisional. Never
-      # let it escape or become a checkpointed result; the dedicated pass owns
-      # the final debate contract.
-      result.debate_claims = []
-      return result
+      return NewsClaimExtractResponse.model_validate(parsed)
     except Exception as e:
       last_error = e
       logger.warning(
@@ -127,12 +118,12 @@ def extract_news_claims_factual(
   raise Exception("News claim extraction: unreachable code path")
 
 
-def extract_news_claims_factual_claude(
+def extract_news_claims_claude(
   headline: str,
   sources: List[NewsArticleSource],
   topics: List[str],
 ) -> NewsClaimExtractResponse:
-  """First-pass news extraction running the same strong prompt on Claude.
+  """Fallback news-claim extraction running the SAME strong prompt on Claude.
 
   Identical contract to extract_news_claims() — same NEWS_CLAIM_EXTRACT_PROMPT,
   same NewsClaimExtractResponse schema — but invokes Anthropic Claude instead
@@ -172,9 +163,7 @@ def extract_news_claims_factual_claude(
         messages=[{"role": "user", "content": prompt}],
       )
       parsed = _parse_llm_response(_claude_text(message))
-      result = NewsClaimExtractResponse.model_validate(parsed)
-      result.debate_claims = []
-      return result
+      return NewsClaimExtractResponse.model_validate(parsed)
     except Exception as e:
       last_error = e
       logger.warning(
@@ -187,37 +176,6 @@ def extract_news_claims_factual_claude(
 
   # Unreachable — loop above either returns or raises
   raise Exception("Claude news claim extraction: unreachable code path")
-
-
-def extract_news_claims(
-  headline: str,
-  sources: List[NewsArticleSource],
-  topics: List[str],
-) -> NewsClaimExtractResponse:
-  """Complete Gemini extraction with a dedicated grounded debate pass.
-
-  The factual prompt explicitly leaves debate_claims empty. Candidate generation
-  then applies deterministic grounding, followed by independent reject-only
-  semantic review before projection to the public response.
-  """
-  result = extract_news_claims_factual(headline, sources, topics)
-  result.debate_claims = extract_news_debate_claims(
-    headline, sources, result.claims
-  )
-  return result
-
-
-def extract_news_claims_claude(
-  headline: str,
-  sources: List[NewsArticleSource],
-  topics: List[str],
-) -> NewsClaimExtractResponse:
-  """Complete Claude extraction with the same grounded debate contract."""
-  result = extract_news_claims_factual_claude(headline, sources, topics)
-  result.debate_claims = extract_news_debate_claims_claude(
-    headline, sources, result.claims
-  )
-  return result
 
 
 def _claude_text(message) -> str:

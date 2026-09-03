@@ -145,50 +145,9 @@ class Settings(BaseSettings):
         description="Gemini 3+ thinking level for news claim extraction: minimal|low|medium|high. 'low' is adaptive (fast on light stories, thinks on dense ones) and holds claim coverage; 'minimal' degrades dense multi-source stories."
     )
 
-    # News Debate Extraction — a separate definition-led pass. Keeping these
-    # controls independent lets us spend more reasoning on the comparatively
-    # small compose-and-review decision without slowing the large factual
-    # extraction prompt. It defaults to the same proven Flash model.
-    gemini_news_debate_model: str = Field(
-        default="gemini-3.5-flash",
-        description="Gemini model for source-grounded news debate generation"
-    )
-    gemini_news_debate_temperature: float = Field(
-        default=0.0,
-        description="Temperature for news debate generation (0 = stable candidate gating)"
-    )
-    gemini_news_debate_thinking_level: str = Field(
-        default="medium",
-        description="Gemini 3+ thinking level for source-grounded news debates: minimal|low|medium|high. Empty disables."
-    )
-    gemini_news_debate_review_model: str = Field(
-        default="gemini-3.5-flash",
-        description="Gemini model for reject-only semantic review of news debates"
-    )
-    gemini_news_debate_review_temperature: float = Field(
-        default=0.0,
-        description="Temperature for news debate semantic review"
-    )
-    gemini_news_debate_review_thinking_level: str = Field(
-        default="high",
-        description="Gemini 3+ thinking level for news debate semantic review. Empty disables."
-    )
-    news_debate_semantic_review_enforced: bool = Field(
-        default=True,
-        description="Reject candidates that fail semantic review. False runs the reviewer in shadow mode."
-    )
-    news_debate_zero_retry_enabled: bool = Field(
-        default=True,
-        description="When first-pass review accepts zero debate candidates but generation produced some, take one fresh generation + review draw. Thin-supply stories sit at the 3-floor with no margin, so a single review flip otherwise zeroes the collection."
-    )
-    news_debate_underfilled_rescue_enabled: bool = Field(
-        default=True,
-        description="Run one additional grounded candidate + semantic-review pass when one or two debates survive."
-    )
-
     # News Claim Extraction — Claude fallback (POST /extract/news/claims/claude)
-    # Runs the same factual + grounded-debate contracts as Gemini, just on
-    # Anthropic Claude. news-worker calls this only when the Gemini path
+    # Runs the EXACT SAME NEWS_CLAIM_EXTRACT_PROMPT as the Gemini endpoint, just
+    # on Anthropic Claude. news-worker calls this only when the Gemini path
     # errors out, so a Gemini outage no longer drops the pipeline onto a weaker
     # locally-defined prompt (root cause of the 2026-06-10 inverted-claim
     # incident). Requires anthropic_api_key (ANTHROPIC_API_KEY env).
