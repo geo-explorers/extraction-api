@@ -26,12 +26,9 @@ def _extract_and_respond(
   request: NewsClaimExtractRequest,
   provider: str,
 ) -> JSONResponse:
-  """Shared request/response handling for both provider endpoints.
-
-  Each extractor runs factual extraction, evidence-first debate candidates,
-  reject-only semantic review, and conditional 3-5 collection completion,
-  then returns the same public schema.
-  """
+  """Shared request/response handling for both the Gemini and Claude
+  news-claim endpoints. Only the injected `extractor` differs — they run the
+  identical NEWS_CLAIM_EXTRACT_PROMPT and return the same schema."""
   logger.info(
     f"News claim extract ({provider}) - Headline: '{request.headline[:80]}', "
     f"Sources: {len(request.sources)}, "
@@ -49,7 +46,6 @@ def _extract_and_respond(
       f"Claims: {len(result.claims)}, "
       f"Quotes: {len(result.quotes)}, "
       f"Collections: {len(result.collections)}, "
-      f"Debate claims: {len(result.debate_claims)}, "
       f"Summary chars: {len(result.summary)}"
     )
     logger.debug(f"Response body: {json.dumps(response_data)[:2000]}")
@@ -71,7 +67,6 @@ def _extract_and_respond(
         "quotes": None,
         "collections": None,
         "collection_order": None,
-        "debate_claims": None,
         "summary": None,
       },
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -86,7 +81,7 @@ def news_claim_extract(request: NewsClaimExtractRequest) -> JSONResponse:
 
 @router.post("/news/claims/claude")
 def news_claim_extract_claude(request: NewsClaimExtractRequest) -> JSONResponse:
-  """Fallback news-claim extraction via Claude on the same reviewed contract.
+  """Fallback news-claim extraction via Claude on the SAME strong prompt.
 
   Separate endpoint (not a flag on /news/claims) so the proven Gemini path is
   untouched. news-worker calls this only when the Gemini path errors out."""

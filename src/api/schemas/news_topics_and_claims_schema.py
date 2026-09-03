@@ -8,7 +8,7 @@ the topic labels without a second call. Claim/quote/collection types are reused
 verbatim, so the claim portion stays byte-identical to /extract/news/claims.
 """
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from typing import List
 
 from src.api.schemas.news_claim_extract_schema import (
@@ -16,8 +16,6 @@ from src.api.schemas.news_claim_extract_schema import (
   ExtractedClaim,
   ExtractedQuote,
   ExtractedCollection,
-  ExtractedDebateClaim,
-  normalize_debate_claims,
 )
 
 
@@ -35,12 +33,4 @@ class NewsTopicsAndClaimsResponse(BaseModel):
   quotes: List[ExtractedQuote] = Field(default_factory=list)
   collections: List[ExtractedCollection] = Field(default_factory=list)
   collection_order: List[str] = Field(default_factory=list)
-  debate_claims: List[ExtractedDebateClaim] = Field(default_factory=list)
   summary: str = ""
-
-  # Same repair as NewsClaimExtractResponse: this model is also constructed
-  # directly (task finalize, HTTP layer), so the contract must hold here too.
-  @model_validator(mode="after")
-  def _enforce_debate_claim_contract(self) -> "NewsTopicsAndClaimsResponse":
-    self.debate_claims = normalize_debate_claims(self.debate_claims)
-    return self
