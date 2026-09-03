@@ -41,6 +41,10 @@ from src.tasks.news_extract_topics_and_claims import (
     news_topics_and_claims_workflow,
     NEWS_TOPICS_AND_CLAIMS_MAX_PAYLOAD_BYTES,
 )
+from src.tasks.news_extract_debate_claims import (
+    news_debate_claims_workflow,
+    NEWS_DEBATE_CLAIMS_MAX_PAYLOAD_BYTES,
+)
 from src.tasks.claims_extract import (
     claims_workflow,
     CLAIMS_EXTRACT_MAX_PAYLOAD_BYTES,
@@ -57,6 +61,10 @@ from src.tasks.geo_spaces_to_sheet import (
 from src.api.schemas.news_topics_and_claims_schema import (
     NewsTopicsAndClaimsRequest,
     NewsTopicsAndClaimsResponse,
+)
+from src.api.schemas.news_debate_claims_task_schema import (
+    NewsDebateClaimsRequest,
+    NewsDebateClaimsResponse,
 )
 from src.api.schemas.claims_extract_schema import (
     ClaimsExtractInput,
@@ -115,6 +123,13 @@ def _build_registry() -> dict[str, RegisteredTask]:
         output_model=NewsTopicsAndClaimsResponse,
         max_payload_bytes=NEWS_TOPICS_AND_CLAIMS_MAX_PAYLOAD_BYTES,
         runnable=news_topics_and_claims_workflow,
+    )
+    registry["news.extract_debate_claims"] = RegisteredTask(
+        name="news.extract_debate_claims",
+        input_model=NewsDebateClaimsRequest,
+        output_model=NewsDebateClaimsResponse,
+        max_payload_bytes=NEWS_DEBATE_CLAIMS_MAX_PAYLOAD_BYTES,
+        runnable=news_debate_claims_workflow,
     )
     registry["claims.extract"] = RegisteredTask(
         name="claims.extract",
