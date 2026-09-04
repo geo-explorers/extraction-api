@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     )
     log_file: str = Field(default="logs/extraction.log", description="Log file path")
 
+    # claims.judge_equivalence: one Gemini call judges which candidates are logically
+    # equivalent to a claim. Candidates come from the caller (typically geo-lens).
+    claims_equivalence_model: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model for claims.judge_equivalence (one call per claim, all candidates)",
+    )
+    claims_equivalence_temperature: float = Field(default=0.0)
+
     # API keys for LLM providers
     anthropic_api_key: str | None = Field(
         default=None,
