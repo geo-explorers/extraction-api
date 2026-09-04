@@ -136,13 +136,17 @@ async def complete_underfilled_debates(
     # return only mirrors it to avoid reserving Gemini spend units for a call
     # the service would refuse — keep the conditions in sync. Either branch
     # spends at most one generation and one review call (the reserved 2 units).
+    # input.repair (consumer opt-out, default True) gates both passes: a
+    # latency-bound caller takes the first review's verdict as final.
     zero_retry = (
-        len(accepted) == 0
+        input.repair
+        and len(accepted) == 0
         and len(attempted) > 0
         and settings.news_debate_zero_retry_enabled
     )
     rescue = (
-        0 < len(accepted) < 3
+        input.repair
+        and 0 < len(accepted) < 3
         and settings.news_debate_underfilled_rescue_enabled
     )
     if not zero_retry and not rescue:
