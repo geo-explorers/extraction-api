@@ -49,6 +49,10 @@ def test_news_specs_use_distinct_rate_limit_keys():
 
     assert NEWS_EXTRACT_CLAIMS_SPEC.rate_limit_key == "gemini_global"
     assert NEWS_EXTRACT_CLAIMS_CLAUDE_SPEC.rate_limit_key == "claude_global"
+    # Standalone endpoints reserve factual + candidate + semantic review plus
+    # the maximum two-call conditional underfilled-collection pass.
+    assert NEWS_EXTRACT_CLAIMS_SPEC.rate_limit_units == 5
+    assert NEWS_EXTRACT_CLAIMS_CLAUDE_SPEC.rate_limit_units == 5
 
 
 def test_spend_guard_disabled_is_noop():
@@ -121,6 +125,40 @@ def test_news_topics_and_claims_dag_registered():
     assert "topics" not in NewsTopicsAndClaimsRequest.model_fields
     # Uses the 5MB default cap, NOT podcast's larger transcript-specific cap.
     assert t.max_payload_bytes == DEFAULT_MAX_PAYLOAD_BYTES
+
+
+def test_news_debate_claims_task_is_registered_with_claims_echo():
+    from src.tasks.registry import get_task
+    from src.api.schemas.news_debate_claims_task_schema import (
+        NewsDebateClaimsRequest,
+        NewsDebateClaimsResponse,
+    )
+    from src.tasks.base import DEFAULT_MAX_PAYLOAD_BYTES
+
+    t = get_task("news.extract_debate_claims")
+    assert t is not None
+    assert t.input_model is NewsDebateClaimsRequest
+    assert t.output_model is NewsDebateClaimsResponse
+    assert t.runnable is not None
+    # The consumer passes the fused task's claims back — debate generation
+    # grounds in them; this task extracts nothing on its own.
+    assert "claims" in NewsDebateClaimsRequest.model_fields
+    assert t.max_payload_bytes == DEFAULT_MAX_PAYLOAD_BYTES
+
+
+def test_debate_claims_response_enforces_zero_or_three_to_five():
+    from src.api.schemas.news_debate_claims_task_schema import (
+        NewsDebateClaimsResponse,
+    )
+    from src.api.schemas.news_claim_extract_schema import ExtractedDebateClaim
+
+    two = [
+        ExtractedDebateClaim(text=f"Contested position {i}", source_indices=[0], confidence=0.8)
+        for i in range(2)
+    ]
+    # Below the floor the contract empties the list rather than shipping a
+    # thin collection — same normalize_debate_claims door as the fused shape.
+    assert NewsDebateClaimsResponse(debate_claims=two).debate_claims == []
 
 
 def test_derive_topics_uses_distinct_claim_topics_in_first_seen_order():

@@ -3,6 +3,11 @@
 Three tasks — extract_topics -> extract_claims_fused -> finalize — fuse what used
 to be two separate operations (news-worker's client-side Pass 1 topic extraction
 on Claude, then a POST to /extract/news/claims on Gemini) into one task type.
+Grounded debates deliberately live in their OWN task type
+(news.extract_debate_claims): they would otherwise sit on this task's critical
+path, and the injector needs claims at pre-debate speed while collecting
+debates asynchronously. The response keeps its debate_claims field for shape
+stability, always empty here.
 The consumer sends {headline, sources}; step 1 extracts the ordered topic labels,
 step 2 feeds them into the EXISTING, UNCHANGED Gemini claim extraction, and
 finalize merges the two outputs into one response.
@@ -14,8 +19,9 @@ succeeded Claude topic call. The label validation + single feedback retry live
 INSIDE extract_topics as plain Python (not a 4th step) — bounded to one extra
 Claude call, only on the rare label-violation path.
 
-Rate limits: the topic step consumes one claude_global unit, the claim step one
-gemini_global unit, finalize none. Engine-agnostic: Hatchet wiring is confined to
+Rate limits: the topic step consumes one claude_global unit; the factual step
+consumes one gemini_global unit; finalize consumes none.
+Engine-agnostic: Hatchet wiring is confined to
 the @workflow.task decorators here plus base.py/worker.py, exactly like the
 podcast DAG — the handlers themselves import only Context.
 """
@@ -31,7 +37,7 @@ from src.api.schemas.news_topics_and_claims_schema import (
     NewsTopicsAndClaimsResponse,
 )
 from src.api.services.news_topics_extract_service import extract_overview_topics
-from src.api.services.news_claim_extract_service import extract_news_claims
+from src.api.services.news_claim_extract_service import extract_news_claims_factual
 from src.tasks.base import DEFAULT_MAX_PAYLOAD_BYTES
 from src.infrastructure.spend_guard import spend_guard
 from src.infrastructure.logger import get_logger
@@ -93,11 +99,10 @@ async def extract_claims_fused(
 ) -> dict:
     topic_list = ctx.task_output(extract_topics)["topics"]
     spend_guard.check_and_record("gemini")
-    # The EXISTING Gemini claim service, unchanged — it already takes a topic
-    # list and runs NEWS_CLAIM_EXTRACT_PROMPT. model_dump() so the step output is
-    # a JSON-serializable dict for ctx.task_output / checkpointing.
+    # Factual claims/collections/summary only. The exported prompt forces
+    # debate_claims empty; news.extract_debate_claims exclusively owns them.
     resp = await asyncio.to_thread(
-        extract_news_claims, input.headline, input.sources, topic_list
+        extract_news_claims_factual, input.headline, input.sources, topic_list
     )
     return {"claims_result": resp.model_dump()}
 
@@ -124,5 +129,7 @@ async def finalize(
         quotes=cr["quotes"],
         collections=cr["collections"],
         collection_order=cr["collection_order"],
+        # Debates come from news.extract_debate_claims; kept for shape stability.
+        debate_claims=[],
         summary=cr["summary"],
     )
