@@ -146,6 +146,67 @@ def test_news_debate_claims_task_is_registered_with_claims_echo():
     assert t.max_payload_bytes == DEFAULT_MAX_PAYLOAD_BYTES
 
 
+def test_debate_claims_request_repair_defaults_true():
+    from src.api.schemas.news_debate_claims_task_schema import NewsDebateClaimsRequest
+
+    # Existing callers (cron pipeline, composite endpoints) send no `repair`
+    # field and must keep the full zero-retry + rescue behavior.
+    req = NewsDebateClaimsRequest(headline="h", sources=[], claims=[])
+    assert req.repair is True
+    opted_out = NewsDebateClaimsRequest(headline="h", sources=[], claims=[], repair=False)
+    assert opted_out.repair is False
+
+
+def test_debate_completion_step_skips_repair_when_consumer_opts_out(monkeypatch):
+    import asyncio
+    import src.tasks.news_extract_debate_claims as deb
+    from src.api.schemas.news_debate_claims_task_schema import NewsDebateClaimsRequest
+
+    called = {"service": 0, "spend": 0}
+    monkeypatch.setattr(
+        deb,
+        "complete_underfilled_news_debate_candidates",
+        lambda *a, **k: (called.__setitem__("service", called["service"] + 1), ([], []))[1],
+    )
+    monkeypatch.setattr(
+        deb.spend_guard,
+        "check_and_record",
+        lambda provider: called.__setitem__("spend", called["spend"] + 1),
+    )
+
+    candidate = {
+        "neutral_question": "q",
+        "opposing_positions": ["a", "b"],
+        "source_indices": [0],
+        "text": "Contested position",
+    }
+    review_out = {
+        # One survivor: underfilled, so rescue WOULD fire with repair on.
+        "accepted_candidates": [candidate],
+        "debate_claims": [{"text": "Contested position", "source_indices": [0], "confidence": 0.8}],
+        "semantic_verdicts": [],
+    }
+
+    class Ctx:
+        def task_output(self, task):
+            return {
+                deb.extract_debate_candidates: {"candidates": [candidate]},
+                deb.review_debates: review_out,
+            }[task]
+
+    # repair=False: first review's verdict is final — no service call, no spend.
+    opted_out = NewsDebateClaimsRequest(headline="h", sources=[], claims=[], repair=False)
+    out = asyncio.run(deb.complete_underfilled_debates.fn(opted_out, Ctx()))
+    assert out["debate_claims"] == review_out["debate_claims"]
+    assert called == {"service": 0, "spend": 0}
+
+    # Default request, same review state: rescue runs and reserves both units.
+    default_req = NewsDebateClaimsRequest(headline="h", sources=[], claims=[])
+    asyncio.run(deb.complete_underfilled_debates.fn(default_req, Ctx()))
+    assert called["service"] == 1
+    assert called["spend"] == 2
+
+
 def test_debate_claims_response_enforces_zero_or_three_to_five():
     from src.api.schemas.news_debate_claims_task_schema import (
         NewsDebateClaimsResponse,

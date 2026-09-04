@@ -25,6 +25,15 @@ class NewsDebateClaimsRequest(BaseModel):
   # The fused task's claims, passed back verbatim: candidate generation grounds
   # in them and the reviewer needs the same factual context the consumer saw.
   claims: List[ExtractedClaim]
+  # Whether the server may run its repair passes (zero-retry redraw +
+  # underfilled rescue) when the first review leaves fewer than three
+  # survivors. Each pass adds a full generation + review round (~45-60s), so a
+  # latency-bound consumer (the news injector, whose editor is waiting on the
+  # response) sends False to answer right after the first review — the 3-floor
+  # then empties thin collections instead of repairing them. The response
+  # contract is identical either way (0 or 3-5); default True keeps every
+  # existing caller, including the cron pipeline, unchanged.
+  repair: bool = True
 
 
 class NewsDebateClaimsResponse(BaseModel):
