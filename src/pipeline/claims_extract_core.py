@@ -57,6 +57,60 @@ def restates_title(claim_text: str, title: Optional[str]) -> bool:
     return len(a & b) / len(a | b) >= TITLE_RESTATEMENT_MIN_OVERLAP
 
 
+# ── Sentence-ending period strip ────────────────────────────────────────────
+# Port of news-worker lib/claim-text.ts `claimName()`. The extraction prompt
+# teaches full sentences — every example claim it shows ends in a period — so
+# claim text arrives as prose. But a Claim entity's name on Geo is a statement,
+# not a sentence, and consumers use this text verbatim as the entity name
+# (geo-chat's claims preview, geogenesis' debate publish minting Name from
+# claim.text). The period comes off HERE, deterministically, so every consumer
+# of claims.extract sees the claim as it will be named on the graph.
+#
+# Only a bare sentence-ending period goes. A period that belongs to the text
+# stays: an abbreviation ("acquired Halcyon Inc."), a dotted initialism ("in
+# the U.S."), or an ellipsis. Same trade the news pipeline made: a claim
+# ending in "Inc." keeps its period rather than publishing as a mangled name
+# (~0.2% of claims, measured there on 79,399).
+
+# Abbreviations whose period is part of the word. Case-sensitive on purpose:
+# "No." is an abbreviation, "voted no." is a sentence.
+_ABBREVIATIONS = frozenset({
+    "Inc", "Ltd", "Corp", "Co", "PLC", "Est",
+    "Jr", "Sr", "Mr", "Mrs", "Ms", "Dr", "Prof",
+    "Gov", "Sen", "Rep", "Gen", "Adm", "Lt", "Col", "Capt", "Sgt",
+    "St", "Mt", "Ft", "Ave", "Blvd", "Rd", "No",
+    "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept",
+    "Oct", "Nov", "Dec", "vs", "etc", "approx",
+})
+_ELLIPSIS_END_RE = re.compile(r"(?:\.{2,}|…)$")
+_FINAL_WORD_RE = re.compile(r"(\S+)\.$")
+_OPENING_WRAPPERS_RE = re.compile(r"^[(\"'“‘\[]+")
+_DOTTED_INITIALISM_RE = re.compile(r"(?:[A-Za-z]{1,2}\.)+[A-Za-z]{1,2}")
+
+
+def claim_name(raw: str) -> str:
+    """The claim text as it should be named on Geo: trimmed, without a bare
+    sentence-ending period. A period inside a closing quote is untouched (the
+    text then ends with the quote, not the period)."""
+    text = (raw or "").strip()
+    if not text.endswith("."):
+        return text
+    # An ellipsis is not a sentence-ending period.
+    if _ELLIPSIS_END_RE.search(text):
+        return text
+    # The word carrying the period, without any bracket or quote it opens
+    # with. A period with nothing attached ("rose 4% .") is a stray period.
+    match = _FINAL_WORD_RE.search(text)
+    if match:
+        word = _OPENING_WRAPPERS_RE.sub("", match.group(1))
+        if word in _ABBREVIATIONS:
+            return text
+        # Dotted initialisms: U.S, D.C, a.m, Ph.D — the final period completes them.
+        if _DOTTED_INITIALISM_RE.fullmatch(word):
+            return text
+    return text[:-1].rstrip()
+
+
 def assign_vocabulary_topics(
     raw_claims: List[dict],
     vocabulary: List[TopicVocabularyItem],
@@ -87,7 +141,10 @@ def assign_vocabulary_topics(
 
 def sanitize_claims(raw_claims: List[dict], num_documents: int) -> List[ExtractedClaimOut]:
     """Coerce raw LLM claim rows into the public model, dropping junk rows and
-    out-of-range document indices rather than failing the whole run."""
+    out-of-range document indices rather than failing the whole run. Claim
+    text is normalized to its on-graph name here (claim_name), so every later
+    stage — title-restatement guard, takeaway matching, consumers — sees the
+    final text."""
     claims: List[ExtractedClaimOut] = []
     for row in raw_claims:
         try:
@@ -95,6 +152,7 @@ def sanitize_claims(raw_claims: List[dict], num_documents: int) -> List[Extracte
         except Exception:
             logger.warning(f"Dropping malformed claim row: {row!r}")
             continue
+        claim.text = claim_name(claim.text)
         if not claim.text.strip():
             continue
         claim.document_indices = [
@@ -213,10 +271,14 @@ def link_takeaways_by_text(
 ) -> List[TakeawayOut]:
     """Resolve each takeaway to the index of the claim it restates by exact
     text match (done here, in-process, so consumers never re-run the fragile
-    string match). Unmatched -> claim_index=None."""
+    string match). Unmatched -> claim_index=None. Claim texts have been
+    through claim_name, so the takeaway is looked up through the same
+    normalization — its own text stays verbatim (it is display prose, not an
+    entity name)."""
     index_by_text = {c.text: i for i, c in enumerate(claims)}
     return [
-        TakeawayOut(text=t, claim_index=index_by_text.get(t)) for t in takeaways
+        TakeawayOut(text=t, claim_index=index_by_text.get(claim_name(t)))
+        for t in takeaways
     ]
 
 
