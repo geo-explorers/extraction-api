@@ -324,6 +324,59 @@ def test_link_takeaways_by_exact_text():
     assert links[1].claim_index is None
 
 
+# ── claim_name: the sentence-ending period comes off at the door ────────────
+# Extracted claims become Geo entity NAMES verbatim (geo-chat's claims
+# preview, geogenesis' debate publish), and the prompt teaches full
+# sentences — so the strip happens server-side, once, for every consumer.
+
+
+def test_claim_name_strips_a_bare_sentence_period():
+    from src.pipeline.claims_extract_core import claim_name
+
+    assert (
+        claim_name("A successful marriage provides constant emotional support.")
+        == "A successful marriage provides constant emotional support"
+    )
+    assert claim_name("  Padded and dotted.  ") == "Padded and dotted"
+    assert claim_name("No trailing period") == "No trailing period"
+
+
+def test_claim_name_keeps_periods_that_belong_to_the_text():
+    from src.pipeline.claims_extract_core import claim_name
+
+    # Abbreviations, dotted initialisms, ellipses, quote-final periods.
+    assert claim_name("Acme acquired Halcyon Inc.") == "Acme acquired Halcyon Inc."
+    assert claim_name("Tariffs raised prices in the U.S.") == "Tariffs raised prices in the U.S."
+    assert claim_name("The outcome remains uncertain…") == "The outcome remains uncertain…"
+    assert claim_name("The senator said the vote was 'historic.'") == "The senator said the vote was 'historic.'"
+    # "No." is an abbreviation; "voted no." is a sentence.
+    assert claim_name("The court cited Order No.") == "The court cited Order No."
+    assert claim_name("The chamber voted no.") == "The chamber voted no"
+
+
+def test_sanitize_claims_names_claims_without_the_trailing_period():
+    from src.pipeline.claims_extract_core import sanitize_claims
+
+    claims = sanitize_claims(
+        [{"text": "Marriage provides a means to pool resources.", "confidence": 0.9}],
+        num_documents=0,
+    )
+    assert [c.text for c in claims] == ["Marriage provides a means to pool resources"]
+
+
+def test_takeaway_links_survive_the_period_strip():
+    from src.pipeline.claims_extract_core import link_takeaways_by_text, sanitize_claims
+
+    claims = sanitize_claims(
+        [{"text": "Voter turnout rose in 2026.", "confidence": 0.9}],
+        num_documents=0,
+    )
+    linked = link_takeaways_by_text(["Voter turnout rose in 2026."], claims)
+    # The takeaway still resolves to its claim, and its own prose keeps the period.
+    assert linked[0].claim_index == 0
+    assert linked[0].text == "Voter turnout rose in 2026."
+
+
 def test_assemble_result_strips_unrequested_sections():
     from src.pipeline.claims_extract_core import assemble_result
 
@@ -542,8 +595,9 @@ def test_motion_restatement_dropped_for_debates_only():
     debate = assemble_result(
         _input(grouping=False, title=title, include_quotes=True), extraction, [], model_used="m"
     )
+    # claim_name has stripped the sentence period by the time claims surface.
     assert [c.text for c in debate.claims] == [
-        "Human therapists are often specialized in only one type of therapy."
+        "Human therapists are often specialized in only one type of therapy"
     ]
     # The quote followed its claim through the reindex.
     assert [q.claim_index for q in debate.quotes] == [0]
