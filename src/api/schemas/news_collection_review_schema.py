@@ -12,7 +12,7 @@ injector enqueues it as soon as the claims arrive and awaits it before
 prepare-ops, overlapped with entity resolution, covers and the debate wait.
 """
 
-from typing import List, Literal
+from typing import Dict, List, Literal
 
 from pydantic import BaseModel, Field
 
@@ -44,17 +44,30 @@ class NewsCollectionReviewRequest(BaseModel):
 
 
 class CollectionReviewReport(BaseModel):
-  # False when the review was discarded (model error, or a result that would
-  # have left a one-claim collection) and the input was returned untouched.
+  # False when the review was discarded (a step failed, the check rejected
+  # the grouping twice, or a core claim would have been dropped) and the
+  # input was returned untouched — the extraction's own grouping.
   applied: bool
+  # Blocks in the result.
+  blocks: int = 0
+  # New claims written from the sources to give a lone claim company.
+  rescued_claims: int = 0
   merges: int = 0
   # Claims folded into another claim (a merge of three counts two).
   merged_claims: int = 0
+  # Lone claims folded into a block whose heading the check found true of them.
   moves: int = 0
-  # Human-readable refusals: a merge that lost a name, a move that would have
-  # made a duplicate, a composed sentence the sources do not support.
+  # Lone claims nothing could home (never a core claim — that discards).
+  dropped_claims: int = 0
+  # "ok" | "repaired" (one regroup) | "rejected" (twice → discarded) | "".
+  check: str = ""
+  # Human-readable refusals: a rescue the sources did not back, a merge that
+  # lost a name, a block the check faulted.
   rejected: List[str] = Field(default_factory=list)
   seconds: float = 0.0
+  # Seconds per step ("group", "merge", "rescue", "check"), for the latency
+  # decisions the injector makes from prod logs.
+  steps: Dict[str, float] = Field(default_factory=dict)
 
 
 class NewsCollectionReviewResponse(BaseModel):
