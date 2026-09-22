@@ -45,6 +45,7 @@ from src.tasks.news_extract_debate_claims import (
     news_debate_claims_workflow,
     NEWS_DEBATE_CLAIMS_MAX_PAYLOAD_BYTES,
 )
+from src.tasks.news_review_collections import NEWS_REVIEW_COLLECTIONS_SPEC
 from src.tasks.claims_extract import (
     claims_workflow,
     CLAIMS_EXTRACT_MAX_PAYLOAD_BYTES,
@@ -87,6 +88,7 @@ _STANDALONE_SPECS: list[TaskSpec] = [
     GEO_RESOLVE_ENTITIES_SPEC,
     SHEETS_EXPORT_TABLE_SPEC,
     CLAIMS_JUDGE_EQUIVALENCE_SPEC,
+    NEWS_REVIEW_COLLECTIONS_SPEC,
 ]
 
 
