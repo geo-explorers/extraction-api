@@ -10,6 +10,7 @@ alone, and the merges the guards refused on the probe.
 """
 
 import json
+import re
 
 import pytest
 
@@ -27,12 +28,15 @@ from src.api.services.news_collection_review_service import (
     MIN_BLOCK,
     Grouping,
     Merge,
+    ProseIndex,
     Rescue,
     ReviewPlan,
+    accept_order,
     apply_merges,
     assemble,
     build_check_prompt,
     build_group_prompt,
+    build_order_prompt,
     build_rescue_prompt,
     build_review_prompt,
     build_source_check_prompt,
@@ -40,10 +44,13 @@ from src.api.services.news_collection_review_service import (
     guard_merge,
     guard_plan,
     guard_rescue,
+    heading_case,
     jaccard,
     merged_claim,
+    opener_fits,
     parse_check,
     parse_grouping,
+    parse_order,
     parse_plan,
     parse_rescues,
     parse_source_check,
@@ -119,11 +126,16 @@ def check_json(homes=None, faults=None):
     return json.dumps({"blocks": blocks, "lone": [{"index": i, "home": h} for i, h in (homes or {}).items()]})
 
 
+def identity_order(prompt):
+    """The order call's default answer: the blocks as listed."""
+    return json.dumps({"order": [int(i) for i in re.findall(r"^\[(\d+)\] ", prompt, re.M)]})
+
+
 CHECK_OK = check_json(homes={2: 0})
 SOURCE_OK = json.dumps({"checks": [{"index": 0, "grade": "supported", "false_link": False}]})
 
 
-def seam(group=GROUP_OK, rescue=RESCUE_OK, merge=MERGE_OK, check=CHECK_OK, source=SOURCE_OK, log=None):
+def seam(group=GROUP_OK, rescue=RESCUE_OK, merge=MERGE_OK, check=CHECK_OK, source=SOURCE_OK, order=identity_order, log=None):
     """A model that answers each step by the first sentence of its prompt."""
     def call(prompt, thinking):
         step = prompt.split(" ", 2)[1]
@@ -139,6 +151,8 @@ def seam(group=GROUP_OK, rescue=RESCUE_OK, merge=MERGE_OK, check=CHECK_OK, sourc
             return check(prompt) if callable(check) else check
         if prompt.startswith("Check each sentence"):
             return source(prompt) if callable(source) else source
+        if prompt.startswith("You order"):
+            return order(prompt) if callable(order) else order
         raise AssertionError(f"unknown prompt: {prompt[:40]}")
     return call
 
@@ -380,11 +394,14 @@ def test_review_rebuilds_the_blocks_end_to_end():
     assert [c.topic for c in r.claims] == ["Details of the security agreement"] * 3 + ["Opposition to a US takeover"] * 2
     assert r.quotes == [ExtractedQuote(text="permanent control", speaker="Donald Trump", claim_index=0),
                         ExtractedQuote(text="express written approval", speaker=None, claim_index=2)]
-    # Steps and their thinking: group cheap, merge at the caller's level and its source
-    # check cheap, rescue reads the sources and gets its own check, the final check cheap.
-    assert [s for s, _ in log] == ["group", "review", "each", "find", "each", "are"]
-    assert [t for _, t in log] == ["low", "medium", "low", "medium", "low", "medium"]
-    assert list(rep.steps) == ["group", "merge", "rescue", "check"]
+    # Steps and their thinking: group cheap, merge at the caller's level and its
+    # source check cheap, rescue reads the sources and gets its own check, the
+    # final check cheap — and the order call beside it (parallel, so either
+    # may log first).
+    assert log[:5] == [("group", "low"), ("review", "medium"), ("each", "low"), ("find", "medium"), ("each", "low")]
+    assert sorted(log[5:]) == [("are", "medium"), ("order", "low")]
+    assert list(rep.steps) == ["group", "merge", "rescue", "order", "check"]
+    assert rep.order == "same"
 
 
 def test_review_drops_a_lone_claim_nothing_homes_but_never_a_core_one():
@@ -505,6 +522,166 @@ def test_review_fails_open_on_garbage_json():
     claims, quotes, collections, order = _story()
     r = review_collections("H", [], claims, quotes, collections, order, call=lambda p, t: "not json at all")
     assert not r.review.applied and r.review.rejected[0].startswith("review failed")
+
+
+# ── headings: sentence case from the story's own prose ───────────────────
+# Real claims from Armando's injector job 2647 (2026-09-23), whose headings
+# came back in Title Case from the group step and sentence case from the
+# rescue step, in one story.
+
+ARMANDO_HEADLINE = "Trump approval hits record low as Republicans break with president over Iran war"
+ARMANDO_CLAIMS = [
+    "The United States House of Representatives voted 220 to 204 on September 15, 2026, to direct President Donald Trump to end the war in Iran or seek explicit congressional authorization.",
+    "Seven House Republicans, including Nancy Mace, voted with Democrats on September 15, 2026, to limit President Donald Trump's war powers in Iran.",
+    "President Donald Trump's overall approval rating fell to a career low of 32 percent in a Reuters/Ipsos poll completed on September 20, 2026.",
+    "Registered voters in a September 2026 Reuters/Ipsos poll favored Democrats over Republicans for the upcoming midterm elections by 43 percent to 35 percent.",
+    "A CNN poll conducted September 16-17, 2026, showed Defense Secretary Pete Hegseth's approval rating at 34 percent overall and 72 percent among Republicans.",
+    "Israel's National Security Minister Itamar Ben-Gvir called on Prime Minister Benjamin Netanyahu to recognize Argentina's sovereignty over the Falkland Islands.",
+]
+
+
+def test_heading_case_takes_proper_nouns_from_the_story_prose():
+    prose = ProseIndex([ARMANDO_HEADLINE, *ARMANDO_CLAIMS])
+    cases = {
+        "House Vote on Iran War Powers": "House vote on Iran war powers",       # "vote" is only seen as "voted"
+        "Trump Approval Ratings": "Trump approval ratings",                     # "ratings" only as "rating"
+        "GOP Midterm Election Prospects": "GOP midterm election prospects",     # acronym kept; "prospects" never seen
+        "Defense Secretary Pete Hegseth": "Defense Secretary Pete Hegseth",     # the prose capitalises the title
+        "Cost of living issues": "Cost of living issues",
+        "Diplomatic row over the Falklands": "Diplomatic row over the Falklands",  # "Falklands" only from "Falkland Islands": left as written
+        "republican candidates on iran": "Republican candidates on Iran",       # the prose restores capitals too
+        "Israel's E1 Tenders And The U.S. Response": "Israel's E1 tenders and the U.S. response",
+        "AP-NORC Poll Findings": "AP-NORC poll findings",
+    }
+    for given, expected in cases.items():
+        assert heading_case(given, prose) == expected, given
+
+
+def test_heading_case_judges_a_word_next_to_its_neighbours_first():
+    # Seen live (2026-09-23): "Foreign" kept its capital from "Foreign Minister"
+    # in a heading about foreign policy, and "States" lost it to "member
+    # states". The pair in the prose decides before the word alone does.
+    prose = ProseIndex([
+        "Hungary's Foreign Minister Anita Orban announced the foreign policy shift on Monday.",
+        "Ukraine's Foreign Minister Andrii Sybiha praised the decision by Hungary's government.",
+        "The United States said the member states must decide, and the poll states otherwise; other states agreed.",
+        "Taiwan's National Security Council asked for security guarantees at the Rodeo I summit near Al-Aqsa Mosque.",
+        "The Senate Foreign Relations Committee questioned Marco Rubio on the secretary-NSA arrangement.",
+    ])
+    # Seen live: "Relations" inside a committee's name capitalised "relationship";
+    # an in-name inflection leaves the model's casing alone. A hyphenated token
+    # the prose has only in parts is judged part by part.
+    assert heading_case("Trump-Rubio relationship evolution", prose) == "Trump-Rubio relationship evolution"
+    assert heading_case("Rubio Dual Secretary-NSA Role", prose) == "Rubio dual secretary-NSA role"
+    assert heading_case("Shift in Hungary's Foreign Policy", prose) == "Shift in Hungary's foreign policy"
+    assert heading_case("United States Response", prose) == "United States response"
+    assert heading_case("Statement by the Foreign Minister", prose) == "Statement by the Foreign Minister"
+    # Capitals seen only inside a longer name do not outweigh a lower-case use.
+    assert heading_case("Taiwan's Defense And Security", prose) == "Taiwan's defense and security"
+    # A roman numeral, and a hyphenated name the prose has as one token.
+    assert heading_case("Conditions At Rodeo I Prison", prose) == "Conditions at Rodeo I prison"
+    assert heading_case("Incursion At Al-Aqsa Mosque", prose) == "Incursion at Al-Aqsa Mosque"
+    # "Taiwan's" is seen only opening a sentence: nothing tells a name from
+    # grammar, so in a sentence-case heading it is left as written;
+    # "Ministry" is unseen and lower-cased.
+    assert heading_case("Response by Taiwan's ministry", prose) == "Response by Taiwan's ministry"
+    assert heading_case("Response by Taiwan's Ministry", prose) == "Response by taiwan's ministry", "Title Case: no information"
+
+
+def test_heading_case_counts_only_words_away_from_a_sentence_start():
+    # "Approval" opens a sentence (capitalised for grammar) and is lowercase
+    # mid-sentence elsewhere: it is not a proper noun. "Reuters" is.
+    prose = ProseIndex(["Approval of the president fell. A Reuters poll found approval at 32 percent."])
+    assert heading_case("Approval Figures From Reuters", prose) == "Approval figures from Reuters"
+    assert prose.counts("approval") == (0, 0, 1) and prose.counts("reuters") == (1, 0, 0)
+
+
+def test_heading_case_lowercases_weak_evidence_only_in_a_title_case_heading():
+    # Seen live: a byline ("Paul Adams, Diplomatic correspondent") was the only
+    # capital "Diplomatic" and no lower-case use existed in eleven sources.
+    # Inside a Title Case heading the model's capital means nothing, so the
+    # word is lower-cased; in a sentence-case heading it is left alone.
+    prose = ProseIndex(["The report by Paul Adams, Diplomatic correspondent, said Israel would retaliate."])
+    assert heading_case("Israeli Diplomatic Retaliation Against The UK", prose) == "Israeli diplomatic retaliation against the UK"
+    assert heading_case("Israeli Diplomatic retaliation", prose) == "Israeli Diplomatic retaliation"
+    assert prose.counts("diplomatic") == (0, 1, 0)
+
+
+# ── reading order: parsed and guarded ────────────────────────────────────
+
+def test_parse_order_reads_a_permutation_only():
+    assert parse_order(json.dumps({"order": [2, 0, 1]}), 3) == [2, 0, 1]
+    for bad in ([0, 1], [0, 1, 1], [0, 1, 5], "x", None):
+        assert parse_order(json.dumps({"order": bad}), 3) == [], bad
+    assert parse_order(json.dumps({}), 3) == []
+
+
+def test_accept_order_holds_the_opener_to_the_headline():
+    blocks = [("House vote on Iran war powers", [0]), ("Trump approval ratings", [1]), ("Outlook on Iran war", [2])]
+    assert accept_order([1, 0, 2], blocks, ARMANDO_HEADLINE) == ([1, 0, 2], "changed")
+    assert accept_order([0, 1, 2], blocks, ARMANDO_HEADLINE) == ([0, 1, 2], "same")
+    assert accept_order([], blocks, ARMANDO_HEADLINE) == ([0, 1, 2], "kept")
+    # A new opener that shares no subject word with the headline: the grouped order stands.
+    off = [("Trump approval ratings", [0]), ("Cost of living issues", [1])]
+    assert accept_order([1, 0], off, ARMANDO_HEADLINE) == ([0, 1], "refused")
+    assert opener_fits("UK, France and Canada impose sanctions on Israeli West Bank settlements", "United Kingdom sanctions and arms ban")
+    assert not opener_fits("Hungary expels 10 Russian diplomats", "Cost of living issues")
+
+
+def test_prompts_ask_for_sentence_case_and_the_order_prompt_carries_the_rule():
+    g = build_group_prompt("H", ["A", "B"])
+    assert "sentence case" in g and "narrative flow" not in g, "one ordering rule, the order call's"
+    assert "sentence case" in build_rescue_prompt("H", ["A", "B"], [1], SOURCES)
+    assert "order" not in build_check_prompt("H", ["A", "B"], [("Block", [0, 1])], []), "the check is unchanged"
+    o = build_order_prompt("H", ["A", "B", "C"], [("X", [0, 1]), ("Y", [2])])
+    assert o.startswith("You order") and '[0] "X"\n   0. A\n   1. B\n[1] "Y"\n   2. C' in o
+    assert "MAIN clause" in o and "contiguous run" in o
+
+
+def test_review_applies_the_order_call_and_cases_the_headings():
+    claims, quotes, collections, order = _story()
+    title_case = GROUP_OK.replace("Details of the security agreement", "Details Of The Security Agreement")
+    headline = "Protesters oppose the US takeover of Greenland"
+    r = review_collections(headline, SOURCES, claims, quotes, collections, order,
+                           call=seam(group=title_case, check=check_json(homes={2: 0}), order=json.dumps({"order": [1, 0]})))
+    assert r.review.applied and r.review.order == "changed"
+    # The opposition block opens (it shares "takeover" with the headline), the
+    # agreement block follows; the heading's Title Case is gone; every claim's
+    # topic is its cased heading.
+    assert [(c.name, c.claim_indices) for c in r.collections] == [
+        ("Opposition to a US takeover", [3, 4]), ("Details of the security agreement", [0, 1, 2]),
+    ]
+    assert r.collection_order == ["Opposition to a US takeover", "Details of the security agreement"]
+    assert [c.topic for c in r.claims] == ["Details of the security agreement"] * 3 + ["Opposition to a US takeover"] * 2
+    # The same order with the agreement headline: the opposition block shares
+    # no word with it, so the order is refused and the grouping's stands.
+    r = review_collections("Greenland security agreement announced", SOURCES, claims, quotes, collections, order,
+                           call=seam(check=check_json(homes={2: 0}), order=json.dumps({"order": [1, 0]})))
+    assert r.review.order == "refused" and r.collection_order[0] == "Details of the security agreement"
+    # An order call that answers garbage or fails: kept, the review itself untouched.
+    r = review_collections(headline, SOURCES, claims, quotes, collections, order, call=seam(order="not json"))
+    assert r.review.applied and r.review.order == "kept" and any(x.startswith("order:") for x in r.review.rejected)
+    assert r.collection_order == ["Details of the security agreement", "Opposition to a US takeover"]
+
+
+def test_a_discarded_review_still_orders_and_cases_the_extractions_blocks():
+    claims, quotes, collections, order = _story()
+    always_bad = check_json(faults={0: {"purpose": False}})
+    headline = "United States adversaries barred from Greenland under new agreement"
+    log = []
+    r = review_collections(headline, SOURCES, claims, quotes, collections, order,
+                           call=seam(check=always_bad, order=json.dumps({"order": [1, 0]}), log=log))
+    assert not r.review.applied and r.review.check == "rejected" and r.review.order == "changed"
+    assert ("order", "low") in log and "order" in r.review.steps
+    assert [c.name for c in r.collections] == ["US adversary restrictions", "Greenland security agreement"]
+    assert r.collection_order == ["US adversary restrictions", "Greenland security agreement"]
+    assert [c.claim_indices for c in r.collections] == [[2, 3, 4], [0, 1, 5]], "the extraction's membership, untouched"
+    assert [c.text for c in r.claims] == [c.text for c in claims]
+    # The order call failing changes nothing but a note.
+    r = review_collections(headline, SOURCES, claims, quotes, collections, order,
+                           call=seam(check=always_bad, order=lambda p: (_ for _ in ()).throw(RuntimeError("quota"))))
+    assert not r.review.applied and r.review.order == "kept" and any(x.startswith("order: ") for x in r.review.rejected)
+    assert [c.name for c in r.collections] == ["Greenland security agreement", "US adversary restrictions"]
 
 
 def test_review_skips_trivial_input():

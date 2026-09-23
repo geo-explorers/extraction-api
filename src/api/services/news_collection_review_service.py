@@ -35,16 +35,33 @@ The chain, each step fail-open:
    still aside, if any. Code verifies the references and that every claim is
    accounted for. A rejected grouping gets ONE regroup with the reasons; a
    second rejection discards the review.
+5. ORDER — alongside the check, on the same finished blocks, one cheap call
+   returns the reading order (in parallel, so the story waits no longer than
+   for the check: 4.3s at low thinking against the check's 7.3s, measured on
+   15 injector stories). Code accepts it only as a permutation whose opener
+   shares a word with the headline.
 A claim still aside after all that folds into the block the check named, or
 is dropped — unless it is a core claim (importance ≥ CORE_IMPORTANCE), in
 which case the review is discarded rather than lose it. A discarded review
 returns the input untouched — the extraction's own grouping, today's
-behaviour.
+behaviour — ordered and cased like any other.
+
+Order and case (2026-09-23, Armando's two asks on the blocks): the order is
+decided ONCE, LAST, on every finished block — earlier the group step ordered
+by "event first" before the rescues existed, so the earliest event opened a
+story about something else and rescued blocks trailed in whatever order the
+lone claims had. The rule is the story first: the block stating the headline's
+main clause opens, blocks on the same subject follow it, each side thread runs
+contiguously, background last. Headings are sentence-cased in code from the
+story's own prose (the claims and sources): a word the prose capitalises
+mid-sentence keeps its capital, one it writes lowercase loses it — the prompts
+ask for sentence case, the code guarantees it.
 """
 
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -101,6 +118,9 @@ CORE_IMPORTANCE = 0.9
 GROUP_THINKING = "low"
 RESCUE_THINKING = "medium"
 CHECK_THINKING = "medium"
+# The order call sees headings and short claims — nothing to weigh, and it
+# must finish inside the check's own time.
+ORDER_THINKING = "low"
 
 # Source bodies the source check and the rescue see, split across sources.
 SOURCE_CHECK_BUDGET = 60_000
@@ -118,10 +138,9 @@ A block is a set of claims a reader would expect under one heading because they 
 Procedure:
 1. For each claim, note (silently) the one specific subject it is about.
 2. Group the claims that share a subject — membership FIRST. Two claims belong together only when a reader who has read the block's heading would expect BOTH of them there. Being about the same story, or sharing one keyword with the group, is not belonging. Do not file a claim under the nearest group.
-3. Only then name each block from its members: a plain, specific heading of 2-6 words that is true of every claim in it, as an editor would head that section. "These all mention X" is not a heading. If it is true of only some members, the block is two blocks, or the odd claim is out.
+3. Only then name each block from its members: a plain, specific heading of 2-6 words in sentence case (capitalise only the first word and proper nouns) that is true of every claim in it, as an editor would head that section. "These all mention X" is not a heading. If it is true of only some members, the block is two blocks, or the odd claim is out.
 4. Every block holds at least {min_block} claims. A claim that shares its subject with no other claim goes into "lone" — never file it under a heading that does not describe it.
 5. A block holds {min_block} to {max_block} claims. A group of more must be split into specific blocks when its claims cleanly separate by subject; only if no clean split exists may it stay larger. Never split a group just to reach a count.
-6. Order the blocks by narrative flow: event → causes → consequences → responses → context.
 
 Return JSON only:
 {{"blocks": [{{"name": "<heading>", "claims": [<indices>]}}], "lone": [<indices>]}}"""
@@ -151,7 +170,7 @@ Rules for the new claim:
 - At most ONE new claim per lone claim. If the sources carry nothing that qualifies, return no claim for it.
 - Self-contained: full proper names, no pronoun before its referent, no "the company"/"the deal"; name the event inside the claim; absolute dates; {min_words}-35 words.
 - source_indices: the indices of the sources that state the fact. confidence 0.9+ when explicit. importance for this story (0.3-1.0).
-- The heading: 2-6 plain words, true of the lone claim and the new claim.
+- The heading: 2-6 plain words in sentence case (capitalise only the first word and proper nouns), true of the lone claim and the new claim.
 
 Return JSON only:
 {{"rescues": [{{"lone": <index>, "name": "<heading>", "claim": {{"text": "...", "source_indices": [0], "confidence": 0.9, "importance": 0.6}}}}]}}
@@ -174,6 +193,28 @@ For every lone claim: "home" = the index of the block whose heading is true of i
 
 Return JSON only:
 {{"blocks": [{{"index": 0, "misfits": [], "purpose": true, "heading_ok": true, "duplicates": [], "reason": ""}}], "lone": [{{"index": 0, "home": -1}}]}}"""
+
+# The reading order. Armando's example: a story headlined "Trump approval hits
+# record low as Republicans break with president over Iran war" opens with the
+# approval figures, keeps the cost of living figures from the same poll next
+# to them, then runs the Republican break as one thread, and ends with the
+# war's background.
+ORDER_RULE = """Reading order, for a reader who arrives from the headline:
+1. First, the block that states what the headline's MAIN clause states.
+2. Then every other block about that same subject — its details, figures, who said it, reactions to it. A block reporting the same poll, vote or measure as the opening block stays next to it.
+3. Then each side thread as ONE contiguous run, the thread the headline's subordinate clause ("as…", "amid…", "after…") names first. Inside a thread, cause before consequence.
+4. Background and context last."""
+
+ORDER_PROMPT = """You order the blocks of one news story for its readers. Each block is a heading with its claims. Do not rename, drop or merge anything — only order.
+
+HEADLINE: {headline}
+
+BLOCKS:
+{blocks}
+
+{order_rule}
+
+Return JSON only: {{"order": [<every block index exactly once, in reading order>]}}"""
 
 REVIEW_PROMPT = """You review the claims of one news story after extraction. Each claim is published ALONE on a knowledge graph, and claims are grouped into named collections shown as blocks. A reader who sees two claims saying the same thing in one block concludes the second was written to fill it. Your only job is to remove that.
 
@@ -307,6 +348,233 @@ def _int_list(values, n: int) -> List[int]:
     if 0 <= i < n and i not in out:
       out.append(i)
   return out
+
+
+# ── Headings: sentence case from the story's own prose (pure) ──────────────
+
+_WORD = re.compile(r"[A-Za-z][A-Za-z'’.-]*")
+_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+# Words of 4+ letters that name no subject, for the opener guard.
+_STOP = {
+  "with", "over", "from", "that", "this", "after", "amid", "into", "than", "their", "about", "says", "said",
+  "will", "have", "been", "were", "also", "more", "most", "other", "some", "such", "what", "when", "where",
+  "which", "while", "would", "could", "should", "being", "during", "before", "under", "between", "against",
+  "among", "around", "through", "because", "following", "despite", "without", "within", "them", "they",
+}
+
+
+def _key(word: str) -> str:
+  """A word's dictionary key: lower-cased, possessive and edge punctuation off."""
+  return re.sub(r"['’]s$", "", word.strip("'’.-").lower())
+
+
+def _inflection(a: str, b: str) -> bool:
+  """"vote"/"voted", "Falklands"/"Falkland": one is a 4+ letter prefix of the other."""
+  return len(a) >= 4 and len(b) >= 4 and (a.startswith(b) or b.startswith(a))
+
+
+class ProseIndex:
+  """How the story's own prose — headline, claims, sources — capitalises each
+  word away from a sentence start. That is the dictionary of proper nouns
+  for the headings: "Iran" and "Hegseth" keep their capital, "war powers"
+  and "midterm" lose it, and no model or word list has to know which is
+  which."""
+
+  def __init__(self, texts: List[str]):
+    # Capitalised mid-sentence with no capitalised neighbour ("Iran"), or
+    # inside a run of capitals ("Security" in "National Security Minister"),
+    # or lower-cased; and words seen only opening a sentence.
+    self.alone: Dict[str, int] = {}
+    self.in_name: Dict[str, int] = {}
+    self.lows: Dict[str, int] = {}
+    self.starts: Set[str] = set()
+    # The same per word pair (both away from the sentence start), keyed by
+    # the pair and the position of the word judged: "States" in "United
+    # States" is a proper noun however often "member states" occurs.
+    self.pair_caps: Dict[Tuple[str, str, int], int] = {}
+    self.pair_lows: Dict[Tuple[str, str, int], int] = {}
+    for text in texts:
+      for sentence in _SENTENCE.split(text or ""):
+        words = _WORD.findall(sentence)
+        if words:
+          self.starts.add(_key(words[0]))
+        words = words[1:]
+        keys = [_key(w) for w in words]
+        for i, (w, k) in enumerate(zip(words, keys)):
+          if len(k) < 2:
+            continue
+          if w[0].isupper():
+            beside = (i > 0 and words[i - 1][0].isupper()) or (i + 1 < len(words) and words[i + 1][0].isupper())
+            side, pairs = (self.in_name if beside else self.alone), self.pair_caps
+          else:
+            side, pairs = self.lows, self.pair_lows
+          side[k] = side.get(k, 0) + 1
+          if i > 0:
+            pairs[(keys[i - 1], k, 1)] = pairs.get((keys[i - 1], k, 1), 0) + 1
+          if i + 1 < len(keys):
+            pairs[(k, keys[i + 1], 0)] = pairs.get((k, keys[i + 1], 0), 0) + 1
+
+  def counts(self, word: str, before: Optional[str] = None, after: Optional[str] = None) -> Tuple[int, int, int]:
+    """(capitalised on its own, capitalised only inside a longer name,
+    lower-cased) sightings of the word mid-sentence: next to the same
+    neighbours when the prose has the pair (then all its capitals count as
+    the word's own); else the word itself; else its inflections."""
+    k = _key(word)
+    pairs = [(_key(before), k, 1)] if before else []
+    pairs += [(k, _key(after), 0)] if after else []
+    caps = sum(self.pair_caps.get(p, 0) for p in pairs)
+    lows = sum(self.pair_lows.get(p, 0) for p in pairs)
+    if caps or lows:
+      return caps, 0, lows
+    alone, in_name, lows = self.alone.get(k, 0), self.in_name.get(k, 0), self.lows.get(k, 0)
+    if not (alone or in_name or lows):
+      alone = sum(n for key, n in self.alone.items() if _inflection(k, key))
+      in_name = sum(n for key, n in self.in_name.items() if _inflection(k, key))
+      lows = sum(n for key, n in self.lows.items() if _inflection(k, key))
+    return alone, in_name, lows
+
+  def opens_sentences(self, word: str) -> bool:
+    return _key(word) in self.starts
+
+  def seen(self, word: str) -> bool:
+    """The word itself, mid-sentence, in any case."""
+    k = _key(word)
+    return k in self.alone or k in self.in_name or k in self.lows
+
+
+def _fixed_case(core: str) -> bool:
+  """Written as-is whatever the prose says: acronyms (GOP, US), single
+  capitals (Rodeo I), tokens with digits (E1, G7), dotted initialisms
+  (U.S.), internal capitals (McDonald)."""
+  letters = [ch for ch in core if ch.isalpha()]
+  return (
+    (len(letters) >= 2 and all(ch.isupper() for ch in letters))
+    or (len(core) == 1 and core.isupper())
+    or any(ch.isdigit() for ch in core)
+    or "." in core.rstrip(".")
+    or any(ch.isupper() for ch in core[1:])
+  )
+
+
+def _decide(core: str, prose: ProseIndex, before: Optional[str], after: Optional[str]) -> Optional[bool]:
+  """True → capitalise, False → lower-case, None → the evidence is too weak
+  to say: the word is capitalised only inside longer names ("Diplomatic"
+  in a byline, "Falkland" in "Falkland Islands"), or only opens sentences
+  (nothing tells a proper noun from grammar)."""
+  own, in_name, lows = prose.counts(core, before, after)
+  if own > lows:
+    return True
+  if lows > own:
+    return False
+  if own == 0:
+    return None if in_name or prose.opens_sentences(core) else False
+  return None
+
+
+# Words a Title Case heading capitalises or not by convention, so they say
+# nothing about whether the rest was meant as names.
+_SMALL = {
+  "a", "an", "the", "of", "on", "in", "at", "to", "for", "by", "over", "with", "and", "or", "vs", "from", "as",
+  "into", "about", "after", "amid", "against", "under", "between", "without", "through", "during", "before",
+}
+
+
+def _title_cased(words: List[str]) -> bool:
+  """Every substantive word after the first capitalised — the model wrote
+  Title Case, so its capitals carry no information about names."""
+  cores = [re.sub(r"^[^A-Za-z]+", "", w) for w in words[1:]]
+  substantive = [c for c in cores if c and c.lower() not in _SMALL and not _fixed_case(c)]
+  return len(substantive) >= 2 and all(c[0].isupper() for c in substantive)
+
+
+def _case_word(word: str, prose: ProseIndex, first: bool, before: Optional[str], after: Optional[str], title: bool) -> str:
+  if "-" in word.strip("-"):
+    # A hyphenated name the prose has as one token ("Al-Aqsa") is judged
+    # whole; anything else part by part ("secretary-NSA").
+    parts = word.split("-")
+    if not first and prose.seen(word) and _decide(word, prose, before, after) is True:
+      return "-".join(p if not p or _fixed_case(p) else p[0].upper() + p[1:] for p in parts)
+    return "-".join(
+      _case_word(p, prose, first and j == 0, parts[j - 1] if j else before, parts[j + 1] if j + 1 < len(parts) else after, title)
+      if p else p for j, p in enumerate(parts)
+    )
+  m = re.match(r"^([^A-Za-z]*)([A-Za-z][A-Za-z0-9'’.]*)(.*)$", word)
+  if not m:
+    return word
+  lead, core, tail = m.groups()
+  if first:
+    if core[0].islower() and core[1:].islower():
+      core = core[0].upper() + core[1:]
+    return lead + core + tail
+  if _fixed_case(core):
+    return word
+  verdict = _decide(core, prose, before, after)
+  if verdict is None:
+    # Weak evidence: the model's own casing stands, unless it wrote the
+    # whole heading in Title Case, which says nothing — then lower-case.
+    verdict = False if title else None
+  if verdict is True:
+    core = core[0].upper() + core[1:]
+  elif verdict is False:
+    core = core.lower()
+  return lead + core + tail
+
+
+def heading_case(name: str, prose: ProseIndex) -> str:
+  """The heading in sentence case: the first word capitalised, every other
+  word as the story's prose writes it mid-sentence, next to the same
+  neighbour when the prose has that pair ("Foreign" in "Foreign Minister"
+  but "foreign policy"). A word the prose never uses is lower-cased —
+  headings are made of their claims' words, so a proper noun is always
+  seen; a common word may only be seen inflected — and acronyms and the
+  like stay as written."""
+  words = name.split()
+  title = _title_cased(words)
+  return " ".join(
+    _case_word(w, prose, i == 0, words[i - 1] if i else None, words[i + 1] if i + 1 < len(words) else None, title)
+    for i, w in enumerate(words)
+  )
+
+
+# ── Reading order, guarded (pure) ──────────────────────────────────────────
+
+def _permutation(values, n: int) -> List[int]:
+  """`values` as a permutation of range(n), else []."""
+  order = _int_list(values, n)
+  return order if len(order) == n else []
+
+
+def _stem(k: str) -> str:
+  """"adversaries"/"adversary", "sanctions"/"sanction": the plural and the
+  common verb endings off, when a 4+ letter stem remains."""
+  for suffix, rep in (("ies", "y"), ("es", ""), ("s", ""), ("ed", ""), ("ing", "")):
+    if k.endswith(suffix) and len(k) - len(suffix) >= 4:
+      return k[: -len(suffix)] + rep
+  return k
+
+
+def _subject_words(text: str) -> Set[str]:
+  return {_stem(k) for k in (_key(w) for w in _WORD.findall(text)) if len(k) >= 4 and k not in _STOP}
+
+
+def opener_fits(headline: str, heading: str) -> bool:
+  """The one thing code can check about an order: the block put first must
+  share a subject word with the headline (a stem or an inflection counts)."""
+  hw, bw = _subject_words(headline), _subject_words(heading)
+  return any(a == b or _inflection(a, b) for a in bw for b in hw)
+
+
+def accept_order(order: List[int], blocks: List[Tuple[str, List[int]]], headline: str) -> Tuple[List[int], str]:
+  """The order to apply and the report word: "same", "changed", "kept" (no
+  usable order came back) or "refused" (its opener is off the headline)."""
+  identity = list(range(len(blocks)))
+  if len(order) != len(blocks):
+    return identity, "kept"
+  if order == identity:
+    return identity, "same"
+  if not opener_fits(headline, blocks[order[0]][0]):
+    return identity, "refused"
+  return order, "changed"
 
 
 # ── Step 1: the grouping the model proposes, validated (pure) ──────────────
@@ -649,12 +917,24 @@ def build_review_prompt(headline: str, claims: List[str], collections: List[Tupl
   )
 
 
-def build_check_prompt(headline: str, claims: List[str], blocks: List[Tuple[str, List[int]]], lone: List[int]) -> str:
-  block_text = "\n".join(
+def _blocks_listing(claims: List[str], blocks: List[Tuple[str, List[int]]]) -> str:
+  return "\n".join(
     f"[{b}] \"{name}\"\n" + "\n".join(f"   {i}. {claims[i]}" for i in idx) for b, (name, idx) in enumerate(blocks)
   )
+
+
+def build_check_prompt(headline: str, claims: List[str], blocks: List[Tuple[str, List[int]]], lone: List[int]) -> str:
   lone_text = f"\nLONE CLAIMS (no block yet):\n{_numbered(claims, lone)}\n" if lone else ""
-  return CHECK_PROMPT.format(headline=headline, blocks=block_text, lone=lone_text)
+  return CHECK_PROMPT.format(headline=headline, blocks=_blocks_listing(claims, blocks), lone=lone_text)
+
+
+def build_order_prompt(headline: str, claims: List[str], blocks: List[Tuple[str, List[int]]]) -> str:
+  return ORDER_PROMPT.format(headline=headline, blocks=_blocks_listing(claims, blocks), order_rule=ORDER_RULE)
+
+
+def parse_order(raw: str, n_blocks: int) -> List[int]:
+  """The order the model returned as a permutation of the blocks, or []."""
+  return _permutation(_json_object(raw).get("order"), n_blocks)
 
 
 def build_source_check_prompt(sentences: List[str], sources: List[NewsArticleSource]) -> str:
@@ -686,6 +966,46 @@ def parse_source_check(raw: str, n: int, strict: bool = False) -> List[Optional[
 
 
 # ── Orchestration ──────────────────────────────────────────────────────────
+
+def order_call(call, headline: str, claims: List[str], blocks: List[Tuple[str, List[int]]], report: CollectionReviewReport) -> List[int]:
+  """The reading order of `blocks` from one cheap call, or [] — the order is
+  never worth failing the story for, so a failed call is a note in the
+  report and the blocks stay as grouped. Its seconds land in the report."""
+  t0 = time.time()
+  try:
+    return parse_order(call(build_order_prompt(headline, claims, blocks), ORDER_THINKING), len(blocks))
+  except Exception as e:  # noqa: BLE001
+    report.rejected.append(f"order: {str(e)[:80]}")
+    return []
+  finally:
+    report.steps["order"] = round(report.steps.get("order", 0.0) + time.time() - t0, 1)
+
+
+def check_and_order(
+  call, headline: str, claims: List[str], blocks: List[Tuple[str, List[int]]], lone: List[int], report: CollectionReviewReport,
+) -> Tuple[Check, List[int]]:
+  """The check and the order call side by side on the same blocks: the
+  order is shorter than the check, so the story waits for the check alone."""
+  with ThreadPoolExecutor(max_workers=2) as pool:
+    checking = pool.submit(call, build_check_prompt(headline, claims, blocks, lone), CHECK_THINKING)
+    ordering = pool.submit(order_call, call, headline, claims, blocks, report)
+    return parse_check(checking.result(), blocks, lone), ordering.result()
+
+
+def order_and_case(
+  resp: NewsCollectionReviewResponse, headline: str, prose: ProseIndex, call, report: CollectionReviewReport,
+) -> None:
+  """A discarded review ships the extraction's own blocks; they still get the
+  reading order and the headings' case, so the reader sees them like any
+  other story's. Collections, their order and the claims' topics are
+  renamed together."""
+  blocks = [(c.name, list(c.claim_indices)) for c in resp.collections]
+  order, report.order = accept_order(order_call(call, headline, [c.text for c in resp.claims], blocks, report), blocks, headline)
+  cased = {c.name: heading_case(c.name, prose) for c in resp.collections}
+  resp.collections = [resp.collections[i].model_copy(update={"name": cased[resp.collections[i].name]}) for i in order]
+  resp.collection_order = [c.name for c in resp.collections]
+  resp.claims = [c.model_copy(update={"topic": cased.get(c.topic, c.topic)}) for c in resp.claims]
+
 
 def _gemini(prompt: str, thinking_level: Optional[str]) -> str:
   client = genai.Client(
@@ -727,6 +1047,7 @@ def review_collections(
   t0 = time.time()
   report = CollectionReviewReport(applied=False)
   last = [t0]
+  prose = ProseIndex([headline, *(c.text for c in claims), *(s.content for s in sources)])
 
   def stamp(step: str) -> None:
     now = time.time()
@@ -735,8 +1056,11 @@ def review_collections(
 
   def discard(reason: str) -> NewsCollectionReviewResponse:
     report.rejected.append(f"{reason} — review discarded")
-    report.seconds = round(time.time() - t0, 1)
     logger.warning(f"collection review discarded for '{headline[:60]}': {reason}")
+    # The extraction's own blocks ship, but the reader still gets the order
+    # and the case: one cheap call, fail-open.
+    order_and_case(untouched, headline, prose, call, report)
+    report.seconds = round(time.time() - t0, 1)
     untouched.review = report
     return untouched
 
@@ -812,8 +1136,9 @@ def review_collections(
         report.rescued_claims += 1
       stamp("rescue")
 
-    # 4. Check both ways; one regroup with the reasons; a second rejection discards.
-    check = parse_check(call(build_check_prompt(headline, texts, blocks, lone), CHECK_THINKING), blocks, lone)
+    # 4 + 5. Check both ways, the reading order alongside; one regroup with
+    # the reasons (and its own order); a second rejection discards.
+    check, ordering = check_and_order(call, headline, texts, blocks, lone, report)
     stamp("check")
     report.check = "ok"
     if check.reasons:
@@ -829,7 +1154,7 @@ def review_collections(
       retry_lone = [i for i in alive if not any(i in idx for _, idx in retry_blocks)]
       if not retry_blocks:
         return discard("regroup produced no block")
-      check2 = parse_check(call(build_check_prompt(headline, texts, retry_blocks, retry_lone), CHECK_THINKING), retry_blocks, retry_lone)
+      check2, ordering = check_and_order(call, headline, texts, retry_blocks, retry_lone, report)
       stamp("repair")
       if check2.reasons:
         report.check = "rejected"
@@ -852,6 +1177,11 @@ def review_collections(
       else:
         discarded.add(i)
         report.dropped_claims += 1
+
+    # What the reader sees is decided once, last, on the finished blocks:
+    # the reading order, guarded, then the headings' case.
+    order, report.order = accept_order(ordering, blocks, headline)
+    blocks = [(heading_case(name, prose), idx) for name, idx in (blocks[i] for i in order)]
 
     out_claims, out_quotes, out_collections, out_order = assemble(live, quotes, dropped, blocks, discarded)
     report.applied = True
