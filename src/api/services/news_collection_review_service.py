@@ -61,6 +61,7 @@ from src.api.schemas.news_collection_review_schema import (
   CollectionReviewReport,
   NewsCollectionReviewResponse,
 )
+from src.api.services.claim_anchor_guard import calendar_block, check_claim, source_anchors
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
 
@@ -140,8 +141,11 @@ LONE CLAIMS (index. text):
 SOURCES:
 {sources}
 
+CALENDAR (read weekdays and "yesterday" off this; never compute them):
+{calendar}
+
 Rules for the new claim:
-- Every name, number, date and fact must be traceable to a specific sentence in the SOURCES. Nothing from prior knowledge. If in doubt, leave it out.
+- Every name, number, date and fact must be traceable to a specific sentence in the SOURCES. Nothing from prior knowledge. If in doubt, leave it out. A weekday or "yesterday" in a source becomes the CALENDAR's date for that source; a year is written only when a source states it or the calendar gives it — code refuses the claim otherwise.
 - It must state a DIFFERENT fact from the lone claim and from every existing claim. A restatement, a gloss, or a piece cut from the lone claim's own fact is forbidden — an empty result is better.
 - NOT a fact for this purpose, even when the sources state it: what an organisation, product, person or term IS (a definition or profile); how something works in general; a commentator's characterisation of the lone claim's event; a detail of the lone claim's own event (its location, its wallet address, its exact time). The reader must learn a second thing that HAPPENED, was DECIDED, or was MEASURED about the same subject.
 - At most ONE new claim per lone claim. If the sources carry nothing that qualifies, return no claim for it.
@@ -629,6 +633,8 @@ def build_rescue_prompt(
     claims="\n".join(f"- {t}" for t in existing),
     lone=_numbered(claims, lone),
     sources=_sources_block(sources, RESCUE_SOURCE_BUDGET, indexed=True),
+    calendar=calendar_block([source_anchors(s.index, s.content, s.published_at) for s in sources])
+    or "(no publication dates known — resolve no relative date)",
     min_words=MIN_CLAIM_WORDS,
   )
 
@@ -749,6 +755,14 @@ def review_collections(
     # thins to one claim sets its survivor aside, so the rescue sees it too.
     plan = parse_plan(call(build_review_prompt(headline, texts, blocks), thinking_level), len(live))
     guard_plan(plan, texts, blocks)
+    # Every sentence the review writes obeys the same rule as extraction: a
+    # date, year or figure must be one a source states or code resolved.
+    anchors = [source_anchors(s.index, s.content, s.published_at) for s in sources]
+    for m in plan.merges:
+      if not m.refused and m.text is not None:
+        problems = check_claim(m.text, anchors)
+        if problems:
+          m.refused = f"merge {m.parts}: unanchored {'; '.join(str(p) for p in problems)}"
     composed = [m for m in plan.merges if not m.refused and m.text is not None]
     if composed:
       verdicts = parse_source_check(
@@ -773,6 +787,10 @@ def review_collections(
       )
       for r in rescues:
         r.refused = guard_rescue(r, texts[r.lone], [texts[i] for i in alive])
+        if not r.refused:
+          problems = check_claim(r.claim.text, anchors)
+          if problems:
+            r.refused = "unanchored " + "; ".join(str(p) for p in problems)
       candidates = [r for r in rescues if not r.refused]
       if candidates:
         verdicts = parse_source_check(

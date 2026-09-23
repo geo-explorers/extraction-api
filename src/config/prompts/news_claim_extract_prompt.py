@@ -142,6 +142,11 @@ Attribution — extract the asserted claim, not the act of asserting
 Temporally Grounded
 - Use absolute dates ("May 12, 2026") instead of relative references ("Monday," "yesterday").
 - Resolve relative dates using the source's publication date ONLY when the resolution is unambiguous within ±1 week. "Monday," "yesterday," "this week," and "last week" relative to a known publication date are resolvable. "Earlier this year," "in April" without a stated year, "last month" against an undated source, or any phrase that requires guessing the year are NOT resolvable — preserve the source's exact relative phrasing, or omit the date. Never invent a year, month, or day that the source does not state explicitly.
+- Read every weekday and "yesterday" off the CALENDAR below — never compute it yourself. A source published on a Tuesday that says "on Monday" means the calendar's Monday for that source, not the publication day. A day-and-month with no year takes the calendar's year for that source; a bare year appears in a claim only when a source states it.
+- Code checks every date, year and figure in every claim against the sources afterwards and drops a claim it cannot trace to them, so a guessed date costs the whole claim.
+
+CALENDAR (per source; the year of these sources is the only year to add)
+{calendar}
 - Domain periods follow the same rule: resolve "last season," "last year," "this quarter" to the named period ("the 2025-26 Süper Lig season," "fiscal Q1 2026," "2025") when the sources or publication date make the resolution unambiguous; otherwise keep the source's phrasing but anchor it with a year.
 
 Evidence-Appropriate Language

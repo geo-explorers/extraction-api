@@ -66,8 +66,15 @@ AGREEMENT = [
 ]
 PEW = "A January 2026 Pew Research Center poll found that 58 percent of Americans opposed a U.S. takeover of Greenland, while 21 percent favored it"
 NUUK = "Protesters in Nuuk held banners reading 'Make America Go Away' and 'We Are Not Property!' in January 2026 to oppose a U.S. takeover of Greenland"
-SOURCES = [NewsArticleSource(index=0, url="u0", title="T0", publisher="P", content="body zero"),
-           NewsArticleSource(index=1, url="u1", title="T1", publisher=None, content="body one")]
+# The sources state every date and figure the claims above carry — the anchor
+# guard (claim_anchor_guard) refuses any rescued or merged sentence otherwise.
+SOURCES = [NewsArticleSource(index=0, url="u0", title="T0", publisher="P", content=(
+             "body zero. President Trump announced the Greenland security agreement on September 19, 2026. "
+             "A January 2026 Pew Research Center poll found 58 percent of Americans opposed a takeover and 21 percent favored it."
+           )),
+           NewsArticleSource(index=1, url="u1", title="T1", publisher=None, content=(
+             "body one. Protesters in Nuuk held banners in January 2026 to oppose a U.S. takeover of Greenland."
+           ))]
 
 
 def _claim(text: str, topic: str = "t", conf: float = 0.9, imp=None, src=None) -> ExtractedClaim:
@@ -408,6 +415,28 @@ def test_review_refuses_a_rescue_the_sources_do_not_back():
     assert NUUK not in [c.text for c in r.claims]
     assert any(x.startswith("rescue of 5: the sources do not support") for x in r.review.rejected)
     assert len(graded) == 2
+
+
+def test_review_refuses_a_rescue_or_merge_carrying_a_date_no_source_states():
+    """The anchor guard runs on every sentence the review writes, before the
+    model source check: a rescued fact dated by the model's own arithmetic and
+    a merge that invents a year are refused in code, with the reason."""
+    claims, quotes, collections, order = _story()
+    guessed = NUUK.replace("in January 2026", "on January 14, 2026")
+    rescue = json.dumps({"rescues": [{"lone": 5, "name": "Opposition to a US takeover",
+                                      "claim": {"text": guessed, "source_indices": [1], "confidence": 0.9, "importance": 0.5}}]})
+    merge = json.dumps({"merges": [{"keep": 2, "drop": [3, 4], "text": ADVERSARY_MERGED.replace("September 19, 2026", "September 19, 2025")}]})
+    graded = []
+    r = review_collections("H", SOURCES, claims, quotes, collections, order,
+                           call=seam(rescue=rescue, merge=merge, source=lambda p: graded.append(p) or SOURCE_OK,
+                                     check=check_json(homes={5: 0})))
+    assert r.review.applied and r.review.rescued_claims == 0 and r.review.merges == 0
+    assert guessed not in [c.text for c in r.claims] and len(r.claims) == 6
+    assert any(x.startswith("rescue of 5: unanchored date 'January 14, 2026': no source states this date") for x in r.review.rejected)
+    # The merge's invented year is caught by whichever guard sees it first —
+    # guard_merge's "every number of the parts" rule or the anchor guard.
+    assert any(x.startswith("merge [2, 3, 4]") for x in r.review.rejected), r.review.rejected
+    assert graded == [], "a sentence the guard refused never reaches the model source check"
 
 
 def test_review_refuses_a_composed_merge_the_sources_do_not_back():
