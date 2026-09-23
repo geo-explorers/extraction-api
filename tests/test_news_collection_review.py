@@ -631,8 +631,13 @@ def test_accept_order_holds_the_opener_to_the_headline():
 def test_prompts_ask_for_sentence_case_and_the_order_prompt_carries_the_rule():
     g = build_group_prompt("H", ["A", "B"])
     assert "sentence case" in g and "narrative flow" not in g, "one ordering rule, the order call's"
-    assert "sentence case" in build_rescue_prompt("H", ["A", "B"], [1], SOURCES)
-    assert "order" not in build_check_prompt("H", ["A", "B"], [("Block", [0, 1])], []), "the check is unchanged"
+    assert 'a name alone ("Thomas Kelly")' in g
+    r = build_rescue_prompt("H", ["A", "B"], [1], SOURCES)
+    assert "sentence case" in r and "Never a name alone" in r
+    assert "spoke exclusively with" in r, "an interview note is not a fact to rescue with (Heidi story, 2026-09-23)"
+    c = build_check_prompt("H", ["A", "B"], [("Block", [0, 1])], [])
+    assert "order" not in c, "the check is unchanged by the order call"
+    assert "a bare name with nothing said about it" in c
     o = build_order_prompt("H", ["A", "B", "C"], [("X", [0, 1]), ("Y", [2])])
     assert o.startswith("You order") and '[0] "X"\n   0. A\n   1. B\n[1] "Y"\n   2. C' in o
     assert "MAIN clause" in o and "contiguous run" in o

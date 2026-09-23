@@ -138,7 +138,7 @@ A block is a set of claims a reader would expect under one heading because they 
 Procedure:
 1. For each claim, note (silently) the one specific subject it is about.
 2. Group the claims that share a subject — membership FIRST. Two claims belong together only when a reader who has read the block's heading would expect BOTH of them there. Being about the same story, or sharing one keyword with the group, is not belonging. Do not file a claim under the nearest group.
-3. Only then name each block from its members: a plain, specific heading of 2-6 words in sentence case (capitalise only the first word and proper nouns) that is true of every claim in it, as an editor would head that section. "These all mention X" is not a heading. If it is true of only some members, the block is two blocks, or the odd claim is out.
+3. Only then name each block from its members: a plain, specific heading of 2-6 words in sentence case (capitalise only the first word and proper nouns) that is true of every claim in it, as an editor would head that section. "These all mention X" is not a heading, and a name alone ("Thomas Kelly") is a label, not a heading. If it is true of only some members, the block is two blocks, or the odd claim is out.
 4. Every block holds at least {min_block} claims. A claim that shares its subject with no other claim goes into "lone" — never file it under a heading that does not describe it.
 5. A block holds {min_block} to {max_block} claims. A group of more must be split into specific blocks when its claims cleanly separate by subject; only if no clean split exists may it stay larger. Never split a group just to reach a count.
 
@@ -166,11 +166,11 @@ CALENDAR (read weekdays and "yesterday" off this; never compute them):
 Rules for the new claim:
 - Every name, number, date and fact must be traceable to a specific sentence in the SOURCES. Nothing from prior knowledge. If in doubt, leave it out. A weekday or "yesterday" in a source becomes the CALENDAR's date for that source; a year is written only when a source states it or the calendar gives it — code refuses the claim otherwise.
 - It must state a DIFFERENT fact from the lone claim and from every existing claim. A restatement, a gloss, or a piece cut from the lone claim's own fact is forbidden — an empty result is better.
-- NOT a fact for this purpose, even when the sources state it: what an organisation, product, person or term IS (a definition or profile); how something works in general; a commentator's characterisation of the lone claim's event; a detail of the lone claim's own event (its location, its wallet address, its exact time). The reader must learn a second thing that HAPPENED, was DECIDED, or was MEASURED about the same subject.
+- NOT a fact for this purpose, even when the sources state it: what an organisation, product, person or term IS (a definition or profile); how something works in general; a commentator's characterisation of the lone claim's event; a detail of the lone claim's own event (its location, its wallet address, its exact time); how or where the outlet obtained a statement (an interview, a broadcast appearance, a phone call, "spoke exclusively with…"). The reader must learn a second thing that HAPPENED, was DECIDED, or was MEASURED about the same subject.
 - At most ONE new claim per lone claim. If the sources carry nothing that qualifies, return no claim for it.
 - Self-contained: full proper names, no pronoun before its referent, no "the company"/"the deal"; name the event inside the claim; absolute dates; {min_words}-35 words.
 - source_indices: the indices of the sources that state the fact. confidence 0.9+ when explicit. importance for this story (0.3-1.0).
-- The heading: 2-6 plain words in sentence case (capitalise only the first word and proper nouns), true of the lone claim and the new claim.
+- The heading: 2-6 plain words in sentence case (capitalise only the first word and proper nouns), true of the lone claim and the new claim, as an editor would head that section. Never a name alone ("Thomas Kelly"), never "these all mention X".
 
 Return JSON only:
 {{"rescues": [{{"lone": <index>, "name": "<heading>", "claim": {{"text": "...", "source_indices": [0], "confidence": 0.9, "importance": 0.6}}}}]}}
@@ -186,7 +186,7 @@ BLOCKS:
 For every block:
 - "misfits": the indices of claims that do NOT belong under the heading — a reader who opened that heading would not expect exactly that claim there.
 - "purpose": true when the block has one clear shared subject every member contributes to; false for a catch-all or "these all mention X".
-- "heading_ok": true when the heading is specific and true of every member; false if it is vague, a catch-all ("Other developments", "Context and reactions"), or promises something the claims do not deliver.
+- "heading_ok": true when the heading is specific and true of every member; false if it is vague, a catch-all ("Other developments", "Context and reactions"), a bare name with nothing said about it ("Thomas Kelly"), or promises something the claims do not deliver.
 - "duplicates": pairs of claim indices inside the block that state the same fact.
 - "reason": under 20 words, only when something is wrong.
 For every lone claim: "home" = the index of the block whose heading is true of it as written, or -1 if none is.
