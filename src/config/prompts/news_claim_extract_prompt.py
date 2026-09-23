@@ -123,8 +123,15 @@ BAD (over-fragmented — should be one claim):
 Claim A: "A bomb blast occurred in Quetta." Claim B: "9 people were killed." Claim C: "33 were injured." Claim D: "The blast was in Pakistan."
 → These describe one event. Merge into a single claim.
 
+One frame, one claim — the limit of the split test
+The split test decides between DIFFERENT facts. It never cuts one fact into pieces. When several statements share the same frame — the same actor, the same event, the same rule, the same poll, the same trial, the same source sentence — and differ only in a clause or a figure, they are ONE claim, never two or three:
+- The clauses of one rule or agreement: "no adversary can have a base … / … make sensitive investments … / … have a military presence …" is one claim: "no U.S. adversary can have a base or military presence in Greenland, or make sensitive investments there, without written U.S. approval".
+- The figures of one poll, survey or trial: "58% opposed, 21% favored and 20% were unsure" is one claim, not three.
+- The terms of one deal, the tranches of one offering, the counts of one tally.
+A separate claim for each piece is the most common defect in extracted claims: the reader meets the same 25-word frame three times and learns one thing. Keep the whole fact in one sentence of at most 40 words. Only when the pieces genuinely cannot fit in 40 words split them by content (the younger age brackets in one claim, the older in another) — never by clause.
+
 Protect High-Value Standalone Facts
-Do not merge a fact into another claim if doing so buries it. Named statistics, named actors' official responses, specific laws or dates, and concrete consequences each deserve their own claim when they are independently informative.
+Do not merge two DIFFERENT facts into one claim if doing so buries one of them: a named actor's official response, a specific law, a concrete consequence each deserve their own claim when they are independently informative. This protects distinct facts; it never licenses splitting one fact.
 
 Attribution — extract the asserted claim, not the act of asserting
 - A claim records WHAT is asserted, not that someone asserted it. Strip reporting-verb scaffolding ("X said that," "according to X," "X reported"): extract the content of the assertion, stated with the strength the source asserted it — do not add hedges the source did not use, and do not harden a hedged assertion into certainty.
@@ -438,10 +445,18 @@ Shuffle audit (mandatory, claim by claim):
   (d) asserts a research finding without naming the study's institution, journal, lead author, or reporting outlet (a bare "Researchers found..." or "Participants rated...").
 - Rewrite every flagged claim to name its referent explicitly (actor + event + date or venue). Rewrite, do not delete — drop a flagged claim only when the sources cannot support the explicit version.
 
+Same-fact audit (mandatory, the LAST pass, collection by collection):
+A reader who sees two claims saying the same thing inside one collection concludes the second was written to fill it. Inside each collection, compare every pair of claims and ask: "does the reader learn a NEW fact from the second after reading the first?"
+- Same fact in other words, or with one detail moved ("Kristersson submitted his resignation letter to the speaker via X" / "Kristersson announced his resignation on September 17 after the final results"): keep the more specific claim, drop the other.
+- One fact cut into pieces that share a frame (three clauses of one provision, three figures of one poll, one measurement at two time points): write ONE claim carrying all the pieces. It must stay within 40 words and at most 8 words longer than the longest piece it replaces. If everything cannot fit, merge only the two most alike; if even two cannot fit, they were different facts — leave them.
+- A merged claim keeps every name, number and date of the claims it replaces and adds nothing; its source_indices are the union.
+- Every pair you resolve reduces the collection by one. If a collection drops to a single claim, move that claim into the existing collection whose name covers it — after checking that collection does not already state the fact (if it does, the moved claim merges there too). Never leave a one-claim collection, never drop a fact to avoid one, never pad one back to two.
+- Then re-number: claim_indices, quote claim_index and collection_order must match the final claims array.
+
 Structural checks:
 - Does any claim contain unresolved pronouns or generic noun phrases? Replace with proper names.
 - Does any claim use a relative date that can be resolved? Resolve it.
-- Does any claim exceed 35 words (40 when the extra words are its Shuffle Rule event anchor)? Apply the split test and split if possible — but never by deleting the event anchor.
+- Does any claim exceed 35 words (40 when the extra words are its Shuffle Rule event anchor)? Apply the split test and split if possible — but never by deleting the event anchor, and never by cutting one fact into clause-sized pieces.
 - Does any claim_index in a collection, quote, or perspective point to the wrong claim? Fix it.
 - Is the summary within 350-500 characters? Rewrite if not.
 - Do the importance scores span at least 0.3 and avoid clustering at one value? Re-grade relative to the story if not — the headline's core event claims must outrank peripheral context.
