@@ -132,4 +132,5 @@ async def finalize(
         # Debates come from news.extract_debate_claims; kept for shape stability.
         debate_claims=[],
         summary=cr["summary"],
+        anchor_report=cr.get("anchor_report"),
     )

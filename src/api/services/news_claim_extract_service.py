@@ -10,6 +10,8 @@ from src.api.schemas.news_claim_extract_schema import (
   NewsClaimExtractResponse,
 )
 from src.config.prompts.news_claim_extract_prompt import NEWS_CLAIM_EXTRACT_PROMPT
+from src.api.services.claim_anchor_enforce import enforce_anchors
+from src.api.services.claim_anchor_guard import calendar_block, describe_published, source_anchors
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
 from src.api.services.news_debate_claim_service import (
@@ -43,11 +45,23 @@ def _build_prompt(
 ) -> str:
   """Render NEWS_CLAIM_EXTRACT_PROMPT — the single source of truth shared by
   both the Gemini and Claude extraction paths (same f-string substitution
-  langchain used previously: {{ }} -> { }, list values str()'d)."""
+  langchain used previously: {{ }} -> { }, list values str()'d).
+
+  Each source's publication date is spelled out with its weekday and the
+  prompt carries a calendar per source, so the model reads what "Tuesday"
+  means instead of computing it — its own arithmetic was off by a day or a
+  year in most of the curators' date corrections (2026-09-23)."""
+  rendered = []
+  for s in sources:
+    d = s.model_dump()
+    d["published_at"] = describe_published(s.published_at)
+    rendered.append(d)
+  anchors = [source_anchors(s.index, s.content, s.published_at) for s in sources]
   return NEWS_CLAIM_EXTRACT_PROMPT.format(
     headline=headline,
-    sources=[s.model_dump() for s in sources],
+    sources=rendered,
     topics=topics,
+    calendar=calendar_block(anchors) or "(no publication dates known — resolve no relative date)",
   )
 
 
@@ -112,7 +126,15 @@ def extract_news_claims_factual(
       # let it escape or become a checkpointed result; the dedicated pass owns
       # the final debate contract.
       result.debate_claims = []
-      return result
+      # Every date, year and figure must be one a source states or one code
+      # resolved from a source's weekday; the model gets one repair round on
+      # the same client, and a claim still carrying a guess is dropped.
+      return enforce_anchors(
+        result, sources,
+        lambda p: client.models.generate_content(
+          model=settings.gemini_news_claim_model, contents=p, config=config,
+        ).text,
+      )
     except Exception as e:
       last_error = e
       logger.warning(
@@ -174,7 +196,16 @@ def extract_news_claims_factual_claude(
       parsed = _parse_llm_response(_claude_text(message))
       result = NewsClaimExtractResponse.model_validate(parsed)
       result.debate_claims = []
-      return result
+      return enforce_anchors(
+        result, sources,
+        lambda p: _claude_text(client.messages.create(
+          model=settings.news_claim_claude_model,
+          max_tokens=settings.news_claim_claude_max_tokens,
+          temperature=settings.gemini_news_claim_temperature,
+          system=_CLAUDE_SYSTEM_PROMPT,
+          messages=[{"role": "user", "content": p}],
+        )),
+      )
     except Exception as e:
       last_error = e
       logger.warning(

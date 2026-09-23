@@ -89,6 +89,20 @@ def normalize_debate_claims(
   return unique if len(unique) >= 2 else []
 
 
+class AnchorReport(BaseModel):
+  """What the source-anchor guard did to a claim set: every date, year and
+  number in every claim must be one a source states or one code resolved
+  from a source's weekday against its publication date. A claim the model
+  could not repair in one round is dropped rather than published with a
+  guessed date; its text is kept here so the drop can be audited."""
+  checked: int = 0
+  flagged: int = 0
+  repaired: int = 0
+  dropped: int = 0
+  dropped_claims: List[str] = Field(default_factory=list)
+  problems: List[str] = Field(default_factory=list)
+
+
 class NewsClaimExtractResponse(BaseModel):
   claims: List[ExtractedClaim] = Field(default_factory=list)
   quotes: List[ExtractedQuote] = Field(default_factory=list)
@@ -96,6 +110,7 @@ class NewsClaimExtractResponse(BaseModel):
   collection_order: List[str] = Field(default_factory=list)
   debate_claims: List[ExtractedDebateClaim] = Field(default_factory=list)
   summary: str = ""
+  anchor_report: Optional[AnchorReport] = None
 
   @model_validator(mode="after")
   def _enforce_debate_claim_contract(self) -> "NewsClaimExtractResponse":

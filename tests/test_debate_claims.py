@@ -128,7 +128,7 @@ def test_normalizer_is_deterministic_and_idempotent():
 
 
 def test_factual_prompt_defers_debates_to_the_dedicated_pass():
-    rendered = NEWS_CLAIM_EXTRACT_PROMPT.format(headline="h", sources=[], topics=[])
+    rendered = NEWS_CLAIM_EXTRACT_PROMPT.format(headline="h", sources=[], topics=[], calendar="")
     assert "STEP 8: DEBATE PLACEHOLDER" in rendered
     assert "Always return an empty `debate_claims` array" in rendered
     assert '"debate_claims": []' in rendered

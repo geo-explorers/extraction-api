@@ -1,0 +1,137 @@
+{
+  "_about": "Shared fixture for the source-anchor guard (extraction-api claim_anchor_guard.py and news-worker lib/claim-anchors.ts run the same cases). Each case: a claim, its sources (content + ISO published_at), and the tokens the guard must flag — an empty list means the claim passes. Cases 1-7 are the curators' batch-14 corrections (2026-09-23) in miniature.",
+  "cases": [
+    {
+      "name": "weekday resolved by the model to the wrong day and year is flagged",
+      "claim": "US President Donald Trump announced on March 4, 2025 that the US Navy could provide escorts for tankers navigating the Strait of Hormuz if necessary",
+      "sources": [{ "content": "On Tuesday, President Donald Trump announced that the U.S. Navy could provide escorts for tankers navigating the strait if necessary. Only one inbound and one outbound vessel crossed on March 4.", "published_at": "2026-03-05T14:00:00Z" }],
+      "expect": [{ "kind": "date", "token": "March 4, 2025" }]
+    },
+    {
+      "name": "the curator's date for that weekday passes: code resolves Tuesday against Thursday 5 March",
+      "claim": "US President Donald Trump announced on March 3, 2026 that the US Navy could provide escorts for tankers navigating the Strait of Hormuz if necessary",
+      "sources": [{ "content": "On Tuesday, President Donald Trump announced that the U.S. Navy could provide escorts for tankers navigating the strait if necessary.", "published_at": "2026-03-05T14:00:00Z" }],
+      "expect": []
+    },
+    {
+      "name": "the article's own date used as the event date is flagged when the source says Monday",
+      "claim": "Eileen Wang resigned from the Arcadia City Council on May 12, 2026",
+      "sources": [{ "content": "The mayor of a Los Angeles suburb resigned Monday, as federal prosecutors announced that Eileen Wang has been charged.", "published_at": "2026-05-12T10:05:02.000Z" }],
+      "expect": [{ "kind": "date", "token": "May 12, 2026" }]
+    },
+    {
+      "name": "Monday before a Tuesday publication is 11 May",
+      "claim": "Eileen Wang resigned from the Arcadia City Council on May 11, 2026",
+      "sources": [{ "content": "The mayor of a Los Angeles suburb resigned Monday, as federal prosecutors announced that Eileen Wang has been charged.", "published_at": "2026-05-12T10:05:02.000Z" }],
+      "expect": []
+    },
+    {
+      "name": "a relative weekday left in the claim is not the guard's business",
+      "claim": "The British government announced on Tuesday that the United Kingdom would send extra troops and air defense systems to the Middle East",
+      "sources": [{ "content": "The British government announced on Tuesday that it would send extra troops and air defense systems to the Middle East.", "published_at": "2026-04-01T10:57:26Z" }],
+      "expect": []
+    },
+    {
+      "name": "the weekday with its resolved date passes (Tuesday before Wednesday 1 April)",
+      "claim": "The British government announced on Tuesday, 31 March 2026 that the United Kingdom would send extra troops and air defense systems to the Middle East",
+      "sources": [{ "content": "The British government announced on Tuesday that it would send extra troops and air defense systems to the Middle East.", "published_at": "2026-04-01T10:57:26Z" }],
+      "expect": []
+    },
+    {
+      "name": "a day-and-month the source states may take the publication year",
+      "claim": "The Trump administration deposed President Nicolas Maduro on January 3, 2026 with US forces conducting a raid on Caracas",
+      "sources": [{ "content": "Thursday's move comes after the Trump administration in January deposed President Nicolas Maduro on January 3, with US forces conducting a raid on Venezuela's capital Caracas.", "published_at": "2026-04-17T02:54:00Z" }],
+      "expect": []
+    },
+    {
+      "name": "a year the model filled from its prior is flagged",
+      "claim": "The 90 billion euro EU loan for Ukraine was agreed in December 2024",
+      "sources": [{ "content": "EU ambassadors approved the 90 billion euro loan for Ukraine, agreed last December, on Wednesday.", "published_at": "2026-04-23T08:00:00Z" }],
+      "expect": [{ "kind": "date", "token": "December 2024" }]
+    },
+    {
+      "name": "a month-year with the publication year passes when the source names the month",
+      "claim": "The 90 billion euro EU loan for Ukraine was agreed in December 2025",
+      "sources": [{ "content": "EU ambassadors approved the 90 billion euro loan for Ukraine, agreed in December 2025, on Wednesday.", "published_at": "2026-04-23T08:00:00Z" }],
+      "expect": []
+    },
+    {
+      "name": "earlier this year means the publication year, not the year before",
+      "claim": "Meta cut around 2,000 workers in two smaller rounds of layoffs earlier in 2025",
+      "sources": [{ "content": "Meta cut around 2,000 workers in two smaller rounds of layoffs earlier this year.", "published_at": "2026-06-10T00:00:00Z" }],
+      "expect": [{ "kind": "year", "token": "2025" }]
+    },
+    {
+      "name": "last year resolves to the year before publication",
+      "claim": "The number of publicly traded companies in the US fell to about 4,000 in 2025",
+      "sources": [{ "content": "The number of publicly traded companies in the U.S. fell from about 7,000 in 2000 to about 4,000 last year.", "published_at": "2026-02-02T00:00:00Z" }],
+      "expect": []
+    },
+    {
+      "name": "a Saturday date that is not a Saturday is flagged; the real Saturday passes",
+      "claim": "A coalition of DeFi protocols filed a Constitutional AIP on the Arbitrum forum on Saturday, April 26, 2026",
+      "sources": [{ "content": "A coalition of major DeFi protocols filed a Constitutional AIP on the Arbitrum forum on Saturday.", "published_at": "2026-04-27T09:00:00Z" }],
+      "expect": [{ "kind": "date", "token": "April 26, 2026" }]
+    },
+    {
+      "name": "the real Saturday before a Monday publication",
+      "claim": "A coalition of DeFi protocols filed a Constitutional AIP on the Arbitrum forum on Saturday, April 25, 2026",
+      "sources": [{ "content": "A coalition of major DeFi protocols filed a Constitutional AIP on the Arbitrum forum on Saturday.", "published_at": "2026-04-27T09:00:00Z" }],
+      "expect": []
+    },
+    {
+      "name": "a figure no source states is flagged; scale words and separators are normalised",
+      "claim": "Trading volume for US spot Bitcoin ETFs fell to approximately $14.5 billion for the week ending September 4, 2026, down from nearly $19 billion the prior week",
+      "sources": [{ "content": "Trading volume for U.S. spot bitcoin ETFs fell to about $14.6bn in the week to September 4, from nearly $19,000 million the week before.", "published_at": "2026-09-07T11:00:00Z" }],
+      "expect": [{ "kind": "number", "token": "$14.5 billion" }]
+    },
+    {
+      "name": "a figure the source states in another form passes",
+      "claim": "Trading volume for US spot Bitcoin ETFs fell to approximately $14.6 billion for the week ending September 4, 2026",
+      "sources": [{ "content": "Trading volume for U.S. spot bitcoin ETFs fell to about $14.6bn in the week to September 4.", "published_at": "2026-09-07T11:00:00Z" }],
+      "expect": []
+    },
+    {
+      "name": "yesterday against the publication date, with a day of timezone tolerance",
+      "claim": "Iran attacked an oil tanker off the Dubai coast on 30 March 2026",
+      "sources": [{ "content": "Iran attacked an oil tanker off the Dubai coast yesterday, setting the vessel alight.", "published_at": "2026-04-01T02:00:00Z" }],
+      "expect": []
+    },
+    {
+      "name": "background facts from the model's memory are flagged",
+      "claim": "A July 2018 fireworks factory explosion in Tultepec, Mexico, killed 24 people, following another explosion that killed 42 people in 2016",
+      "sources": [{ "content": "A fireworks factory explosion in Tultepec, Mexico, killed 24 people in July 2018, the town's worst since a market blast years earlier.", "published_at": "2026-09-14T00:00:00Z" }],
+      "expect": [{ "kind": "year", "token": "2016" }, { "kind": "number", "token": "42" }]
+    },
+    {
+      "name": "clock times, ordinals and percentages in the sources are read the same way",
+      "claim": "Roberto Sanchez trailed with 12.1 percent in an early exit poll by Ipsos Peru on 12 April 2026",
+      "sources": [{ "content": "At 10:30 pm on Sunday, Ipsos Peru's exit poll put Roberto Sanchez at 12.1% in the 12th round of counting.", "published_at": "2026-04-13T03:00:00Z" }],
+      "expect": []
+    },
+    {
+      "name": "an ISO date in the source anchors a claim's long date",
+      "claim": "Nine countries announced the Defence, Security and Resilience Bank on 7 July 2026",
+      "sources": [{ "content": "Nine countries announced the bank on 2026-07-07 at the summit.", "published_at": null }],
+      "expect": []
+    },
+    {
+      "name": "a year mentioned elsewhere in the article does not license a month-year",
+      "claim": "Eileen Wang became mayor of Arcadia in February 2025",
+      "sources": [{ "content": "Wang, who became mayor in February, has resigned. A 2025 House committee report counted 60 cases of espionage.", "published_at": "2026-05-12T10:05:02Z" }],
+      "expect": [{ "kind": "date", "token": "February 2025" }]
+    },
+    {
+      "name": "the publication year completes a month the source names",
+      "claim": "Eileen Wang became mayor of Arcadia in February 2026",
+      "sources": [{ "content": "Wang, who became mayor in February, has resigned. A 2025 House committee report counted 60 cases of espionage.", "published_at": "2026-05-12T10:05:02Z" }],
+      "expect": []
+    },
+    {
+      "name": "no sources at all: nothing can be checked, nothing is flagged",
+      "claim": "Eileen Wang resigned from the Arcadia City Council on May 12, 2026",
+      "sources": [],
+      "expect": []
+    }
+  ]
+}

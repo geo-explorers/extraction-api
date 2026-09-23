@@ -9,9 +9,10 @@ verbatim, so the claim portion stays byte-identical to /extract/news/claims.
 """
 
 from pydantic import BaseModel, Field, model_validator
-from typing import List
+from typing import List, Optional
 
 from src.api.schemas.news_claim_extract_schema import (
+  AnchorReport,
   NewsArticleSource,
   ExtractedClaim,
   ExtractedQuote,
@@ -37,6 +38,9 @@ class NewsTopicsAndClaimsResponse(BaseModel):
   collection_order: List[str] = Field(default_factory=list)
   debate_claims: List[ExtractedDebateClaim] = Field(default_factory=list)
   summary: str = ""
+  # What the source-anchor guard repaired or dropped in the claim pass, so
+  # the consumer can log it; absent from a server that predates the guard.
+  anchor_report: Optional[AnchorReport] = None
 
   # Same repair as NewsClaimExtractResponse: this model is also constructed
   # directly (task finalize, HTTP layer), so the contract must hold here too.
