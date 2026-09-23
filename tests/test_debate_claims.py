@@ -208,15 +208,28 @@ def test_dedicated_prompt_carries_the_product_definition():
     assert "Every returned claim becomes its OWN debate" in rendered
     assert "BAD pair" in rendered and "GOOD pair" in rendered
     assert "neutral question" in rendered
-    # Card style, including the soft form-variety preference.
-    assert "prefer form variety" in rendered
-    assert "manufacture variety" in rendered
+    # The editors' brief: this story's disagreement, both directions, one
+    # prescriptive card, and the wording rules.
+    assert "The central disagreement in this story" in rendered
+    assert "The headline names the disagreement" in rendered
+    assert "a card about the war alone belongs to\nanother story" in rendered
+    assert "BOTH DIRECTIONS, THEN ONE" in rendered
+    assert "both sides must be able to accept the" in rendered
+    assert "At most one card in the set may prescribe" in rendered
+    assert "Never convert a card into another shape" in rendered
+    assert "A motive the sources do not state" in rendered
+    assert "A verdict smuggled into the wording" in rendered
+    assert "A pure prediction" in rendered
+    assert "A card almost everyone would accept" in rendered
+    assert "Cause or forecast" not in rendered
+    # Card style.
     assert "Aim for 6-10 words" in rendered
     assert "20 words is the hard maximum" in rendered
     assert "Orion should disclose its automated hiring criteria" in rendered
     assert "Aster's battery design poses unacceptable safety risks" in rendered
     assert "Riverton's housing shortage is driven by zoning restrictions" in rendered
-    assert "Mosaic fusion power will be commercially viable by 2040" in rendered
+    assert "Mosaic's fusion reactor is reliable enough for grid connection" in rendered
+    assert "commercially viable by 2040" not in rendered
     # Holdout topics must not be echoed from style examples into eval runs.
     assert "Bitcoin" not in rendered
     assert "Open-source AI" not in rendered

@@ -76,7 +76,10 @@ def test_completion_prompt_carries_count_survivors_and_rejection_audit():
     assert "proposition and its counterclaim" in prompt
     assert "sounds like a headline" in prompt
     assert "societal instance" in prompt
-    assert "prefer a form the" in prompt
+    assert "this belongs under this story because" in prompt
+    assert "At most one claim in the finished collection may prescribe" in prompt
+    assert "Draft each new axis in both directions" in prompt
+    assert "Do not smuggle a verdict into the wording" in prompt
     assert "market-performance forecast" in prompt
     assert "allocation or strategy advice" in prompt
 
