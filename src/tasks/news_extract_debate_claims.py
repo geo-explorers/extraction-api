@@ -43,7 +43,7 @@ from src.api.services.news_debate_claim_service import (
 from src.api.services.news_debate_semantic_review_service import (
     review_news_debate_candidates,
 )
-from src.tasks.base import DEFAULT_MAX_PAYLOAD_BYTES
+from src.tasks.base import DEFAULT_MAX_PAYLOAD_BYTES, with_overrides
 from src.config.settings import settings
 from src.infrastructure.spend_guard import spend_guard
 from src.infrastructure.logger import get_logger
@@ -72,6 +72,7 @@ news_debate_claims_workflow = hatchet.workflow(
     retries=3,
     backoff_factor=2.0,
 )
+@with_overrides(label="news.extract_debate_claims:extract_debate_candidates")
 async def extract_debate_candidates(
     input: NewsDebateClaimsRequest, ctx: Context
 ) -> dict:
@@ -89,6 +90,7 @@ async def extract_debate_candidates(
     retries=3,
     backoff_factor=2.0,
 )
+@with_overrides(label="news.extract_debate_claims:review_debates")
 async def review_debates(
     input: NewsDebateClaimsRequest, ctx: Context
 ) -> dict:
@@ -125,6 +127,7 @@ async def review_debates(
     retries=3,
     backoff_factor=2.0,
 )
+@with_overrides(label="news.extract_debate_claims:complete_underfilled_debates")
 async def complete_underfilled_debates(
     input: NewsDebateClaimsRequest, ctx: Context
 ) -> dict:
@@ -191,6 +194,7 @@ async def complete_underfilled_debates(
     parents=[complete_underfilled_debates],
     execution_timeout=_FINALIZE_TIMEOUT,
 )
+@with_overrides(label="news.extract_debate_claims:finalize")
 async def finalize(
     input: NewsDebateClaimsRequest, ctx: Context
 ) -> NewsDebateClaimsResponse:

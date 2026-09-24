@@ -27,10 +27,7 @@ from src.api.schemas.news_debate_claim_schema import (
   strongest_first,
 )
 from src.api.schemas.news_debate_semantic_review_schema import DebateSemanticVerdict
-from src.config.prompts.news_debate_claim_prompt import NEWS_DEBATE_CLAIM_PROMPT
-from src.config.prompts.news_debate_completion_prompt import (
-  NEWS_DEBATE_UNDERFILLED_RESCUE_PROMPT,
-)
+from src.config.overrides import llm, prompts
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
 from src.api.services.news_debate_semantic_review_service import (
@@ -52,11 +49,6 @@ _INFERENTIAL_FRAME = re.compile(
 # a currency sign stood ("’403 million" for "€403 million"). Such a card is
 # unpublishable however good its axis.
 _GARBLED = re.compile(r"�|[‘’'`´]\d")
-
-_CLAUDE_SYSTEM_PROMPT = (
-  "You write news debate cards. Follow the user's definition and rules "
-  "exactly. Output ONLY one valid JSON object matching the requested shape."
-)
 
 
 # Glyph variants that carry no difference in wording (curly vs straight quotes,
@@ -100,7 +92,7 @@ def _build_prompt(
   sources: list[NewsArticleSource],
   claims: list[ExtractedClaim],
 ) -> str:
-  return NEWS_DEBATE_CLAIM_PROMPT.format(
+  return prompts.get("news_debate_claim").format(
     headline=headline,
     central_claims=_claims_context(claims),
     sources=json.dumps(
@@ -136,7 +128,7 @@ def _build_underfilled_rescue_prompt(
     })
 
   survivor_count = len(accepted_candidates)
-  return NEWS_DEBATE_UNDERFILLED_RESCUE_PROMPT.format(
+  return prompts.get("news_debate_completion").format(
     headline=headline,
     central_claims=_claims_context(claims),
     survivor_count=survivor_count,
@@ -292,11 +284,11 @@ def generate_news_debate_candidates(
     http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
   )
   config_kwargs: dict = {
-    "temperature": settings.gemini_news_debate_temperature,
+    "temperature": llm.get("gemini_news_debate_temperature"),
     "response_mime_type": "application/json",
     "response_schema": GroundedDebateResponse,
   }
-  thinking_level = (settings.gemini_news_debate_thinking_level or "").strip()
+  thinking_level = (llm.get("gemini_news_debate_thinking_level") or "").strip()
   if thinking_level:
     config_kwargs["thinking_config"] = types.ThinkingConfig(
       thinking_level=thinking_level,
@@ -307,7 +299,7 @@ def generate_news_debate_candidates(
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       response = client.models.generate_content(
-        model=settings.gemini_news_debate_model,
+        model=llm.get("gemini_news_debate_model"),
         contents=prompt,
         config=config,
       )
@@ -352,10 +344,10 @@ def generate_news_debate_candidates_claude(
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       message = client.messages.create(
-        model=settings.news_claim_claude_model,
+        model=llm.get("news_claim_claude_model"),
         max_tokens=8000,
-        temperature=settings.gemini_news_debate_temperature,
-        system=_CLAUDE_SYSTEM_PROMPT,
+        temperature=llm.get("gemini_news_debate_temperature"),
+        system=prompts.get("news_debate_claim.claude_system"),
         messages=[{"role": "user", "content": prompt}],
       )
       raw = "".join(
@@ -428,11 +420,11 @@ def generate_news_debate_underfilled_rescue(
     http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
   )
   config_kwargs: dict = {
-    "temperature": settings.gemini_news_debate_temperature,
+    "temperature": llm.get("gemini_news_debate_temperature"),
     "response_mime_type": "application/json",
     "response_schema": GroundedDebateResponse,
   }
-  thinking_level = (settings.gemini_news_debate_thinking_level or "").strip()
+  thinking_level = (llm.get("gemini_news_debate_thinking_level") or "").strip()
   if thinking_level:
     config_kwargs["thinking_config"] = types.ThinkingConfig(
       thinking_level=thinking_level,
@@ -443,7 +435,7 @@ def generate_news_debate_underfilled_rescue(
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       response = client.models.generate_content(
-        model=settings.gemini_news_debate_model,
+        model=llm.get("gemini_news_debate_model"),
         contents=prompt,
         config=config,
       )
@@ -506,10 +498,10 @@ def generate_news_debate_underfilled_rescue_claude(
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       message = client.messages.create(
-        model=settings.news_claim_claude_model,
+        model=llm.get("news_claim_claude_model"),
         max_tokens=4000,
-        temperature=settings.gemini_news_debate_temperature,
-        system=_CLAUDE_SYSTEM_PROMPT,
+        temperature=llm.get("gemini_news_debate_temperature"),
+        system=prompts.get("news_debate_claim.claude_system"),
         messages=[{"role": "user", "content": prompt}],
       )
       raw = "".join(

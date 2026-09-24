@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from src.api.schemas.geo_spaces_schema import AssignedRow, Entity, Space
 from src.api.services.llm_classify_service import classify_items
+from src.config.overrides import bind_context, llm
 from src.config.prompts.space_assignment_prompt import build_space_assignment_prompt
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
@@ -52,8 +53,8 @@ def assign_spaces(spaces: list[Space], entities: list[Entity]) -> list[AssignedR
     def _classify(chunk: list[Entity]):
         return classify_items(
             prompt=build_space_assignment_prompt(spaces, chunk),
-            model=settings.gemini_space_assignment_model,
-            temperature=settings.gemini_space_assignment_temperature,
+            model=llm.get("gemini_space_assignment_model"),
+            temperature=llm.get("gemini_space_assignment_temperature"),
         )
 
     # Run the per-batch Gemini calls in a bounded thread pool (each is a blocking
@@ -62,8 +63,11 @@ def assign_spaces(spaces: list[Space], entities: list[Entity]) -> list[AssignedR
     if concurrency == 1 or len(chunks) <= 1:
         results = [_classify(c) for c in chunks]
     else:
+        # bind_context: pool threads start with an empty context, so the run's
+        # override scope would not reach the calls without it.
         with ThreadPoolExecutor(max_workers=min(concurrency, len(chunks))) as pool:
-            results = list(pool.map(_classify, chunks))
+            results = list(pool.map(bind_context(_classify), chunks))
+
 
     for assignments in results:
         for a in assignments:

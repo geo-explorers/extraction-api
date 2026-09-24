@@ -2,20 +2,14 @@
 
 import asyncio
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
-from src.config.prompts.key_takeaways_prompt import KEY_TAKEAWAYS_PROMPT
+from src.config.overrides import llm, prompts
 from src.config.settings import settings
-from src.config.prompts.topics_of_discussion_extraction_prompt import (
-    TOPICS_OF_DISCUSSION_PROMPT
-)
-from src.config.prompts.claim_extraction_prompt import (
-    CLAIM_EXTRACTION_PROMPT
-)
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -83,11 +77,22 @@ class PremiumClaimExtractor:
                 timeout=GEMINI_TIMEOUT_SECONDS * 1000,
             )
         )
-        self.model_name = settings.gemini_premium_model
+        self._explicit_model: Optional[str] = None
         logger.info(
             f"Initialized PremiumClaimExtractor with model {self.model_name} "
             f"(structured outputs, {APP_MAX_RETRIES} app-level retries)"
         )
+
+    @property
+    def model_name(self) -> str:
+        # Resolved per call, not at construction: the extractor is shared and a
+        # run may override the model. An assigned model (tests, evals) pins it.
+        return self._explicit_model or llm.get("gemini_premium_model")
+
+    @model_name.setter
+    def model_name(self, value: Optional[str]) -> None:
+        self._explicit_model = value
+
 
     async def _call_gemini(self, prompt: str, config: types.GenerateContentConfig, step_name: str) -> str:
         """
@@ -190,7 +195,7 @@ class PremiumClaimExtractor:
             ValueError: If response is empty or contains no topics
             Exception: If Gemini API call fails (after SDK retries exhausted)
         """
-        prompt = TOPICS_OF_DISCUSSION_PROMPT.format(
+        prompt = prompts.get("podcast_extract.topics").format(
             title=title,
             description=description,
             transcript=full_transcript
@@ -200,7 +205,7 @@ class PremiumClaimExtractor:
         response_text = await self._call_gemini(
             prompt=prompt,
             config=types.GenerateContentConfig(
-                temperature=settings.gemini_premium_temperature,
+                temperature=llm.get("gemini_premium_temperature"),
                 response_mime_type="application/json",
                 response_schema=TopicDiscussionResult,
             ),
@@ -235,7 +240,7 @@ class PremiumClaimExtractor:
             ValueError: If response is empty or contains no claims
             Exception: If Gemini API call fails (after SDK retries exhausted)
         """
-        prompt = CLAIM_EXTRACTION_PROMPT.format(
+        prompt = prompts.get("podcast_extract.claims").format(
             transcript=full_transcript,
             topics_of_discussion=topics_of_discussion
         )
@@ -248,7 +253,7 @@ class PremiumClaimExtractor:
         response_text = await self._call_gemini(
             prompt=prompt,
             config=types.GenerateContentConfig(
-                temperature=settings.gemini_premium_temperature,
+                temperature=llm.get("gemini_premium_temperature"),
                 response_mime_type="application/json",
                 response_schema=ClaimWithTopicResult,
             ),
@@ -287,7 +292,7 @@ class PremiumClaimExtractor:
             ValueError: If response is empty or contains no key takeaways
             Exception: If Gemini API call fails (after SDK retries exhausted)
         """
-        prompt = KEY_TAKEAWAYS_PROMPT.format(
+        prompt = prompts.get("podcast_extract.takeaways").format(
             topics_with_claims=topics_with_claims
         )
 
@@ -298,7 +303,7 @@ class PremiumClaimExtractor:
         response_text = await self._call_gemini(
             prompt=prompt,
             config=types.GenerateContentConfig(
-                temperature=settings.gemini_premium_temperature,
+                temperature=llm.get("gemini_premium_temperature"),
                 response_mime_type="application/json",
                 response_schema=KeyTakeawayResult,
             ),

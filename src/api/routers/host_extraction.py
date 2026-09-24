@@ -4,12 +4,14 @@ from fastapi.responses import JSONResponse
 from src.api.services.host_extraction_service import extract_podcast_hosts
 from src.api.schemas.host_extraction_schema import HostExtractionRequest
 from src.infrastructure.logger import get_logger
+from src.config.overrides import with_payload_overrides
 
 logger = get_logger(__name__)
 
 router = APIRouter()
 
 @router.post("/hosts")
+@with_payload_overrides("http:hosts")
 def host_extraction(request: HostExtractionRequest) -> JSONResponse:
   try:
     hosts = extract_podcast_hosts(

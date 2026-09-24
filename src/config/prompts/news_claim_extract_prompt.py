@@ -611,3 +611,14 @@ def _factual_only_prompt(prompt: str) -> str:
 NEWS_CLAIM_EXTRACT_PROMPT = _factual_only_prompt(
   _NEWS_CLAIM_EXTRACT_PROMPT_WITH_PROVISIONAL_DEBATES
 )
+
+
+# Minimal role primer for the Claude fallback. All extraction logic and
+# grounding rules live in NEWS_CLAIM_EXTRACT_PROMPT (the user message) — this
+# only sets the system role and reinforces raw-JSON output. NOT a second copy
+# of the extraction prompt.
+NEWS_CLAIM_EXTRACT_CLAUDE_SYSTEM_PROMPT = (
+  "You are an expert news fact-extraction system. Follow the user's instructions "
+  "exactly and with zero hallucination tolerance. Output ONLY a single valid JSON "
+  "object matching the requested schema — no prose, no markdown code fences."
+)

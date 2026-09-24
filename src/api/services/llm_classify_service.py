@@ -15,6 +15,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
+from src.config.overrides import llm
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
 
@@ -66,7 +67,7 @@ def classify_items(
     )
     config = types.GenerateContentConfig(
         temperature=(
-            settings.gemini_space_assignment_temperature
+            llm.get("gemini_space_assignment_temperature")
             if temperature is None
             else temperature
         ),
@@ -74,7 +75,8 @@ def classify_items(
         response_schema=ClassificationResult,
     )
     response = client.models.generate_content(
-        model=model or settings.gemini_space_assignment_model,
+        model=model or llm.get("gemini_space_assignment_model"),
+
         contents=prompt,
         config=config,
     )

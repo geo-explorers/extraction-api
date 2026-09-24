@@ -1,7 +1,8 @@
 from pydantic import BaseModel
+from src.api.schemas.overrides_schema import OverridesMixin
 from typing import Dict, Any, List
 
-class KeywordExtractionRequest(BaseModel):
+class KeywordExtractionRequest(OverridesMixin):
   episode: Dict[str, Any]
   topics_list: List[str]
   min_keywords: int = 5

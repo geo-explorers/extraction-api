@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
+from src.api.schemas.overrides_schema import OverridesMixin
 from typing import List, Literal, Optional
 
 
@@ -11,7 +12,7 @@ class NewsArticleSource(BaseModel):
   content: str
 
 
-class NewsClaimExtractRequest(BaseModel):
+class NewsClaimExtractRequest(OverridesMixin):
   headline: str
   sources: List[NewsArticleSource]
   topics: List[str] = Field(

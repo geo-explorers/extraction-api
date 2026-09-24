@@ -9,6 +9,7 @@ verbatim, so the claim portion stays byte-identical to /extract/news/claims.
 """
 
 from pydantic import BaseModel, Field, model_validator
+from src.api.schemas.overrides_schema import OverridesMixin
 from typing import List, Optional
 
 from src.api.schemas.news_claim_extract_schema import (
@@ -22,7 +23,7 @@ from src.api.schemas.news_claim_extract_schema import (
 )
 
 
-class NewsTopicsAndClaimsRequest(BaseModel):
+class NewsTopicsAndClaimsRequest(OverridesMixin):
   headline: str
   sources: List[NewsArticleSource]
 

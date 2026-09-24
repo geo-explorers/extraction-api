@@ -15,6 +15,7 @@ prepare-ops, overlapped with entity resolution, covers and the debate wait.
 from typing import Dict, List, Literal
 
 from pydantic import BaseModel, Field
+from src.api.schemas.overrides_schema import OverridesMixin
 
 from src.api.schemas.news_claim_extract_schema import (
   ExtractedClaim,
@@ -24,7 +25,7 @@ from src.api.schemas.news_claim_extract_schema import (
 )
 
 
-class NewsCollectionReviewRequest(BaseModel):
+class NewsCollectionReviewRequest(OverridesMixin):
   headline: str
   # The story's sources, for the source check on every merged sentence the
   # review composes — a merge that joins two facts can imply a relation the
@@ -61,6 +62,10 @@ class CollectionReviewReport(BaseModel):
   dropped_claims: int = 0
   # "ok" | "repaired" (one regroup) | "rejected" (twice → discarded) | "".
   check: str = ""
+  # The reading order the check returned for the blocks: "same" (as grouped),
+  # "changed", "kept" (no usable order came back), "refused" (the block it
+  # put first shares no word with the headline — the grouped order stands).
+  order: str = ""
   # Human-readable refusals: a rescue the sources did not back, a merge that
   # lost a name, a block the check faulted.
   rejected: List[str] = Field(default_factory=list)

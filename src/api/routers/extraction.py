@@ -10,6 +10,7 @@ from src.api.schemas.responses import (
     SimplifiedBatchExtractionResponse,
 )
 from src.infrastructure.logger import get_logger
+from src.config.overrides import with_payload_overrides
 
 logger = get_logger(__name__)
 
@@ -69,6 +70,7 @@ router = APIRouter(prefix="/extract", tags=["extraction"])
         500: {"description": "Processing error (when continue_on_error=false)"},
     },
 )
+@with_payload_overrides("http:claims_premium")
 async def extract_episodes_batch_premium(
     request: BatchExtractionRequest, db: Session = Depends(get_db)
 ) -> SimplifiedBatchExtractionResponse:

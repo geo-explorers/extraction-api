@@ -1,6 +1,6 @@
 import json
 from typing import Any, Dict, List
-from src.config.prompts.guest_extraction_prompt import GUEST_EXTRACTION_PROMPT
+from src.config.overrides import prompts
 from src.api.utils import llm_model
 from src.infrastructure.logger import get_logger
 
@@ -16,7 +16,7 @@ def extract_podcast_guests(
 ) -> List[Dict[str, Any]]:
   try:
     chain = llm_model.build_chain(
-      prompt=GUEST_EXTRACTION_PROMPT
+      prompt=prompts.get("guest_extraction")
     )
   except Exception as e:
     raise Exception("Error building chain")

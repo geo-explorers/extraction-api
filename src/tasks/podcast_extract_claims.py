@@ -17,10 +17,11 @@ from datetime import timedelta
 from functools import lru_cache
 
 from pydantic import BaseModel, Field
+from src.api.schemas.overrides_schema import OverridesMixin
 from hatchet_sdk import Context, RateLimit
 
 from src.hatchet_client import hatchet
-from src.config.settings import settings
+from src.tasks.base import with_overrides
 from src.preprocessing.transcript_parser import TranscriptParser
 from src.extraction.premium_claim_extractor import PremiumClaimExtractor
 from src.pipeline.premium_extraction_core import (
@@ -42,7 +43,7 @@ _STEP_TIMEOUT = timedelta(minutes=5)
 # ── Contracts ──────────────────────────────────────────────────────────────
 
 
-class PodcastExtractInput(BaseModel):
+class PodcastExtractInput(OverridesMixin):
     episode_id: int
     title: str
     description: str = ""
@@ -102,6 +103,7 @@ podcast_workflow = hatchet.workflow(
 @podcast_workflow.task(
     rate_limits=_GEMINI, execution_timeout=_STEP_TIMEOUT, retries=3, backoff_factor=2.0
 )
+@with_overrides(label="podcast.extract_claims:topics")
 async def topics(input: PodcastExtractInput, ctx: Context) -> dict:
     spend_guard.check_and_record("gemini")
     result = await _extractor().extract_topics_of_discussion_from_episode(
@@ -116,6 +118,7 @@ async def topics(input: PodcastExtractInput, ctx: Context) -> dict:
     parents=[topics], rate_limits=_GEMINI, execution_timeout=_STEP_TIMEOUT,
     retries=3, backoff_factor=2.0,
 )
+@with_overrides(label="podcast.extract_claims:claims")
 async def claims(input: PodcastExtractInput, ctx: Context) -> dict:
     topic_list = ctx.task_output(topics)["topics"]
     if not topic_list:
@@ -132,6 +135,7 @@ async def claims(input: PodcastExtractInput, ctx: Context) -> dict:
     parents=[topics, claims], rate_limits=_GEMINI, execution_timeout=_STEP_TIMEOUT,
     retries=3, backoff_factor=2.0,
 )
+@with_overrides(label="podcast.extract_claims:takeaways")
 async def takeaways(input: PodcastExtractInput, ctx: Context) -> dict:
     topic_list = ctx.task_output(topics)["topics"]
     cwt = ctx.task_output(claims)["claims_with_topics"]
@@ -146,6 +150,7 @@ async def takeaways(input: PodcastExtractInput, ctx: Context) -> dict:
 
 
 @podcast_workflow.task(parents=[topics, claims, takeaways], execution_timeout=timedelta(minutes=2))
+@with_overrides(label="podcast.extract_claims:finalize")
 async def finalize(input: PodcastExtractInput, ctx: Context) -> PodcastExtractResult:
     topic_list = ctx.task_output(topics)["topics"]
     cwt = ctx.task_output(claims)["claims_with_topics"]
@@ -177,5 +182,5 @@ async def finalize(input: PodcastExtractInput, ctx: Context) -> PodcastExtractRe
         ],
         topic_of_discussion=ordered_topics,
         claims_extracted=claims_extracted,
-        model_used=settings.gemini_premium_model,
+        model_used=_extractor().model_name,
     )

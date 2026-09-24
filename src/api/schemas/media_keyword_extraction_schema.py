@@ -1,8 +1,9 @@
 from pydantic import BaseModel
+from src.api.schemas.overrides_schema import OverridesMixin
 from typing import Dict, Any, List, Optional
 
 
-class MediaKeywordExtractionRequest(BaseModel):
+class MediaKeywordExtractionRequest(OverridesMixin):
   media: Dict[str, Any]
   media_type: Optional[str] = None
   topics_list: List[str]

@@ -38,7 +38,7 @@ from src.api.schemas.news_topics_and_claims_schema import (
 )
 from src.api.services.news_topics_extract_service import extract_overview_topics
 from src.api.services.news_claim_extract_service import extract_news_claims_factual
-from src.tasks.base import DEFAULT_MAX_PAYLOAD_BYTES
+from src.tasks.base import DEFAULT_MAX_PAYLOAD_BYTES, with_overrides
 from src.infrastructure.spend_guard import spend_guard
 from src.infrastructure.logger import get_logger
 
@@ -77,6 +77,7 @@ news_topics_and_claims_workflow = hatchet.workflow(
 @news_topics_and_claims_workflow.task(
     rate_limits=_CLAUDE, execution_timeout=_TOPIC_TIMEOUT, retries=3, backoff_factor=2.0
 )
+@with_overrides(label="news.extract_topics_and_claims:extract_topics")
 async def extract_topics(input: NewsTopicsAndClaimsRequest, ctx: Context) -> dict:
     spend_guard.check_and_record("claude")
     # Blocking Anthropic SDK call (incl. its own bounded feedback retry); offload
@@ -94,6 +95,7 @@ async def extract_topics(input: NewsTopicsAndClaimsRequest, ctx: Context) -> dic
     retries=3,
     backoff_factor=2.0,
 )
+@with_overrides(label="news.extract_topics_and_claims:extract_claims_fused")
 async def extract_claims_fused(
     input: NewsTopicsAndClaimsRequest, ctx: Context
 ) -> dict:
@@ -111,6 +113,7 @@ async def extract_claims_fused(
     parents=[extract_topics, extract_claims_fused],
     execution_timeout=_FINALIZE_TIMEOUT,
 )
+@with_overrides(label="news.extract_topics_and_claims:finalize")
 async def finalize(
     input: NewsTopicsAndClaimsRequest, ctx: Context
 ) -> NewsTopicsAndClaimsResponse:

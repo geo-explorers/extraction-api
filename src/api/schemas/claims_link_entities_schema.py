@@ -23,6 +23,7 @@ import re
 from typing import Dict, List
 
 from pydantic import BaseModel, Field, field_validator
+from src.api.schemas.overrides_schema import OverridesMixin
 
 from src.config.settings import settings
 
@@ -72,7 +73,7 @@ class Facet(BaseModel):
         return v
 
 
-class ClaimsLinkEntitiesRequest(BaseModel):
+class ClaimsLinkEntitiesRequest(OverridesMixin):
     claims: List[LinkClaim] = Field(min_length=1, max_length=MAX_CLAIMS)
     facets: List[Facet] = Field(min_length=1, max_length=MAX_FACETS)
     # Optional framing for the model (a title or one-line description of the

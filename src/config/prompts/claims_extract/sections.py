@@ -6,6 +6,15 @@ validation checklist from the same conditions. Templates with slots use
 str.format on brace-free text.
 """
 
+# str.format slots: {media_noun}, {grouped_clause} ("" or ", grouped under the provided topics")
+ROLE_SECTION = (
+    "You are an expert fact extraction system for {media_noun}. Your objective "
+    "is to extract verifiable, atomic claims from the provided documents"
+    "{grouped_clause}. You operate with high precision and zero hallucination "
+    "tolerance."
+)
+
+
 GROUPING_SECTION = """─────────────────────────────────────────────
 EXTRACTION MODE: GROUPED BY TOPIC
 ─────────────────────────────────────────────

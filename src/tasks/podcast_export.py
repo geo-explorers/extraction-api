@@ -26,6 +26,7 @@ import requests
 from hatchet_sdk import Context
 
 from src.config.settings import settings
+from src.api.schemas.overrides_schema import OVERRIDE_FIELDS
 from src.api.schemas.podcast_export_schema import (
     PodcastExportRequest,
     PodcastExportResult,
@@ -52,9 +53,12 @@ async def _handle(input: PodcastExportRequest, ctx: Context) -> PodcastExportRes
     )
     # Blocking call (~25 min over private networking); offload so the worker
     # event loop stays free for other concurrent task types.
+    # The override maps are for this run only; postgrestogeo gets the body verbatim minus them.
     resp = await asyncio.to_thread(
-        requests.post, url, json=input.model_dump(), headers=headers, timeout=_HTTP_TIMEOUT
+        requests.post, url, json=input.model_dump(exclude=OVERRIDE_FIELDS), headers=headers,
+        timeout=_HTTP_TIMEOUT,
     )
+
     resp.raise_for_status()  # non-2xx -> task FAILED (terminal; retries=0)
 
     body = resp.json()

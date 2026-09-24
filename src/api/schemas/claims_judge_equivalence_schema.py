@@ -13,6 +13,7 @@ loosely coupled: either can change without the other knowing.
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
+from src.api.schemas.overrides_schema import OverridesMixin
 
 Verdict = Literal["equivalent", "not_equivalent", "unsure"]
 
@@ -22,7 +23,7 @@ class ClaimText(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
-class ClaimsJudgeEquivalenceInput(BaseModel):
+class ClaimsJudgeEquivalenceInput(OverridesMixin):
     claim: ClaimText
     candidates: List[ClaimText] = Field(min_length=1, max_length=50)
 

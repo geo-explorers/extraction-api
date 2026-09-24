@@ -15,6 +15,7 @@ import re
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from src.api.schemas.overrides_schema import OverridesMixin
 
 MAX_ITEMS = 200
 
@@ -54,7 +55,7 @@ class ResolvePolicy(BaseModel):
         return v
 
 
-class GeoResolveRequest(BaseModel):
+class GeoResolveRequest(OverridesMixin):
     items: List[ResolveItem] = Field(min_length=1, max_length=MAX_ITEMS)
     policies: Dict[str, ResolvePolicy] = Field(min_length=1)
 

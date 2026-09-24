@@ -37,10 +37,7 @@ from src.api.schemas.news_debate_semantic_review_schema import (
   DebateSemanticReviewResponse,
   DebateSemanticVerdict,
 )
-from src.config.prompts.news_debate_semantic_review_prompt import (
-  NEWS_DEBATE_JUDGMENT_OPINION_PROMPT,
-  NEWS_DEBATE_SEMANTIC_REVIEW_PROMPT,
-)
+from src.config.overrides import llm, prompts
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
 
@@ -48,10 +45,6 @@ logger = get_logger(__name__)
 
 MAX_RETRIES = 3
 _REQUEST_TIMEOUT_MS = 180_000
-_CLAUDE_SYSTEM_PROMPT = (
-  "You are a strict reject-only semantic reviewer for news debate cards. "
-  "Use only the supplied material. Output only the requested JSON object."
-)
 # The two gates a second opinion may overturn. The other two are objective.
 JUDGMENT_GATES = frozenset({"NOT_SOCIETAL_DEBATE", "NOT_FROM_STORY"})
 # What the reviewer sees of a candidate: the writer's draft, never the grade
@@ -103,7 +96,7 @@ def _build_review_prompt(
   candidates: list[GroundedDebateCandidate],
   prior_candidates: list[GroundedDebateCandidate] | None = None,
 ) -> str:
-  return NEWS_DEBATE_SEMANTIC_REVIEW_PROMPT.format(
+  return prompts.get("news_debate_semantic_review").format(
     headline=headline,
     claims=_claims_json(claims),
     candidates=_candidates_json(candidates),
@@ -124,7 +117,7 @@ def _build_opinion_prompt(
   """The second opinion's input: no sources, the rejected cards alone, the
   accepted cards as context. A different input is what makes it a second
   reading rather than a replay."""
-  return NEWS_DEBATE_JUDGMENT_OPINION_PROMPT.format(
+  return prompts.get("news_debate_semantic_review.judgment_opinion").format(
     headline=headline,
     claims=_claims_json(claims),
     candidates=_candidates_json(candidates),
@@ -304,11 +297,11 @@ def _gemini_json(prompt: str, schema, label: str):
     http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
   )
   config_kwargs: dict = {
-    "temperature": settings.gemini_news_debate_review_temperature,
+    "temperature": llm.get("gemini_news_debate_review_temperature"),
     "response_mime_type": "application/json",
     "response_schema": schema,
   }
-  thinking_level = (settings.gemini_news_debate_review_thinking_level or "").strip()
+  thinking_level = (llm.get("gemini_news_debate_review_thinking_level") or "").strip()
   if thinking_level:
     config_kwargs["thinking_config"] = types.ThinkingConfig(
       thinking_level=thinking_level,
@@ -319,7 +312,7 @@ def _gemini_json(prompt: str, schema, label: str):
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       response = client.models.generate_content(
-        model=settings.gemini_news_debate_review_model,
+        model=llm.get("gemini_news_debate_review_model"),
         contents=prompt,
         config=config,
       )
@@ -385,10 +378,10 @@ def _claude_json(prompt: str, schema, label: str):
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       message = client.messages.create(
-        model=settings.news_claim_claude_model,
+        model=llm.get("news_claim_claude_model"),
         max_tokens=10000,
-        temperature=settings.gemini_news_debate_review_temperature,
-        system=_CLAUDE_SYSTEM_PROMPT,
+        temperature=llm.get("gemini_news_debate_review_temperature"),
+        system=prompts.get("news_debate_semantic_review.claude_system"),
         messages=[{"role": "user", "content": prompt}],
       )
       raw = "".join(

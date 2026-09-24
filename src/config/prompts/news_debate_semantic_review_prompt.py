@@ -4,9 +4,11 @@ second opinion on the two judgment gates.
 The definition, the headline question, and the two judgment gates are shared
 text: the second-opinion prompt re-asks exactly what the review asked, on a
 smaller input, so the two readings differ in what they see, not in the rule.
+The pieces are private: they are composed into the two prompts at import,
+so the prompt registry (and a per-run override) sees the composed prompts.
 """
 
-DEBATE_DEFINITION = """THE DEFINITION the cards must satisfy:
+_DEBATE_DEFINITION = """THE DEFINITION the cards must satisfy:
 
 A debate claim sounds like a headline: clear, direct, and it takes a definite
 position. It states a proposition for which clear, large or significant groups
@@ -14,7 +16,7 @@ are genuinely debating — or would clearly debate — for and against, in socie
 or online.
 """
 
-HEADLINE_QUESTION = """THE HEADLINE'S DISAGREEMENT (`on_headline`)
+_HEADLINE_QUESTION = """THE HEADLINE'S DISAGREEMENT (`on_headline`)
 - Set true when the card's disagreement is the one the headline reports: what
   its main clause says happened, or a subordinate clause ("as…", "amid…",
   "after…"), and what that forces people to judge — its cause, whether it
@@ -28,7 +30,7 @@ HEADLINE_QUESTION = """THE HEADLINE'S DISAGREEMENT (`on_headline`)
   on-headline card is placed above it in the published set.
 """
 
-GATE_ONE = """1. REAL SOCIETAL DEBATE (`real_societal_debate`)
+_GATE_ONE = """1. REAL SOCIETAL DEBATE (`real_societal_debate`)
 - Set true unless you can say who would NOT hold one of the two listed
   positions: clear, large or significant groups take both sides of a real
   debate, in society, in institutions, or online. The story need not quote
@@ -57,7 +59,7 @@ GATE_ONE = """1. REAL SOCIETAL DEBATE (`real_societal_debate`)
 - Set false when disagreement would amount only to denying a reported fact.
 """
 
-GATE_TWO = """2. RAISED BY THIS STORY (`raised_by_story`)
+_GATE_TWO = """2. RAISED BY THIS STORY (`raised_by_story`)
 - Would a reader of this story recognize the debate as raised by it? The
   claim must concern the central event, a central actor's conduct, a direct
   consequence or response, or an established societal divide the central
@@ -70,7 +72,7 @@ GATE_TWO = """2. RAISED BY THIS STORY (`raised_by_story`)
   merely for being broader than the named actor.
 """
 
-STRENGTH_GRADE = """- Grade how strongly the card meets the definition for THIS story, 0.0 to
+_STRENGTH_GRADE = """- Grade how strongly the card meets the definition for THIS story, 0.0 to
   1.0: both sides are real and the split could be near even, both sides can
   accept the wording, and a reader gets it in five seconds. Grade relative to
   this set, the strongest card highest, and spread the grades: a card you
@@ -82,7 +84,7 @@ STRENGTH_GRADE = """- Grade how strongly the card meets the definition for THIS 
 
 NEWS_DEBATE_SEMANTIC_REVIEW_PROMPT = """You are the final reviewer for news debate cards.
 
-""" + DEBATE_DEFINITION + """
+""" + _DEBATE_DEFINITION + """
 You are a REJECT-ONLY reviewer:
 - Do not generate, rewrite, or repair candidate text.
 - Judge every candidate independently, then compare the set for duplicates.
@@ -95,9 +97,9 @@ You are a REJECT-ONLY reviewer:
 For every candidate decide first where it sits against the headline, then
 evaluate it on ALL four gates, then grade its strength.
 
-""" + HEADLINE_QUESTION + """
-""" + GATE_ONE + """
-""" + GATE_TWO + """
+""" + _HEADLINE_QUESTION + """
+""" + _GATE_ONE + """
+""" + _GATE_TWO + """
 3. NO INVENTED FACTS (`no_invented_facts`)
 - The proposition must not assert an event, number, actor, motive, mechanism,
   or consequence that the supplied material does not contain. List any such
@@ -119,7 +121,7 @@ evaluate it on ALL four gates, then grade its strength.
   `distinct_axis=false` and leave `duplicate_of` null for those.
 
 5. STRENGTH (`strength`)
-""" + STRENGTH_GRADE + """
+""" + _STRENGTH_GRADE + """
 OUTPUT RULES
 - Return exactly one verdict for every candidate_index, in input order.
 - Keep every analysis to one short sentence, at most 15 words: the audit
@@ -176,7 +178,7 @@ full sources
 
 NEWS_DEBATE_JUDGMENT_OPINION_PROMPT = """You give a second opinion on news debate cards.
 
-""" + DEBATE_DEFINITION + """
+""" + _DEBATE_DEFINITION + """
 A first review, reading the full sources, passed every card below on its
 fact and duplicate checks and rejected it on one or both judgment gates: a
 real societal debate, raised by this story. Those two gates are where a real
@@ -187,11 +189,11 @@ do not defer to the first verdict, and do not overturn it out of charity.
 For every candidate decide first where it sits against the headline, then
 evaluate the two gates, then grade its strength.
 
-""" + HEADLINE_QUESTION + """
-""" + GATE_ONE + """
-""" + GATE_TWO + """
+""" + _HEADLINE_QUESTION + """
+""" + _GATE_ONE + """
+""" + _GATE_TWO + """
 3. STRENGTH (`strength`)
-""" + STRENGTH_GRADE + """
+""" + _STRENGTH_GRADE + """
 The `accepted cards` are context only: they show what this story's set
 already holds. Do not return verdicts for them.
 
@@ -232,3 +234,10 @@ candidates (candidate_index is their position in this array)
 accepted cards (context only; do not return verdicts for these)
 {accepted}
 """
+
+
+# System primer for the Claude path; the rules live in the review prompt.
+NEWS_DEBATE_SEMANTIC_REVIEW_CLAUDE_SYSTEM_PROMPT = (
+  "You are a strict reject-only semantic reviewer for news debate cards. "
+  "Use only the supplied material. Output only the requested JSON object."
+)
