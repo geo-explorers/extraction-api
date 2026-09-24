@@ -15,6 +15,7 @@ from google.genai import types
 
 from src.api.schemas.news_claim_extract_schema import (
   DEBATE_MAX,
+  DEBATE_MIN,
   ExtractedClaim,
   ExtractedDebateClaim,
   NewsArticleSource,
@@ -47,6 +48,10 @@ _INFERENTIAL_FRAME = re.compile(
   r"\b(?:signals?|proves?|demonstrates?|indicates?|is\s+evidence\s+of)\b",
   re.IGNORECASE,
 )
+# A glyph the model garbled: the replacement character, or a quote mark where
+# a currency sign stood ("’403 million" for "€403 million"). Such a card is
+# unpublishable however good its axis.
+_GARBLED = re.compile(r"�|[‘’'`´]\d")
 
 _CLAUDE_SYSTEM_PROMPT = (
   "You write news debate cards. Follow the user's definition and rules "
@@ -186,6 +191,8 @@ def filter_grounded_debate_candidates(
       reason = "proposition is a question or contains hedging"
     elif _INFERENTIAL_FRAME.search(text):
       reason = "proposition uses evidentiary-summary framing"
+    elif _GARBLED.search(text):
+      reason = "proposition contains a garbled character"
     elif not question_key:
       reason = "missing neutral question"
     elif question_key in seen_questions or text_key in seen_texts:
@@ -215,6 +222,28 @@ def filter_grounded_debate_candidates(
   return accepted[:8]
 
 
+def headline_first_set(
+  candidates: Iterable[GroundedDebateCandidate], off_headline_slots: int
+) -> list[GroundedDebateCandidate]:
+  """Every card on the headline's disagreement, then off-headline cards for
+  at most ``off_headline_slots`` slots, or more only to reach the floor.
+
+  The review passes a neighbouring debate that the story genuinely raises
+  (the war on the approval story); the reader still wants the block to be
+  about the headline. On the 24-story run, one slot moved on-topic cards
+  from 71% to 77% and lost 17 of 92 cards; zero slots reached 83% at the
+  cost of half the four-card blocks. An ungraded set (the review never ran)
+  is returned as it came: nothing there says where a card sits."""
+  candidates = list(candidates)
+  ordered = strongest_first(candidates, len(candidates))
+  if not any(candidate.strength > 0.0 for candidate in ordered):
+    return ordered
+  on_headline = [candidate for candidate in ordered if candidate.on_headline]
+  off_headline = [candidate for candidate in ordered if not candidate.on_headline]
+  slots = max(off_headline_slots, DEBATE_MIN - len(on_headline))
+  return on_headline + off_headline[:slots]
+
+
 def project_debate_candidates(
   candidates: Iterable[GroundedDebateCandidate],
 ) -> list[ExtractedDebateClaim]:
@@ -229,7 +258,9 @@ def project_debate_candidates(
       source_indices=list(candidate.source_indices),
       **({"confidence": candidate.strength} if candidate.strength > 0.0 else {}),
     )
-    for candidate in candidates
+    for candidate in headline_first_set(
+      list(candidates), settings.news_debate_off_headline_slots
+    )
   ]
   return normalize_debate_claims(public)
 
@@ -523,7 +554,8 @@ def complete_underfilled_news_debate_candidates(
   opinion, unlike rescue, which must never replay rejected axes. A single
   survivor gets the focused rescue attempt with the first pass's audit trail.
   Zero survivors from zero candidates stays terminal. Either path spends at
-  most one generation and one review call.
+  most one generation and one review call: the review's own second opinion
+  on the judgment gates belongs to the first review and is off here.
   """
   if len(accepted_candidates) >= 2:
     return accepted_candidates, []
@@ -535,7 +567,7 @@ def complete_underfilled_news_debate_candidates(
     try:
       redraw = generate_news_debate_candidates(headline, sources, claims)
       retried, retry_verdicts = review_news_debate_candidates(
-        headline, sources, claims, redraw
+        headline, sources, claims, redraw, second_opinion=False
       )
       logger.info(
         f"News debate zero-retry: {len(redraw)} redraw candidates → "
@@ -568,6 +600,7 @@ def complete_underfilled_news_debate_candidates(
       claims,
       rescued,
       prior_candidates=attempted_candidates,
+      second_opinion=False,
     )
     completed = strongest_first([*accepted_candidates, *reviewed], DEBATE_MAX)
     logger.info(
@@ -599,7 +632,7 @@ def complete_underfilled_news_debate_candidates_claude(
     try:
       redraw = generate_news_debate_candidates_claude(headline, sources, claims)
       retried, retry_verdicts = review_news_debate_candidates_claude(
-        headline, sources, claims, redraw
+        headline, sources, claims, redraw, second_opinion=False
       )
       logger.info(
         f"Claude debate zero-retry: {len(redraw)} redraw candidates → "
@@ -632,6 +665,7 @@ def complete_underfilled_news_debate_candidates_claude(
       claims,
       rescued,
       prior_candidates=attempted_candidates,
+      second_opinion=False,
     )
     completed = strongest_first([*accepted_candidates, *reviewed], DEBATE_MAX)
     logger.info(

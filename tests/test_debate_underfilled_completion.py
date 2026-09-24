@@ -205,10 +205,13 @@ def test_multiple_valid_axes_complete_collection_without_counterclaim_padding(mo
     )
 
     def accept_review(
-        headline, review_sources, review_claims, candidates, *, prior_candidates
+        headline, review_sources, review_claims, candidates, *, prior_candidates,
+        second_opinion,
     ):
         assert candidates == additions
         assert prior_candidates == survivors
+        # The completion pass stays within its two-call budget.
+        assert second_opinion is False
         return candidates, [_verdict(i) for i in range(len(candidates))]
 
     monkeypatch.setattr(service, "review_news_debate_candidates", accept_review)
@@ -317,10 +320,12 @@ def test_claude_completion_reviews_only_new_axes_against_prior_attempts(monkeypa
     )
 
     def accept_review(
-        headline, review_sources, review_claims, candidates, *, prior_candidates
+        headline, review_sources, review_claims, candidates, *, prior_candidates,
+        second_opinion,
     ):
         assert candidates == additions
         assert prior_candidates == survivors
+        assert second_opinion is False
         return candidates, [_verdict(0)]
 
     monkeypatch.setattr(

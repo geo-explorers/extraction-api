@@ -302,7 +302,9 @@ def test_the_review_grade_becomes_the_public_confidence_and_orders_the_set():
         _candidate(text="never graded", neutral_question="q3"),
     ]
     graded[0].strength = 0.4
+    graded[0].on_headline = True
     graded[1].strength = 0.9
+    graded[1].on_headline = True
     result = project_debate_candidates(graded)
     assert [c.text for c in result] == [
         "graded strongest by the review",
@@ -310,6 +312,36 @@ def test_the_review_grade_becomes_the_public_confidence_and_orders_the_set():
         "ranked first by the writer",
     ]
     assert [c.confidence for c in result] == [0.9, 0.8, 0.4]
+
+
+def _graded(text: str, strength: float, on_headline: bool) -> GroundedDebateCandidate:
+    candidate = _candidate(text=text, neutral_question=text)
+    candidate.strength = strength
+    candidate.on_headline = on_headline
+    return candidate
+
+
+def test_off_headline_cards_fill_one_slot_unless_the_floor_needs_more(monkeypatch):
+    from src.api.services import news_debate_claim_service as service
+
+    monkeypatch.setattr(service.settings, "news_debate_off_headline_slots", 1)
+    on_a, on_b = _graded("on a", 0.9, True), _graded("on b", 0.8, True)
+    off_a, off_b, off_c = _graded("off a", 0.45, False), _graded("off b", 0.4, False), _graded("off c", 0.3, False)
+
+    # Two on the headline: one neighbouring debate rides along, the rest drop.
+    assert [c.text for c in project_debate_candidates([off_a, on_b, off_b, on_a, off_c])] == [
+        "on a", "on b", "off a",
+    ]
+    # One on the headline: the floor of two needs one off-headline card.
+    assert [c.text for c in project_debate_candidates([off_a, off_b, on_a])] == ["on a", "off a"]
+    # None on the headline: the floor needs two, the third drops.
+    assert [c.text for c in project_debate_candidates([off_a, off_b, off_c])] == ["off a", "off b"]
+    # The slot count is the operator's dial: four publishes whatever passed.
+    monkeypatch.setattr(service.settings, "news_debate_off_headline_slots", 4)
+    assert len(project_debate_candidates([on_a, off_a, off_b, off_c])) == 4
+    # An ungraded set (the review never ran) is not a set with cards off the
+    # headline: it passes through untouched.
+    assert len(project_debate_candidates([_candidate(neutral_question=f"q{i}", text=f"t{i}") for i in range(3)])) == 3
 
 
 @pytest.mark.parametrize(
@@ -322,6 +354,10 @@ def test_the_review_grade_becomes_the_public_confidence_and_orders_the_set():
         _candidate(opposing_positions=["Only one side"]),
         _candidate(opposing_positions=["Side one", "  "]),
         _candidate(text="one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone"),
+        # The model garbled a glyph: a quote mark where the euro sign stood
+        # ("Google's ’403 million fine"), or the replacement character.
+        _candidate(text="Canada’s ’403 million dairy subsidy is justified."),
+        _candidate(text="Canada�s dairy subsidy is justified."),
     ],
 )
 def test_malformed_candidates_are_rejected(candidate):
