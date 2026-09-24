@@ -197,6 +197,9 @@ def test_dedicated_prompt_carries_the_product_definition():
     assert "sounds like a headline" in rendered
     assert "large or significant groups" in rendered
     assert "2-5 debate claims" in rendered
+    # Supply is the writer's job: over-generate, the reviewer selects.
+    assert "Return 6-8 candidates" in rendered
+    assert "cannot recover one you\nnever wrote" in rendered
     # Discovery lenses, including the societal-instance lens.
     assert "Policy or response" in rendered
     assert "Societal instance" in rendered
