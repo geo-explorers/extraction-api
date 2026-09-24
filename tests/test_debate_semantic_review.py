@@ -53,6 +53,14 @@ def test_review_prompt_is_reject_only_and_carries_every_gate():
     assert "business tactic" in rendered
     assert "market speculation" in rendered
     assert "allocation or strategy advice" in rendered
+    # Gate one carries the burden of proof for a rejection; the strength grade
+    # follows the four gates.
+    assert "Set true unless you can say who would NOT hold" in rendered
+    assert "5. STRENGTH (`strength`)" in rendered
+    assert '"strength": 0.8' in rendered
+    # Analyses capped at a sentence: review time tracks output length (30.6 s
+    # -> 23.0 s on the same six-candidate sets), not the thinking level.
+    assert "one short sentence, at most 15 words" in rendered
     assert "Do not reject a claim" in rendered
     assert "polices facts, not judgments" in rendered
     assert "Do not supply an overall pass field" in rendered
@@ -60,6 +68,22 @@ def test_review_prompt_is_reject_only_and_carries_every_gate():
     assert "Canada" not in rendered
     assert "Fauci" not in rendered
     assert "satellite" not in rendered.lower()
+
+
+def test_review_grades_the_accepted_cards_and_orders_them_strongest_first():
+    cards = [
+        _candidate("ranked first by the writer"),
+        _candidate("rejected"),
+        _candidate("graded strongest"),
+    ]
+    verdicts = [
+        _verdict(candidate_index=0, strength=0.5),
+        _verdict(candidate_index=1, real_societal_debate=False, strength=0.9),
+        _verdict(candidate_index=2, strength=0.8),
+    ]
+    accepted = apply_semantic_review(cards, verdicts, enforce=True)
+    assert [c.text for c in accepted] == ["graded strongest", "ranked first by the writer"]
+    assert [c.strength for c in accepted] == [0.8, 0.5]
 
 
 def test_completion_review_separates_current_candidates_from_prior_axes():

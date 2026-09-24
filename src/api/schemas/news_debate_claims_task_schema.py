@@ -31,7 +31,7 @@ class NewsDebateClaimsRequest(BaseModel):
   # latency-bound consumer (the news injector, whose editor is waiting on the
   # response) sends False to answer right after the first review — the 3-floor
   # then empties thin collections instead of repairing them. The response
-  # contract is identical either way (0 or 2-5); default True keeps every
+  # contract is identical either way (0 or 2-4); default True keeps every
   # existing caller, including the cron pipeline, unchanged.
   repair: bool = True
 
@@ -39,7 +39,7 @@ class NewsDebateClaimsRequest(BaseModel):
 class NewsDebateClaimsResponse(BaseModel):
   debate_claims: List[ExtractedDebateClaim] = Field(default_factory=list)
 
-  # Same repair as NewsTopicsAndClaimsResponse: the 0-or-2-5 contract must
+  # Same repair as NewsTopicsAndClaimsResponse: the 0-or-2-4 contract must
   # hold on every door this shape leaves through.
   @model_validator(mode="after")
   def _enforce_debate_claim_contract(self) -> "NewsDebateClaimsResponse":

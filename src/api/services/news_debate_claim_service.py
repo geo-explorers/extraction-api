@@ -14,6 +14,7 @@ from google import genai
 from google.genai import types
 
 from src.api.schemas.news_claim_extract_schema import (
+  DEBATE_MAX,
   ExtractedClaim,
   ExtractedDebateClaim,
   NewsArticleSource,
@@ -22,6 +23,7 @@ from src.api.schemas.news_claim_extract_schema import (
 from src.api.schemas.news_debate_claim_schema import (
   GroundedDebateCandidate,
   GroundedDebateResponse,
+  strongest_first,
 )
 from src.api.schemas.news_debate_semantic_review_schema import DebateSemanticVerdict
 from src.config.prompts.news_debate_claim_prompt import NEWS_DEBATE_CLAIM_PROMPT
@@ -134,7 +136,7 @@ def _build_underfilled_rescue_prompt(
     central_claims=_claims_context(claims),
     survivor_count=survivor_count,
     minimum_needed=max(0, 2 - survivor_count),
-    maximum_new=max(0, 5 - survivor_count),
+    maximum_new=max(0, DEBATE_MAX - survivor_count),
     surviving_candidates=json.dumps(
       [candidate.model_dump() for candidate in accepted_candidates],
       ensure_ascii=False,
@@ -167,6 +169,10 @@ def filter_grounded_debate_candidates(
   accepted: list[GroundedDebateCandidate] = []
 
   for position, candidate in enumerate(candidates):
+    # The writer answers with drafts (no strength field); from here on the
+    # card carries the review's grade, so lift it to the full candidate.
+    if not isinstance(candidate, GroundedDebateCandidate):
+      candidate = GroundedDebateCandidate.model_validate(candidate.model_dump())
     reason: str | None = None
     text = " ".join(candidate.text.split())
     question_key = _normalized(candidate.neutral_question)
@@ -204,18 +210,24 @@ def filter_grounded_debate_candidates(
     seen_texts.add(text_key)
 
   # Candidate generation is deliberately higher-recall than publication; the
-  # semantic review chooses survivors and normalize_debate_claims caps at 5.
+  # semantic review chooses survivors and normalize_debate_claims keeps the
+  # strongest DEBATE_MAX.
   return accepted[:8]
 
 
 def project_debate_candidates(
   candidates: Iterable[GroundedDebateCandidate],
 ) -> list[ExtractedDebateClaim]:
-  """Project reviewed internal candidates to the stable public API contract."""
+  """Project reviewed internal candidates to the stable public API contract.
+
+  The review's strength grade becomes the public confidence; a candidate that
+  reached this point ungraded (the review never ran) keeps the schema default
+  rather than reporting zero confidence."""
   public = [
     ExtractedDebateClaim(
       text=candidate.text,
       source_indices=list(candidate.source_indices),
+      **({"confidence": candidate.strength} if candidate.strength > 0.0 else {}),
     )
     for candidate in candidates
   ]
@@ -363,13 +375,13 @@ def generate_news_debate_underfilled_rescue(
   attempted_candidates: list[GroundedDebateCandidate],
   verdicts: list[DebateSemanticVerdict],
 ) -> list[GroundedDebateCandidate]:
-  """Ask Gemini for enough new axes to complete a 2-5 claim collection."""
+  """Ask Gemini for enough new axes to complete a 2-4 claim collection."""
   if not settings.gemini_api_key:
     raise Exception("GEMINI_API_KEY not configured for news debate completion")
   if not sources or not claims:
     return []
 
-  max_new = max(0, 5 - len(accepted_candidates))
+  max_new = max(0, DEBATE_MAX - len(accepted_candidates))
   if max_new == 0:
     return []
   prompt = _build_underfilled_rescue_prompt(
@@ -438,7 +450,7 @@ def generate_news_debate_underfilled_rescue_claude(
   if not sources or not claims:
     return []
 
-  max_new = max(0, 5 - len(accepted_candidates))
+  max_new = max(0, DEBATE_MAX - len(accepted_candidates))
   if max_new == 0:
     return []
   prompt = _build_underfilled_rescue_prompt(
@@ -529,7 +541,7 @@ def complete_underfilled_news_debate_candidates(
         f"News debate zero-retry: {len(redraw)} redraw candidates → "
         f"{len(retried)} accepted"
       )
-      return retried[:5], retry_verdicts
+      return strongest_first(retried, DEBATE_MAX), retry_verdicts
     except Exception as e:
       logger.warning(f"News debate zero-retry skipped after failure: {e}")
       return accepted_candidates, []
@@ -557,7 +569,7 @@ def complete_underfilled_news_debate_candidates(
       rescued,
       prior_candidates=attempted_candidates,
     )
-    completed = [*accepted_candidates, *reviewed][:5]
+    completed = strongest_first([*accepted_candidates, *reviewed], DEBATE_MAX)
     logger.info(
       f"News debate completion added {len(reviewed)} reviewed axes; "
       f"{len(completed)} total"
@@ -593,7 +605,7 @@ def complete_underfilled_news_debate_candidates_claude(
         f"Claude debate zero-retry: {len(redraw)} redraw candidates → "
         f"{len(retried)} accepted"
       )
-      return retried[:5], retry_verdicts
+      return strongest_first(retried, DEBATE_MAX), retry_verdicts
     except Exception as e:
       logger.warning(f"Claude debate zero-retry skipped after failure: {e}")
       return accepted_candidates, []
@@ -621,7 +633,7 @@ def complete_underfilled_news_debate_candidates_claude(
       rescued,
       prior_candidates=attempted_candidates,
     )
-    completed = [*accepted_candidates, *reviewed][:5]
+    completed = strongest_first([*accepted_candidates, *reviewed], DEBATE_MAX)
     logger.info(
       f"Claude debate completion added {len(reviewed)} reviewed axes; "
       f"{len(completed)} total"

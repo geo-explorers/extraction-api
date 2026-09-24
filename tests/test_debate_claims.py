@@ -67,7 +67,7 @@ def test_legacy_checkpoint_without_field_still_validates():
     assert resp.debate_claims == []
 
 
-# ── Cardinality repair (0 or 2-5) ──────────────────────────────────────
+# ── Cardinality repair (0 or 2-4) ──────────────────────────────────────
 
 
 def test_a_singleton_is_omitted_instead_of_published_as_thin_collection():
@@ -81,11 +81,26 @@ def test_two_survive_the_floor():
     assert [c.text for c in resp.debate_claims] == ["one", "two"]
 
 
-def test_six_capped_at_first_five():
+def test_six_capped_at_first_four():
     resp = NewsClaimExtractResponse.model_validate(
         {"debate_claims": _claims("a", "b", "c", "d", "e", "f")}
     )
-    assert [c.text for c in resp.debate_claims] == ["a", "b", "c", "d", "e"]
+    assert [c.text for c in resp.debate_claims] == ["a", "b", "c", "d"]
+
+
+def test_the_strongest_four_survive_the_cap_not_the_first_four():
+    # The review's grade (confidence) decides the published set; the producer's
+    # order only breaks ties.
+    graded = [
+        {"text": "weak first", "confidence": 0.3},
+        {"text": "strong", "confidence": 0.9},
+        {"text": "tie a", "confidence": 0.6},
+        {"text": "tie b", "confidence": 0.6},
+        {"text": "middling", "confidence": 0.7},
+        {"text": "also weak", "confidence": 0.2},
+    ]
+    resp = NewsClaimExtractResponse.model_validate({"debate_claims": graded})
+    assert [c.text for c in resp.debate_claims] == ["strong", "middling", "tie a", "tie b"]
 
 
 def test_duplicates_that_leave_under_two_omit_the_collection():
@@ -95,8 +110,8 @@ def test_duplicates_that_leave_under_two_omit_the_collection():
     assert resp.debate_claims == []
 
 
-def test_two_through_five_pass_untouched():
-    for n in (2, 3, 4, 5):
+def test_two_through_four_pass_untouched():
+    for n in (2, 3, 4):
         texts = [f"distinct position {i}" for i in range(n)]
         resp = NewsClaimExtractResponse.model_validate({"debate_claims": _claims(*texts)})
         assert [c.text for c in resp.debate_claims] == texts
@@ -121,7 +136,7 @@ def test_normalizer_is_deterministic_and_idempotent():
     once = normalize_debate_claims([ExtractedDebateClaim(text=f"p{i}") for i in range(6)])
     twice = normalize_debate_claims(once)
     assert [c.text for c in once] == [c.text for c in twice]
-    assert len(once) == 5
+    assert len(once) == 4
 
 
 # ── Prompt smoke (markers, not prose) ───────────────────────────────────
@@ -196,9 +211,12 @@ def test_dedicated_prompt_carries_the_product_definition():
     # The definition, in the team's own terms.
     assert "sounds like a headline" in rendered
     assert "large or significant groups" in rendered
-    assert "2-5 debate claims" in rendered
-    # Supply is the writer's job: over-generate, the reviewer selects.
+    # Supply is the writer's job: over-generate, the reviewer selects. The
+    # published count stays out of the writer's brief: naming it anchored the
+    # draft count (6.0 -> 5.2 candidates per story when "2-4" was named).
+    assert "picks the published set from your candidates" in rendered
     assert "Return 6-8 candidates" in rendered
+    assert "2-4 debate claims" not in rendered and "2-5 debate claims" not in rendered
     assert "cannot recover one you\nnever wrote" in rendered
     # Discovery lenses, including the societal-instance lens.
     assert "Policy or response" in rendered
@@ -266,6 +284,32 @@ def test_grounded_candidate_is_projected_to_public_contract():
 
 def test_public_projection_omits_a_singleton_grounded_candidate():
     assert project_debate_candidates([_candidate()]) == []
+
+
+def test_the_writer_is_never_asked_for_a_strength_grade():
+    # The writer's response schema is the draft; the review's grade lives on
+    # the candidate the service passes around, never in the writer's output.
+    from src.api.schemas.news_debate_claim_schema import GroundedDebateResponse
+
+    assert "strength" not in str(GroundedDebateResponse.model_json_schema())
+    assert _candidate().strength == 0.0
+
+
+def test_the_review_grade_becomes_the_public_confidence_and_orders_the_set():
+    graded = [
+        _candidate(text="ranked first by the writer", neutral_question="q1"),
+        _candidate(text="graded strongest by the review", neutral_question="q2"),
+        _candidate(text="never graded", neutral_question="q3"),
+    ]
+    graded[0].strength = 0.4
+    graded[1].strength = 0.9
+    result = project_debate_candidates(graded)
+    assert [c.text for c in result] == [
+        "graded strongest by the review",
+        "never graded",
+        "ranked first by the writer",
+    ]
+    assert [c.confidence for c in result] == [0.9, 0.8, 0.4]
 
 
 @pytest.mark.parametrize(

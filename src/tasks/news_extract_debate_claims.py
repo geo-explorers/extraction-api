@@ -13,7 +13,8 @@ The consumer sends {headline, sources, claims} — the claims are the fused
 task's own output passed back verbatim, because candidate generation grounds
 in them and the reject-only semantic review judges against them. Grounding,
 review gates, zero-retry, and the underfilled completion pass are all
-unchanged: same services, same settings, same 0-or-2-5 contract.
+unchanged: same services, same settings, same 0-or-2-4 contract, with the
+review's strength grade ordering the published set.
 
 Rate limits: candidate generation and semantic review each consume one
 gemini_global unit; the conditional completion pass reserves two more for its

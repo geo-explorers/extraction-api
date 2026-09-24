@@ -3,7 +3,7 @@
 NEWS_DEBATE_UNDERFILLED_RESCUE_PROMPT = """You complete an underfilled news Debate collection.
 
 An earlier pass plus independent review left {survivor_count} publishable
-debate claims. A useful collection holds 2-5 independent claims. Find at least
+debate claims. A useful collection holds 2-4 independent claims. Find at least
 {minimum_needed} and at most {maximum_new} NEW claims when the story genuinely
 raises them. Returning fewer is correct when it does not; never pad, mirror,
 or weaken a claim to reach a count.

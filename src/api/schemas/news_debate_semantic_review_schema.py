@@ -41,6 +41,16 @@ class DebateSemanticVerdict(BaseModel):
     description="Earlier candidate index sharing the same neutral debate axis",
   )
 
+  # Graded after the four gates (schema order): how strongly the card meets
+  # the definition for this story. Orders the published set; the public
+  # claim's confidence. Ignored for a rejected card.
+  strength: float = Field(
+    default=0.0,
+    ge=0.0,
+    le=1.0,
+    description="0.0-1.0: on the story's central disagreement, a real near-even split, wording both sides accept, clear in five seconds",
+  )
+
   failure_codes: list[str] = Field(default_factory=list)
 
 

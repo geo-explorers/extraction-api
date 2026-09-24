@@ -50,6 +50,14 @@ class ExtractedCollection(BaseModel):
   claim_indices: List[int] = Field(default_factory=list)
 
 
+# The Debate collection contract: 0 cards, or DEBATE_MIN..DEBATE_MAX of them.
+# Two is a publishable collection (Armando 2026-09-07); four is the editors'
+# number (the master debate prompt returns four) and the point past which
+# the checker's weaker passes were showing up (2026-09-24).
+DEBATE_MIN = 2
+DEBATE_MAX = 4
+
+
 class ExtractedDebateClaim(BaseModel):
   """A composed debatable proposition (Step 8 of the prompt): headline-like,
   taking a definite side of a dispute that significant groups genuinely
@@ -61,22 +69,23 @@ class ExtractedDebateClaim(BaseModel):
     default_factory=list,
     description="Sources showing the contested question this proposition answers"
   )
-  # Not requested from the model — a self-graded score on a composed
-  # proposition means nothing. The default exists so consumers whose claim
-  # shape requires a confidence can map these uniformly.
+  # The semantic review's strength grade (0-1: how strongly the card meets
+  # the definition for this story), not the writer's self-assessment. It
+  # orders the published set and is what consumers store as the claim's
+  # confidence. The default covers a claim that reached this shape ungraded.
   confidence: float = Field(ge=0.0, le=1.0, default=0.8)
 
 
 def normalize_debate_claims(
   items: List[ExtractedDebateClaim],
 ) -> List[ExtractedDebateClaim]:
-  """Deterministic enforcement of the Debate collection contract: 0 or 2-5.
+  """Deterministic enforcement of the Debate collection contract: 0 or 2-4.
 
-  The product requirement is a useful collection of 2-5 independent
-  debates, never a one-card collection (Armando 2026-09-07: two is enough). Duplicates collapse first and
-  producers list strongest first. An underfilled result becomes empty so the
-  consumer omits the Debate collection rather than padding it with weak or
-  mirrored claims.
+  Duplicates collapse first; the survivors are ordered by confidence (the
+  review's grade), highest first, with the producer's own order breaking
+  ties, and the strongest DEBATE_MAX are kept. An underfilled result becomes
+  empty so the consumer omits the Debate collection rather than padding it
+  with weak or mirrored claims.
   """
   seen: set[str] = set()
   unique: List[ExtractedDebateClaim] = []
@@ -85,8 +94,8 @@ def normalize_debate_claims(
     if key and key not in seen:
       seen.add(key)
       unique.append(c)
-  unique = unique[:5]
-  return unique if len(unique) >= 2 else []
+  unique = sorted(unique, key=lambda c: -c.confidence)[:DEBATE_MAX]
+  return unique if len(unique) >= DEBATE_MIN else []
 
 
 class AnchorReport(BaseModel):

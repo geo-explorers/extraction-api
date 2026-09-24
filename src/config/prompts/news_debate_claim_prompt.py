@@ -9,10 +9,10 @@ position. It states a proposition for which clear, large or significant groups
 are genuinely debating — or would clearly debate — for and against, in society
 or online. A reader immediately knows what agreeing and disagreeing mean.
 
-Read the headline, the extracted story facts, and the sources. The published
-set is 2-5 debate claims that this story raises; an independent reviewer
-picks it from your candidates, so supply is your job and selection is not.
-Return 6-8 candidates, strongest first, spread across different questions.
+Read the headline, the extracted story facts, and the sources. An independent
+reviewer picks the published set from your candidates, so supply is your job
+and selection is not. Return 6-8 candidates, strongest first, spread across
+different questions.
 A candidate you are less sure of belongs in the list, ranked lower, rather
 than left out: the reviewer can drop a weak card but cannot recover one you
 never wrote. Return fewer only when the story genuinely raises fewer real

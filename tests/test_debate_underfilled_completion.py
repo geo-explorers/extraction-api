@@ -69,7 +69,8 @@ def test_completion_prompt_carries_count_survivors_and_rejection_audit():
         ],
     )
     assert "left 1 publishable" in prompt
-    assert "1 and at most 4 NEW" in prompt
+    assert "1 and at most 3 NEW" in prompt
+    assert "holds 2-4 independent claims" in prompt
     assert all(survivor.neutral_question in prompt for survivor in survivors)
     assert rejected.neutral_question in prompt
     assert "INVENTED_FACTS" in prompt

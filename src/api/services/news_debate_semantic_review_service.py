@@ -7,7 +7,10 @@ from google import genai
 from google.genai import types
 
 from src.api.schemas.news_claim_extract_schema import ExtractedClaim, NewsArticleSource
-from src.api.schemas.news_debate_claim_schema import GroundedDebateCandidate
+from src.api.schemas.news_debate_claim_schema import (
+  GroundedDebateCandidate,
+  strongest_first,
+)
 from src.api.schemas.news_debate_semantic_review_schema import (
   DebateSemanticReviewResponse,
   DebateSemanticVerdict,
@@ -106,9 +109,14 @@ def apply_semantic_review(
       )
       if enforce:
         continue
+    # The review's grade travels with the card from here: it orders the
+    # published set and becomes the public claim's confidence.
+    candidate.strength = matching[0].strength if len(matching) == 1 else 0.0
     accepted.append(candidate)
 
-  return accepted
+  # Strongest first, the writer's own order breaking ties, so every later
+  # cap (completion, projection) keeps the best-graded cards.
+  return strongest_first(accepted, len(accepted))
 
 
 def _gemini_review(
