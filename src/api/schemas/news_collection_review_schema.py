@@ -15,6 +15,7 @@ prepare-ops, overlapped with entity resolution, covers and the debate wait.
 from typing import Dict, List, Literal
 
 from pydantic import BaseModel, Field
+from src.api.schemas.overrides_schema import OverridesMixin
 
 from src.api.schemas.news_claim_extract_schema import (
   ExtractedClaim,
@@ -24,7 +25,7 @@ from src.api.schemas.news_claim_extract_schema import (
 )
 
 
-class NewsCollectionReviewRequest(BaseModel):
+class NewsCollectionReviewRequest(OverridesMixin):
   headline: str
   # The story's sources, for the source check on every merged sentence the
   # review composes — a merge that joins two facts can imply a relation the

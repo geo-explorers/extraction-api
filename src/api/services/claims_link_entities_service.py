@@ -23,8 +23,10 @@ from src.api.schemas.claims_link_entities_schema import (
     ClaimsLinkEntitiesRequest,
     ClaimsLinkEntitiesResponse,
 )
+from src.config.overrides import llm
 from src.config.prompts.claims_link_entities_prompt import build_user_prompt
 from src.config.settings import settings
+
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -135,9 +137,9 @@ def link_claim_entities(
         api_key=settings.gemini_api_key,
         http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
     )
-    config_kwargs: dict = {"temperature": settings.claims_link_temperature}
+    config_kwargs: dict = {"temperature": llm.get("claims_link_temperature")}
     # Gemini 3+ control; attach only when set so 2.5-era model overrides run clean.
-    thinking_level = (settings.claims_link_thinking_level or "").strip()
+    thinking_level = (llm.get("claims_link_thinking_level") or "").strip()
     if thinking_level:
         config_kwargs["thinking_config"] = types.ThinkingConfig(
             thinking_level=thinking_level,
@@ -148,14 +150,14 @@ def link_claim_entities(
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = client.models.generate_content(
-                model=settings.claims_link_model,
+                model=llm.get("claims_link_model"),
                 contents=prompt,
                 config=config,
             )
             parsed = _parse_llm_response(response.text)
             return ClaimsLinkEntitiesResponse(
                 links=validate_links_response(parsed, request),
-                model_used=settings.claims_link_model,
+                model_used=llm.get("claims_link_model"),
             )
         except Exception as e:
             last_error = e

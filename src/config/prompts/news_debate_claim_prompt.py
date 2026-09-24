@@ -134,3 +134,10 @@ story facts (extracted claims, for reference)
 sources (use each object's index for source_indices)
 {sources}
 """
+
+
+# System primer for the Claude path; the rules live in NEWS_DEBATE_CLAIM_PROMPT.
+NEWS_DEBATE_CLAIM_CLAUDE_SYSTEM_PROMPT = (
+  "You write news debate cards. Follow the user's definition and rules "
+  "exactly. Output ONLY one valid JSON object matching the requested shape."
+)

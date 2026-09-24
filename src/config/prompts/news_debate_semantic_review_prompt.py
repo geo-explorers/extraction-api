@@ -119,3 +119,10 @@ prior axes (context only; do not return verdicts for these)
 full sources
 {sources}
 """
+
+
+# System primer for the Claude path; the rules live in the review prompt.
+NEWS_DEBATE_SEMANTIC_REVIEW_CLAUDE_SYSTEM_PROMPT = (
+  "You are a strict reject-only semantic reviewer for news debate cards. "
+  "Use only the supplied material. Output only the requested JSON object."
+)

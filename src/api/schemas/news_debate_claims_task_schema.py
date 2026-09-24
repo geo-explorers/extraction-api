@@ -9,6 +9,7 @@ judges against them — so this task adds no extraction of its own.
 """
 
 from pydantic import BaseModel, Field, model_validator
+from src.api.schemas.overrides_schema import OverridesMixin
 from typing import List
 
 from src.api.schemas.news_claim_extract_schema import (
@@ -19,7 +20,7 @@ from src.api.schemas.news_claim_extract_schema import (
 )
 
 
-class NewsDebateClaimsRequest(BaseModel):
+class NewsDebateClaimsRequest(OverridesMixin):
   headline: str
   sources: List[NewsArticleSource]
   # The fused task's claims, passed back verbatim: candidate generation grounds

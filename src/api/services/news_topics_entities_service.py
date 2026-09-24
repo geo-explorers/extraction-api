@@ -25,8 +25,8 @@ from src.api.services.news_claim_extract_service import (
   _claude_text,
   _parse_llm_response,
 )
+from src.config.overrides import llm, prompts
 from src.config.prompts.news_topics_entities_prompt import (
-  SYSTEM_BASE,
   build_curated_system_block,
   build_user_prompt,
 )
@@ -154,7 +154,10 @@ def extract_story_topics_and_entities(
     raise Exception("ANTHROPIC_API_KEY not configured for topic/entity extraction")
 
   has_curated = len(curated_topic_names) > 0
-  system_blocks: list = [{"type": "text", "text": SYSTEM_BASE}]
+  system_blocks: list = [
+    {"type": "text", "text": prompts.get("news_topics_entities.system")}
+  ]
+
   if has_curated:
     # Cache the (large, batch-stable) curated list across requests.
     system_blocks.append(
@@ -181,9 +184,9 @@ def extract_story_topics_and_entities(
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       message = client.messages.create(
-        model=settings.news_claim_claude_model,
+        model=llm.get("news_claim_claude_model"),
         max_tokens=_MAX_TOKENS,
-        temperature=settings.gemini_news_claim_temperature,
+        temperature=llm.get("gemini_news_claim_temperature"),
         system=system_blocks,
         messages=[{"role": "user", "content": user_prompt}],
       )

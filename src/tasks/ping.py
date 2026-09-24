@@ -6,6 +6,7 @@ construction stays centralized; carries no business logic.
 """
 
 from pydantic import BaseModel
+from src.api.schemas.overrides_schema import OverridesMixin
 from hatchet_sdk import Context
 
 from src.tasks.base import TaskSpec
@@ -14,7 +15,7 @@ from src.infrastructure.logger import get_logger
 logger = get_logger(__name__)
 
 
-class PingInput(BaseModel):
+class PingInput(OverridesMixin):
     message: str = "ping"
 
 

@@ -20,10 +20,7 @@ from src.api.services.news_claim_extract_service import (
   _claude_text,
   _parse_llm_response,
 )
-from src.config.prompts.news_topics_extract_prompt import (
-  NEWS_TOPICS_EXTRACT_PROMPT,
-  NEWS_TOPICS_REGENERATE_PROMPT,
-)
+from src.config.overrides import llm, prompts
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
 
@@ -56,9 +53,6 @@ _FALLBACK_TOPIC = "Overview"
 MAX_RETRIES = 3
 _REQUEST_TIMEOUT_S = 180.0
 _TOPIC_MAX_TOKENS = 1024
-# Role primer only; all extraction rules live in the user-message prompt.
-_TOPIC_SYSTEM_PROMPT = "You are an expert news analyst. Return only valid JSON."
-
 
 # ── Pure helpers (no LLM; unit-tested) ───────────────────────────────────
 
@@ -181,7 +175,7 @@ def extract_overview_topics(
     return [_FALLBACK_TOPIC]
 
   content = pooled[:_CONTENT_CHAR_LIMIT]
-  prompt = NEWS_TOPICS_EXTRACT_PROMPT.format(headline=headline, content=content)
+  prompt = prompts.get("news_topics_extract").format(headline=headline, content=content)
   topics = _call_claude_topics(prompt)
   topics = topics[:MAX_OVERVIEW_TOPICS] if topics else [_FALLBACK_TOPIC]
 
@@ -213,7 +207,7 @@ def regenerate_overview_topics_with_feedback(
     f"- \"{i['label']}\" — {'; '.join(i['issues'])}" for i in issues
   )
   previous = "\n".join(f"{idx + 1}. {t}" for idx, t in enumerate(previous_topics))
-  prompt = NEWS_TOPICS_REGENERATE_PROMPT.format(
+  prompt = prompts.get("news_topics_extract.regenerate").format(
     headline=headline, content=content, feedback=feedback, previous=previous
   )
   topics = _call_claude_topics(prompt)
@@ -247,10 +241,10 @@ def _call_claude_topics(prompt: str) -> List[str]:
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       message = client.messages.create(
-        model=settings.news_claim_claude_model,
+        model=llm.get("news_claim_claude_model"),
         max_tokens=_TOPIC_MAX_TOKENS,
-        temperature=settings.gemini_news_claim_temperature,
-        system=_TOPIC_SYSTEM_PROMPT,
+        temperature=llm.get("gemini_news_claim_temperature"),
+        system=prompts.get("news_topics_extract.system"),
         messages=[{"role": "user", "content": prompt}],
       )
       parsed = _parse_llm_response(_claude_text(message))

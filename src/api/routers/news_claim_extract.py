@@ -13,6 +13,7 @@ from src.api.services.news_claim_extract_service import (
   extract_news_claims_claude,
 )
 from src.infrastructure.logger import get_logger
+from src.config.overrides import with_payload_overrides
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -79,12 +80,14 @@ def _extract_and_respond(
 
 
 @router.post("/news/claims")
+@with_payload_overrides("http:news_claims:gemini")
 def news_claim_extract(request: NewsClaimExtractRequest) -> JSONResponse:
   """Primary news-claim extraction via Gemini."""
   return _extract_and_respond(extract_news_claims, request, "gemini")
 
 
 @router.post("/news/claims/claude")
+@with_payload_overrides("http:news_claims:claude")
 def news_claim_extract_claude(request: NewsClaimExtractRequest) -> JSONResponse:
   """Fallback news-claim extraction via Claude on the same reviewed contract.
 

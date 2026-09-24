@@ -1,6 +1,6 @@
 import json
 from typing import Any, Dict, List
-from src.config.prompts.host_extraction_prompt import HOST_EXTRACTION_PROMPT
+from src.config.overrides import prompts
 from src.api.utils import llm_model
 from src.infrastructure.logger import get_logger
 
@@ -20,7 +20,7 @@ def extract_podcast_hosts(
 
   try:
     chain = llm_model.build_chain(
-      prompt=HOST_EXTRACTION_PROMPT
+      prompt=prompts.get("host_extraction")
     )
   except Exception as e:
     logger.error(f"Error building chain: {e}")

@@ -153,3 +153,7 @@ Previous attempt (rewrite each one):
 
 Return a JSON array of new topic strings:
 ["First topic", "Second topic", ...]"""
+
+
+# Role primer only; all extraction rules live in the user-message prompts above.
+NEWS_TOPICS_SYSTEM_PROMPT = "You are an expert news analyst. Return only valid JSON."

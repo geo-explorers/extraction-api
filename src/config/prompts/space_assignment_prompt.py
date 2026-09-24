@@ -9,8 +9,9 @@ embedded entity payload are safe.
 import json
 
 from src.api.schemas.geo_spaces_schema import Entity, Space
+from src.config.overrides import prompts
 
-_SYSTEM = (
+SPACE_ASSIGNMENT_SYSTEM_PROMPT = (
     "You are a knowledge-graph curator. Assign each ENTITY to the SPACES it belongs to.\n"
     "\n"
     "A space is a topical collection. Assign a space to an entity only when the "
@@ -33,6 +34,13 @@ _SYSTEM = (
     "weak match.\n"
     "- Use ONLY the exact space ids listed. Never invent, modify, or guess an id.\n"
     "- Return every entity exactly once, echoing its id verbatim as item_id.\n"
+)
+
+SPACE_ASSIGNMENT_OUTPUT_PROMPT = (
+    "For every entity return an object with `item_id` (the entity id, verbatim), "
+    "`reasoning` (one brief sentence justifying the choice), and `category_ids` "
+    "(the list of space ids it belongs to; empty list if none apply). Use only "
+    "ids from ### SPACES. Include every entity exactly once."
 )
 
 
@@ -67,14 +75,11 @@ def build_space_assignment_prompt(spaces: list[Space], entities: list[Entity]) -
         [_entity_block(e) for e in entities], ensure_ascii=False, indent=2
     )
     return (
-        _SYSTEM
+        prompts.get("space_assignment.system")
         + "\n### SPACES (assign only these exact ids)\n"
         + space_lines
         + "\n\n### ENTITIES (JSON)\n"
         + entities_json
         + "\n\n### OUTPUT\n"
-        + "For every entity return an object with `item_id` (the entity id, verbatim), "
-        + "`reasoning` (one brief sentence justifying the choice), and `category_ids` "
-        + "(the list of space ids it belongs to; empty list if none apply). Use only "
-        + "ids from ### SPACES. Include every entity exactly once."
+        + prompts.get("space_assignment.output")
     )

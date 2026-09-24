@@ -8,10 +8,11 @@ reshaping its contract.
 """
 
 from pydantic import BaseModel, Field
+from src.api.schemas.overrides_schema import OverridesMixin
 from typing import List
 
 
-class PodcastExportRequest(BaseModel):
+class PodcastExportRequest(OverridesMixin):
     podcast_name: List[str] = Field(
         ..., description="Podcast names to export (the export selects their recent episodes)"
     )

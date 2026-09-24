@@ -1,7 +1,7 @@
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
-from src.config.prompts.media_keyword_extraction_prompt import MEDIA_KEYWORD_EXTRACTION_PROMPT
+from src.config.overrides import prompts
 from src.api.utils import llm_model
 from src.infrastructure.logger import get_logger
 
@@ -21,7 +21,7 @@ def extract_media_keywords_and_topics(
 ) -> Tuple[List[str], List[str], Dict[str, List[str]]]:
   try:
     chain = llm_model.build_chain(
-      prompt=MEDIA_KEYWORD_EXTRACTION_PROMPT
+      prompt=prompts.get("media_keyword_extraction")
     )
   except Exception as e:
     raise Exception("Error building chain")

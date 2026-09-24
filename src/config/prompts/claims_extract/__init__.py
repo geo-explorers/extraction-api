@@ -9,6 +9,7 @@ from src.config.prompts.claims_extract.media_layers import MEDIA_LAYERS, MEDIA_N
 from src.config.prompts.claims_extract.topics import GENERIC_TOPICS_PROMPT
 from src.config.prompts.claims_extract.takeaways import GENERIC_TAKEAWAYS_PROMPT
 from src.config.prompts.claims_extract.sections import (
+    ROLE_SECTION,
     GROUPING_SECTION,
     FLAT_SECTION,
     QUOTES_SECTION,
@@ -32,6 +33,8 @@ from src.config.prompts.claims_extract.sections import (
 
 __all__ = [
     "CORE_CLAIM_RULES",
+    "ROLE_SECTION",
+
     "MEDIA_LAYERS",
     "MEDIA_NOUNS",
     "GENERIC_TOPICS_PROMPT",

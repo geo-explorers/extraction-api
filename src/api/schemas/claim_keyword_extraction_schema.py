@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from src.api.schemas.overrides_schema import OverridesMixin
 from typing import List
 
 
@@ -7,7 +8,7 @@ class ClaimInput(BaseModel):
     text: str
 
 
-class ClaimKeywordExtractionRequest(BaseModel):
+class ClaimKeywordExtractionRequest(OverridesMixin):
     claims: List[ClaimInput]
     title: str
     description: str

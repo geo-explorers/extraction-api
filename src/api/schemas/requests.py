@@ -1,9 +1,10 @@
 """Request schemas for API endpoints."""
 
 from pydantic import BaseModel, Field, field_validator
+from src.api.schemas.overrides_schema import OverridesMixin
 
 
-class BatchExtractionRequest(BaseModel):
+class BatchExtractionRequest(OverridesMixin):
     """Request body for batch episode extraction."""
 
     podcast_ids: list[int] = Field(
