@@ -13,10 +13,12 @@ The consumer sends {headline, sources, claims} — the claims are the fused
 task's own output passed back verbatim, because candidate generation grounds
 in them and the reject-only semantic review judges against them. Grounding,
 review gates, zero-retry, and the underfilled completion pass are all
-unchanged: same services, same settings, same 0-or-2-5 contract.
+unchanged: same services, same settings, same 0-or-2-4 contract, with the
+review's strength grade ordering the published set.
 
-Rate limits: candidate generation and semantic review each consume one
-gemini_global unit; the conditional completion pass reserves two more for its
+Rate limits: candidate generation consumes one gemini_global unit; the review
+reserves two (the review call and its conditional second opinion on the
+judgment gates); the conditional completion pass reserves two more for its
 candidate and review calls; zero-survivor and full results are terminal and
 finalize consumes none.
 """
@@ -52,6 +54,7 @@ logger = get_logger(__name__)
 # default is ample.
 NEWS_DEBATE_CLAIMS_MAX_PAYLOAD_BYTES = DEFAULT_MAX_PAYLOAD_BYTES
 _GEMINI = [RateLimit(static_key="gemini_global", units=1)]
+_GEMINI_REVIEW = [RateLimit(static_key="gemini_global", units=2)]
 _GEMINI_RESCUE = [RateLimit(static_key="gemini_global", units=2)]
 _STEP_TIMEOUT = timedelta(minutes=8)
 _FINALIZE_TIMEOUT = timedelta(minutes=2)
@@ -82,7 +85,7 @@ async def extract_debate_candidates(
 
 @news_debate_claims_workflow.task(
     parents=[extract_debate_candidates],
-    rate_limits=_GEMINI,
+    rate_limits=_GEMINI_REVIEW,
     execution_timeout=_STEP_TIMEOUT,
     retries=3,
     backoff_factor=2.0,
@@ -96,7 +99,10 @@ async def review_debates(
         for candidate in ctx.task_output(extract_debate_candidates)["candidates"]
     ]
     if candidates:
-        spend_guard.check_and_record("gemini")
+        # Reserve the maximum cost: the review call and, only when it leaves
+        # the set underfilled or off the headline, its second opinion.
+        for _ in range(2):
+            spend_guard.check_and_record("gemini")
         accepted, verdicts = await asyncio.to_thread(
             review_news_debate_candidates,
             input.headline,

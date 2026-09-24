@@ -209,6 +209,15 @@ class Settings(BaseSettings):
         default=True,
         description="Run one additional grounded candidate + semantic-review pass when one or two debates survive."
     )
+    news_debate_second_opinion_enabled: bool = Field(
+        default=True,
+        description="When the first debate review leaves fewer than two cards, or none on the headline's disagreement, re-judge the cards it rejected on the two judgment gates alone in one smaller call (headline + story facts, no sources). Either reading passing a judgment gate passes it."
+    )
+    news_debate_off_headline_slots: int = Field(
+        default=1,
+        ge=0,
+        description="How many published debate cards may sit off the headline's disagreement (the review's on_headline=false), beyond what the floor of two needs. Every on-headline card publishes first. 1 = a four-card block carries at most one neighbouring debate; 4 = publish whatever the review passed."
+    )
 
     # News Claim Extraction — Claude fallback (POST /extract/news/claims/claude)
     # Runs the same factual + grounded-debate contracts as Gemini, just on

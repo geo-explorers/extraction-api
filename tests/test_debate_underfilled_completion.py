@@ -69,14 +69,18 @@ def test_completion_prompt_carries_count_survivors_and_rejection_audit():
         ],
     )
     assert "left 1 publishable" in prompt
-    assert "1 and at most 4 NEW" in prompt
+    assert "1 and at most 3 NEW" in prompt
+    assert "holds 2-4 independent claims" in prompt
     assert all(survivor.neutral_question in prompt for survivor in survivors)
     assert rejected.neutral_question in prompt
     assert "INVENTED_FACTS" in prompt
     assert "proposition and its counterclaim" in prompt
     assert "sounds like a headline" in prompt
     assert "societal instance" in prompt
-    assert "prefer a form the" in prompt
+    assert "this belongs under this story because" in prompt
+    assert "At most one claim in the finished collection may prescribe" in prompt
+    assert "Draft each new axis in both directions" in prompt
+    assert "Do not smuggle a verdict into the wording" in prompt
     assert "market-performance forecast" in prompt
     assert "allocation or strategy advice" in prompt
 
@@ -201,10 +205,13 @@ def test_multiple_valid_axes_complete_collection_without_counterclaim_padding(mo
     )
 
     def accept_review(
-        headline, review_sources, review_claims, candidates, *, prior_candidates
+        headline, review_sources, review_claims, candidates, *, prior_candidates,
+        second_opinion,
     ):
         assert candidates == additions
         assert prior_candidates == survivors
+        # The completion pass stays within its two-call budget.
+        assert second_opinion is False
         return candidates, [_verdict(i) for i in range(len(candidates))]
 
     monkeypatch.setattr(service, "review_news_debate_candidates", accept_review)
@@ -313,10 +320,12 @@ def test_claude_completion_reviews_only_new_axes_against_prior_attempts(monkeypa
     )
 
     def accept_review(
-        headline, review_sources, review_claims, candidates, *, prior_candidates
+        headline, review_sources, review_claims, candidates, *, prior_candidates,
+        second_opinion,
     ):
         assert candidates == additions
         assert prior_candidates == survivors
+        assert second_opinion is False
         return candidates, [_verdict(0)]
 
     monkeypatch.setattr(

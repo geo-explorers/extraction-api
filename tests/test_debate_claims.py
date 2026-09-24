@@ -67,7 +67,7 @@ def test_legacy_checkpoint_without_field_still_validates():
     assert resp.debate_claims == []
 
 
-# ── Cardinality repair (0 or 2-5) ──────────────────────────────────────
+# ── Cardinality repair (0 or 2-4) ──────────────────────────────────────
 
 
 def test_a_singleton_is_omitted_instead_of_published_as_thin_collection():
@@ -81,11 +81,26 @@ def test_two_survive_the_floor():
     assert [c.text for c in resp.debate_claims] == ["one", "two"]
 
 
-def test_six_capped_at_first_five():
+def test_six_capped_at_first_four():
     resp = NewsClaimExtractResponse.model_validate(
         {"debate_claims": _claims("a", "b", "c", "d", "e", "f")}
     )
-    assert [c.text for c in resp.debate_claims] == ["a", "b", "c", "d", "e"]
+    assert [c.text for c in resp.debate_claims] == ["a", "b", "c", "d"]
+
+
+def test_the_strongest_four_survive_the_cap_not_the_first_four():
+    # The review's grade (confidence) decides the published set; the producer's
+    # order only breaks ties.
+    graded = [
+        {"text": "weak first", "confidence": 0.3},
+        {"text": "strong", "confidence": 0.9},
+        {"text": "tie a", "confidence": 0.6},
+        {"text": "tie b", "confidence": 0.6},
+        {"text": "middling", "confidence": 0.7},
+        {"text": "also weak", "confidence": 0.2},
+    ]
+    resp = NewsClaimExtractResponse.model_validate({"debate_claims": graded})
+    assert [c.text for c in resp.debate_claims] == ["strong", "middling", "tie a", "tie b"]
 
 
 def test_duplicates_that_leave_under_two_omit_the_collection():
@@ -95,8 +110,8 @@ def test_duplicates_that_leave_under_two_omit_the_collection():
     assert resp.debate_claims == []
 
 
-def test_two_through_five_pass_untouched():
-    for n in (2, 3, 4, 5):
+def test_two_through_four_pass_untouched():
+    for n in (2, 3, 4):
         texts = [f"distinct position {i}" for i in range(n)]
         resp = NewsClaimExtractResponse.model_validate({"debate_claims": _claims(*texts)})
         assert [c.text for c in resp.debate_claims] == texts
@@ -121,7 +136,7 @@ def test_normalizer_is_deterministic_and_idempotent():
     once = normalize_debate_claims([ExtractedDebateClaim(text=f"p{i}") for i in range(6)])
     twice = normalize_debate_claims(once)
     assert [c.text for c in once] == [c.text for c in twice]
-    assert len(once) == 5
+    assert len(once) == 4
 
 
 # ── Prompt smoke (markers, not prose) ───────────────────────────────────
@@ -196,7 +211,13 @@ def test_dedicated_prompt_carries_the_product_definition():
     # The definition, in the team's own terms.
     assert "sounds like a headline" in rendered
     assert "large or significant groups" in rendered
-    assert "2-5 debate claims" in rendered
+    # Supply is the writer's job: over-generate, the reviewer selects. The
+    # published count stays out of the writer's brief: naming it anchored the
+    # draft count (6.0 -> 5.2 candidates per story when "2-4" was named).
+    assert "picks the published set from your candidates" in rendered
+    assert "Return 6-8 candidates" in rendered
+    assert "2-4 debate claims" not in rendered and "2-5 debate claims" not in rendered
+    assert "cannot recover one you\nnever wrote" in rendered
     # Discovery lenses, including the societal-instance lens.
     assert "Policy or response" in rendered
     assert "Societal instance" in rendered
@@ -208,15 +229,28 @@ def test_dedicated_prompt_carries_the_product_definition():
     assert "Every returned claim becomes its OWN debate" in rendered
     assert "BAD pair" in rendered and "GOOD pair" in rendered
     assert "neutral question" in rendered
-    # Card style, including the soft form-variety preference.
-    assert "prefer form variety" in rendered
-    assert "manufacture variety" in rendered
+    # The editors' brief: this story's disagreement, both directions, one
+    # prescriptive card, and the wording rules.
+    assert "The central disagreement in this story" in rendered
+    assert "The headline names the disagreement" in rendered
+    assert "a card about the war alone belongs to\nanother story" in rendered
+    assert "BOTH DIRECTIONS, THEN ONE" in rendered
+    assert "both sides must be able to accept the" in rendered
+    assert "At most one card in the set may prescribe" in rendered
+    assert "Never convert a card into another shape" in rendered
+    assert "A motive the sources do not state" in rendered
+    assert "A verdict smuggled into the wording" in rendered
+    assert "A pure prediction" in rendered
+    assert "A card almost everyone would accept" in rendered
+    assert "Cause or forecast" not in rendered
+    # Card style.
     assert "Aim for 6-10 words" in rendered
     assert "20 words is the hard maximum" in rendered
     assert "Orion should disclose its automated hiring criteria" in rendered
     assert "Aster's battery design poses unacceptable safety risks" in rendered
     assert "Riverton's housing shortage is driven by zoning restrictions" in rendered
-    assert "Mosaic fusion power will be commercially viable by 2040" in rendered
+    assert "Mosaic's fusion reactor is reliable enough for grid connection" in rendered
+    assert "commercially viable by 2040" not in rendered
     # Holdout topics must not be echoed from style examples into eval runs.
     assert "Bitcoin" not in rendered
     assert "Open-source AI" not in rendered
@@ -252,6 +286,64 @@ def test_public_projection_omits_a_singleton_grounded_candidate():
     assert project_debate_candidates([_candidate()]) == []
 
 
+def test_the_writer_is_never_asked_for_a_strength_grade():
+    # The writer's response schema is the draft; the review's grade lives on
+    # the candidate the service passes around, never in the writer's output.
+    from src.api.schemas.news_debate_claim_schema import GroundedDebateResponse
+
+    assert "strength" not in str(GroundedDebateResponse.model_json_schema())
+    assert _candidate().strength == 0.0
+
+
+def test_the_review_grade_becomes_the_public_confidence_and_orders_the_set():
+    graded = [
+        _candidate(text="ranked first by the writer", neutral_question="q1"),
+        _candidate(text="graded strongest by the review", neutral_question="q2"),
+        _candidate(text="never graded", neutral_question="q3"),
+    ]
+    graded[0].strength = 0.4
+    graded[0].on_headline = True
+    graded[1].strength = 0.9
+    graded[1].on_headline = True
+    result = project_debate_candidates(graded)
+    assert [c.text for c in result] == [
+        "graded strongest by the review",
+        "never graded",
+        "ranked first by the writer",
+    ]
+    assert [c.confidence for c in result] == [0.9, 0.8, 0.4]
+
+
+def _graded(text: str, strength: float, on_headline: bool) -> GroundedDebateCandidate:
+    candidate = _candidate(text=text, neutral_question=text)
+    candidate.strength = strength
+    candidate.on_headline = on_headline
+    return candidate
+
+
+def test_off_headline_cards_fill_one_slot_unless_the_floor_needs_more(monkeypatch):
+    from src.api.services import news_debate_claim_service as service
+
+    monkeypatch.setattr(service.settings, "news_debate_off_headline_slots", 1)
+    on_a, on_b = _graded("on a", 0.9, True), _graded("on b", 0.8, True)
+    off_a, off_b, off_c = _graded("off a", 0.45, False), _graded("off b", 0.4, False), _graded("off c", 0.3, False)
+
+    # Two on the headline: one neighbouring debate rides along, the rest drop.
+    assert [c.text for c in project_debate_candidates([off_a, on_b, off_b, on_a, off_c])] == [
+        "on a", "on b", "off a",
+    ]
+    # One on the headline: the floor of two needs one off-headline card.
+    assert [c.text for c in project_debate_candidates([off_a, off_b, on_a])] == ["on a", "off a"]
+    # None on the headline: the floor needs two, the third drops.
+    assert [c.text for c in project_debate_candidates([off_a, off_b, off_c])] == ["off a", "off b"]
+    # The slot count is the operator's dial: four publishes whatever passed.
+    monkeypatch.setattr(service.settings, "news_debate_off_headline_slots", 4)
+    assert len(project_debate_candidates([on_a, off_a, off_b, off_c])) == 4
+    # An ungraded set (the review never ran) is not a set with cards off the
+    # headline: it passes through untouched.
+    assert len(project_debate_candidates([_candidate(neutral_question=f"q{i}", text=f"t{i}") for i in range(3)])) == 3
+
+
 @pytest.mark.parametrize(
     "candidate",
     [
@@ -262,6 +354,10 @@ def test_public_projection_omits_a_singleton_grounded_candidate():
         _candidate(opposing_positions=["Only one side"]),
         _candidate(opposing_positions=["Side one", "  "]),
         _candidate(text="one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone"),
+        # The model garbled a glyph: a quote mark where the euro sign stood
+        # ("Google's ’403 million fine"), or the replacement character.
+        _candidate(text="Canada’s ’403 million dairy subsidy is justified."),
+        _candidate(text="Canada�s dairy subsidy is justified."),
     ],
 )
 def test_malformed_candidates_are_rejected(candidate):

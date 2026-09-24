@@ -5,15 +5,40 @@ societal debate, raised by this story, on its own axis, asserting no facts
 the story does not contain. Application code computes acceptance from the
 booleans; the analysis strings are short audit explanations retained in the
 Hatchet checkpoint for observability and for the rescue pass's audit trail.
+
+The first two gates are judgment calls and the place a real debate is most
+often lost, so they have a second-opinion shape of their own
+(``DebateJudgmentOpinion``): the same fields, re-judged on a fresh, smaller
+input for cards the first review rejected on those gates alone. The fact and
+duplicate gates are objective and never re-judged.
 """
 
 from pydantic import BaseModel, Field
 
 
-class DebateSemanticVerdict(BaseModel):
+def _strength_field():
+  return Field(
+    default=0.0,
+    ge=0.0,
+    le=1.0,
+    description="0.0-1.0: a real near-even split, wording both sides accept, clear in five seconds",
+  )
+
+
+class DebateJudgmentVerdict(BaseModel):
+  """The judgment half of a verdict: where the card sits and the two gates
+  that ask a reviewer to weigh, not to look up."""
+
   # Analysis precedes each decision because Gemini structured output follows
-  # schema order.
+  # schema order. The headline question comes first so the reviewer settles
+  # what this story's disagreement is before judging any card against it.
   candidate_index: int = Field(description="0-based index into the candidate list")
+
+  headline_analysis: str = Field(default="")
+  on_headline: bool = Field(
+    default=False,
+    description="The card's disagreement is the one the headline reports (its main or subordinate clause), not a broader conflict, policy, or actor the headline names only as context",
+  )
 
   debate_analysis: str = Field(default="")
   real_societal_debate: bool = Field(
@@ -27,6 +52,14 @@ class DebateSemanticVerdict(BaseModel):
     description="A reader of this story would recognize the debate as raised by it",
   )
 
+
+class DebateJudgmentOpinion(DebateJudgmentVerdict):
+  """A second opinion on the judgment gates, graded, for one candidate."""
+
+  strength: float = _strength_field()
+
+
+class DebateSemanticVerdict(DebateJudgmentVerdict):
   invented_facts_analysis: str = Field(default="")
   invented_facts: list[str] = Field(
     default_factory=list,
@@ -41,8 +74,18 @@ class DebateSemanticVerdict(BaseModel):
     description="Earlier candidate index sharing the same neutral debate axis",
   )
 
+  # Graded after the four gates (schema order): how strongly the card meets
+  # the definition for this story. Folded with ``on_headline`` into the
+  # candidate's grade, which orders the published set and becomes the public
+  # claim's confidence. Ignored for a rejected card.
+  strength: float = _strength_field()
+
   failure_codes: list[str] = Field(default_factory=list)
 
 
 class DebateSemanticReviewResponse(BaseModel):
   verdicts: list[DebateSemanticVerdict] = Field(default_factory=list)
+
+
+class DebateJudgmentOpinionResponse(BaseModel):
+  verdicts: list[DebateJudgmentOpinion] = Field(default_factory=list)

@@ -108,6 +108,7 @@ _register("news_debate_claim", _debate.NEWS_DEBATE_CLAIM_PROMPT, formatted=True,
 _register("news_debate_claim.claude_system", _debate.NEWS_DEBATE_CLAIM_CLAUDE_SYSTEM_PROMPT, formatted=False, module=_debate)
 _register("news_debate_completion", _debate_completion.NEWS_DEBATE_UNDERFILLED_RESCUE_PROMPT, formatted=True, module=_debate_completion)
 _register("news_debate_semantic_review", _debate_review.NEWS_DEBATE_SEMANTIC_REVIEW_PROMPT, formatted=True, module=_debate_review)
+_register("news_debate_semantic_review.judgment_opinion", _debate_review.NEWS_DEBATE_JUDGMENT_OPINION_PROMPT, formatted=True, module=_debate_review)
 _register("news_debate_semantic_review.claude_system", _debate_review.NEWS_DEBATE_SEMANTIC_REVIEW_CLAUDE_SYSTEM_PROMPT, formatted=False, module=_debate_review)
 _register("news_topics_extract", _topics_extract.NEWS_TOPICS_EXTRACT_PROMPT, formatted=True, module=_topics_extract)
 _register("news_topics_extract.regenerate", _topics_extract.NEWS_TOPICS_REGENERATE_PROMPT, formatted=True, module=_topics_extract)

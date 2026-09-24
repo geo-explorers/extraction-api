@@ -30,7 +30,7 @@ def _extract_and_respond(
   """Shared request/response handling for both provider endpoints.
 
   Each extractor runs factual extraction, evidence-first debate candidates,
-  reject-only semantic review, and conditional 2-5 collection completion,
+  reject-only semantic review, and conditional 2-4 collection completion,
   then returns the same public schema.
   """
   logger.info(
