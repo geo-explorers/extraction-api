@@ -52,9 +52,10 @@ overridden per section (`claims_extract.core`, `claims_extract.media.debate`,
 the prompt itself.
 
 Each run logs one line per task (or per DAG step) naming the overrides that applied, any that
-went unused, and every prompt key and setting the step read. When overrides were given the
-same line lands in the run's log in the Hatchet dashboard. A model override is also reported
-in `model_used` where the result carries it.
+went unused, and every prompt key and setting the step read; the worker forwards its logging
+into the run's log, so the line is visible in the Hatchet dashboard. A model override is also
+reported in `model_used` where the result carries it.
+
 
 Under the hood: `src/config/overrides.py` holds a contextvars scope activated by the task
 runner (`src/tasks/base.py`, `with_overrides`) and by the HTTP handlers; prompt consumers call

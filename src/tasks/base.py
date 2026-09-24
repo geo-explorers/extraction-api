@@ -58,9 +58,10 @@ def with_overrides(fn=None, *, label: Optional[str] = None):
     The input's `prompt_overrides` / `llm_overrides` (OverridesMixin) are
     activated for the duration of the step, so every prompts.get / llm.get
     down the call stack sees them. On exit the scope summary — which overrides
-    applied, which went unused, which prompts and settings were read — goes to
-    the worker log and, when overrides were given, to the run's own log in the
-    Hatchet dashboard.
+    applied, which went unused, which prompts and settings were read — is
+    logged; the Hatchet worker forwards logging into the run's own log, so the
+    line is visible in the dashboard too (verified against hatchet-lite: an
+    explicit ctx.log would only duplicate it).
 
     build_task applies this to every standalone handler; DAG steps declare it
     themselves, under the `@workflow.task(...)` decorator, because each step is
@@ -77,26 +78,12 @@ def with_overrides(fn=None, *, label: Optional[str] = None):
                 try:
                     return await handler(input, ctx)
                 finally:
-                    line = scope.summary(name)
-                    logger.info(line)
-                    if scope.given:
-                        _ctx_log(ctx, line)
+                    logger.info(scope.summary(name))
 
         return wrapper
 
     return decorate(fn) if fn is not None else decorate
 
-
-def _ctx_log(ctx: Context, line: str) -> None:
-    """Best-effort line into the run's dashboard log (a test Context stub may
-    not have .log, and a failed log must never fail the step)."""
-    log = getattr(ctx, "log", None)
-    if not callable(log):
-        return
-    try:
-        log(line)
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def build_task(spec: TaskSpec):

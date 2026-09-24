@@ -223,16 +223,13 @@ def test_scope_propagates_through_to_thread_and_bind_context():
     assert bound == ["in-thread"] * 3
 
 
-def test_with_overrides_activates_from_the_input_and_logs_to_ctx():
+def test_with_overrides_activates_from_the_input_and_logs_summary(caplog):
+    import logging
+
     from src.tasks.base import with_overrides
     from src.tasks.ping import PingInput
 
     seen = {}
-    lines = []
-
-    class Ctx:
-        def log(self, line):
-            lines.append(line)
 
     @with_overrides(label="probe")
     async def step(input, ctx):
@@ -244,16 +241,22 @@ def test_with_overrides_activates_from_the_input_and_logs_to_ctx():
         prompt_overrides={"claims_extract.core": "CORE!"},
         llm_overrides={"claims_extract_model": "probe-model", "claims_link_model": "unused"},
     )
-    assert asyncio.run(step(inp, Ctx())) == "done"
+    with caplog.at_level(logging.INFO, logger="src.tasks.base"):
+        assert asyncio.run(step(inp, ctx=None)) == "done"
     assert seen == {"model": "probe-model", "prompt": "CORE!"}
-    assert len(lines) == 1 and lines[0].startswith("overrides[probe]")
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("overrides[probe]")]
+    assert len(lines) == 1
+    assert "applied=['claims_extract.core', 'llm:claims_extract_model']" in lines[0]
     assert "unused=['llm:claims_link_model']" in lines[0]
     assert current_scope() is None
 
-    # No overrides given: nothing pushed to the run log, defaults resolve.
-    lines.clear()
-    asyncio.run(step(PingInput(), Ctx()))
-    assert seen["model"] == settings.claims_extract_model and lines == []
+    # No overrides given: defaults resolve and the line says so.
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="src.tasks.base"):
+        asyncio.run(step(PingInput(), ctx=None))
+    assert seen["model"] == settings.claims_extract_model
+    assert any("overrides[probe] none given" in r.getMessage() for r in caplog.records)
+
 
 
 # ── Builders honor the registry ──────────────────────────────────────────────
