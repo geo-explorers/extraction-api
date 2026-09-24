@@ -19,6 +19,49 @@ All endpoints require an `X-API-Key` header. Interactive docs at `/docs`.
 | `POST /extract/media/keywords` | Media-type-agnostic keyword/topic extraction (articles, papers, …) | news-worker (in progress) |
 | `POST /extract/claim-keywords` | Per-claim keyword/topic extraction | (reserved) |
 
+## Prompt and LLM overrides (hand-testing without a deploy)
+
+Every prompt is cataloged by key in `src/config/prompt_registry.py`, and every task input
+and sync request body accepts two optional maps:
+
+| Field | Value | Effect |
+|-------|-------|--------|
+| `prompt_overrides` | `{ "<prompt key>": "<replacement text>" }` | That prompt text, for this run only |
+| `llm_overrides` | `{ "<setting name>": <value> }` | That model / temperature / thinking level / max tokens, for this run only |
+
+`GET /prompts` lists every key with its format slots, plus every overridable LLM setting with
+its current value. `GET /prompts/{key}?format=text` returns one prompt's default text for
+copy-paste. The loop is: fetch, edit, paste into the Hatchet dashboard's trigger payload
+(or `POST /tasks`, or a sync endpoint body):
+
+```json
+{
+  "media_type": "debate",
+  "documents": [{"content": "..."}],
+  "prompt_overrides": {"claims_extract.factuality": "...edited section..."},
+  "llm_overrides": {"claims_extract_model": "gemini-3.5-pro", "claims_extract_thinking_level": "low"}
+}
+```
+
+Rules, enforced at enqueue (422 at the facade; input-validation failure on the worker for a
+dashboard trigger): the key must exist; a formatted prompt's override may use only the slots
+its default uses (`{headline}` etc., literal braces as `{{ }}`); an LLM setting name must be
+one `GET /prompts` lists, with a value of the right type and range. `claims.extract` is
+overridden per section (`claims_extract.core`, `claims_extract.media.debate`,
+`claims_extract.factuality`, ...) because the builder renders documents and vocabulary into
+the prompt itself.
+
+Each run logs one line per task (or per DAG step) naming the overrides that applied, any that
+went unused, and every prompt key and setting the step read. When overrides were given the
+same line lands in the run's log in the Hatchet dashboard. A model override is also reported
+in `model_used` where the result carries it.
+
+Under the hood: `src/config/overrides.py` holds a contextvars scope activated by the task
+runner (`src/tasks/base.py`, `with_overrides`) and by the HTTP handlers; prompt consumers call
+`prompts.get(key)` and LLM call sites call `llm.get(setting)` at render time instead of
+importing constants. The scope follows `asyncio.to_thread`; work handed to a bare
+`ThreadPoolExecutor` goes through `bind_context()`.
+
 ## Setup
 
 ```bash
@@ -46,7 +89,10 @@ src/
 │   └── episode_query.py       # Episode selection queries (used by premium pipeline)
 ├── config/
 │   ├── settings.py            # Pydantic settings (env-driven)
+│   ├── prompt_registry.py     # Key -> prompt text catalog (GET /prompts, prompt_overrides)
+│   ├── overrides.py           # Per-run prompt/LLM override scope (prompts.get / llm.get)
 │   └── prompts/               # All LLM prompts
+
 ├── database/                  # SQLAlchemy models + repositories (shared crypto schema)
 ├── extraction/
 │   ├── premium_claim_extractor.py  # Gemini structured-output calls

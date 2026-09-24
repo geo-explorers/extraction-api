@@ -9,7 +9,7 @@ from src.api.schemas.news_claim_extract_schema import (
   NewsArticleSource,
   NewsClaimExtractResponse,
 )
-from src.config.prompts.news_claim_extract_prompt import NEWS_CLAIM_EXTRACT_PROMPT
+from src.config.overrides import llm, prompts
 from src.api.services.claim_anchor_enforce import enforce_anchors
 from src.api.services.claim_anchor_guard import calendar_block, describe_published, source_anchors
 from src.config.settings import settings
@@ -26,16 +26,6 @@ MAX_RETRIES = 3
 # Request timeout (ms). Generous — a dense multi-source extraction can take a
 # while, and the news-worker caller has its own 240s budget + retries on top.
 _REQUEST_TIMEOUT_MS = 180_000
-
-# Minimal role primer for the Claude fallback. All extraction logic +
-# grounding rules live in NEWS_CLAIM_EXTRACT_PROMPT (the user message) — this
-# only sets the system role and reinforces raw-JSON output. NOT a second copy
-# of the extraction prompt.
-_CLAUDE_SYSTEM_PROMPT = (
-  "You are an expert news fact-extraction system. Follow the user's instructions "
-  "exactly and with zero hallucination tolerance. Output ONLY a single valid JSON "
-  "object matching the requested schema — no prose, no markdown code fences."
-)
 
 
 def _build_prompt(
@@ -57,7 +47,7 @@ def _build_prompt(
     d["published_at"] = describe_published(s.published_at)
     rendered.append(d)
   anchors = [source_anchors(s.index, s.content, s.published_at) for s in sources]
-  return NEWS_CLAIM_EXTRACT_PROMPT.format(
+  return prompts.get("news_claim_extract").format(
     headline=headline,
     sources=rendered,
     topics=topics,
@@ -97,12 +87,12 @@ def extract_news_claims_factual(
       api_key=settings.gemini_api_key,
       http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
     )
-    config_kwargs: dict = {"temperature": settings.gemini_news_claim_temperature}
+    config_kwargs: dict = {"temperature": llm.get("gemini_news_claim_temperature")}
     # thinking_level is a Gemini-3+ control. Only attach it when set, so a
     # revert to a 2.5-era model (e.g. GEMINI_NEWS_CLAIM_MODEL=gemini-2.5-pro
     # with GEMINI_NEWS_CLAIM_THINKING_LEVEL unset) runs cleanly with no
     # thinking config and no error.
-    thinking_level = (settings.gemini_news_claim_thinking_level or "").strip()
+    thinking_level = (llm.get("gemini_news_claim_thinking_level") or "").strip()
     if thinking_level:
       config_kwargs["thinking_config"] = types.ThinkingConfig(
         thinking_level=thinking_level,
@@ -116,7 +106,7 @@ def extract_news_claims_factual(
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       response = client.models.generate_content(
-        model=settings.gemini_news_claim_model,
+        model=llm.get("gemini_news_claim_model"),
         contents=prompt,
         config=config,
       )
@@ -132,7 +122,7 @@ def extract_news_claims_factual(
       return enforce_anchors(
         result, sources,
         lambda p: client.models.generate_content(
-          model=settings.gemini_news_claim_model, contents=p, config=config,
+          model=llm.get("gemini_news_claim_model"), contents=p, config=config,
         ).text,
       )
     except Exception as e:
@@ -187,10 +177,10 @@ def extract_news_claims_factual_claude(
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       message = client.messages.create(
-        model=settings.news_claim_claude_model,
-        max_tokens=settings.news_claim_claude_max_tokens,
-        temperature=settings.gemini_news_claim_temperature,
-        system=_CLAUDE_SYSTEM_PROMPT,
+        model=llm.get("news_claim_claude_model"),
+        max_tokens=llm.get("news_claim_claude_max_tokens"),
+        temperature=llm.get("gemini_news_claim_temperature"),
+        system=prompts.get("news_claim_extract.claude_system"),
         messages=[{"role": "user", "content": prompt}],
       )
       parsed = _parse_llm_response(_claude_text(message))
@@ -199,10 +189,10 @@ def extract_news_claims_factual_claude(
       return enforce_anchors(
         result, sources,
         lambda p: _claude_text(client.messages.create(
-          model=settings.news_claim_claude_model,
-          max_tokens=settings.news_claim_claude_max_tokens,
-          temperature=settings.gemini_news_claim_temperature,
-          system=_CLAUDE_SYSTEM_PROMPT,
+          model=llm.get("news_claim_claude_model"),
+          max_tokens=llm.get("news_claim_claude_max_tokens"),
+          temperature=llm.get("gemini_news_claim_temperature"),
+          system=prompts.get("news_claim_extract.claude_system"),
           messages=[{"role": "user", "content": p}],
         )),
       )

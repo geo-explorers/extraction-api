@@ -5,11 +5,17 @@ from src.api.services.guest_extraction_service import extract_podcast_guests
 from src.api.schemas.guest_extraction_schema import (
   GuestExtractionRequest,
 )
+from src.config.overrides import activate_for
 
 router = APIRouter()
 
 @router.post("/guests")
 def guest_extraction(request: GuestExtractionRequest) -> JSONResponse:
+  with activate_for(request, "http:guests"):
+    return _guest_extraction(request)
+
+
+def _guest_extraction(request: GuestExtractionRequest) -> JSONResponse:
   try:
     guests = extract_podcast_guests(
       title=request.title,

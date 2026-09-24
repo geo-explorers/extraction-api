@@ -1,4 +1,5 @@
 from typing import Any, Dict
+from src.config.overrides import llm
 from src.config.settings import settings
 
 from langchain_core.language_models import BaseChatModel
@@ -13,8 +14,9 @@ def _create_chat_model(
   temperature: float = None,
 ) -> BaseChatModel:
   return ChatGoogleGenerativeAI(
-    model=model_name or settings.gemini_extraction_model,
-    temperature=temperature if temperature is not None else settings.gemini_extraction_temperature,
+    model=model_name or llm.get("gemini_extraction_model"),
+    temperature=temperature if temperature is not None else llm.get("gemini_extraction_temperature"),
+
     api_key=settings.gemini_api_key,
     max_retries=3,
   )

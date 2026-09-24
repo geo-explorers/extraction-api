@@ -1,7 +1,8 @@
 from typing import List, Optional
 from pydantic import BaseModel
+from src.api.schemas.overrides_schema import OverridesMixin
 
-class HostExtractionRequest(BaseModel):
+class HostExtractionRequest(OverridesMixin):
   title: str
   description: str
   truncated_transcript: str

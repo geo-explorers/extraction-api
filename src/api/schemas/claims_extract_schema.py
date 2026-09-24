@@ -8,6 +8,7 @@ without a contract change.
 """
 
 from pydantic import BaseModel, Field, model_validator
+from src.api.schemas.overrides_schema import OverridesMixin
 from typing import Dict, List, Literal, Optional
 
 MediaType = Literal["debate", "news", "podcast", "research_paper", "talk", "generic"]
@@ -44,7 +45,7 @@ class TopicVocabularyItem(BaseModel):
   label: str = Field(min_length=1, max_length=TOPIC_VOCABULARY_LABEL_MAX_CHARS)
 
 
-class ClaimsExtractInput(BaseModel):
+class ClaimsExtractInput(OverridesMixin):
   media_type: MediaType  # unknown values are rejected at enqueue (422)
   documents: List[InputDocument] = Field(min_length=1, max_length=50)
   title: Optional[str] = None  # debate motion / episode title / headline

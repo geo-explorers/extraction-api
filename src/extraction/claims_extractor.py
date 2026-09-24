@@ -20,6 +20,7 @@ from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
+from src.config.overrides import llm
 from src.config.settings import settings
 from src.infrastructure.logger import get_logger
 
@@ -135,21 +136,33 @@ class ClaimsExtractor:
             api_key=settings.gemini_api_key,
             http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_SECONDS * 1000),
         )
-        self.model_name = settings.claims_extract_model
+        self._explicit_model: Optional[str] = None
         logger.info(
             f"Initialized ClaimsExtractor with model {self.model_name} "
             f"(structured outputs, {APP_MAX_RETRIES} app-level retries)"
         )
 
+    @property
+    def model_name(self) -> str:
+        # Resolved per call, not at construction: the extractor is cached per
+        # worker process, and a run may override the model. An assigned model
+        # (tests, evals) pins it.
+        return self._explicit_model or llm.get("claims_extract_model")
+
+    @model_name.setter
+    def model_name(self, value: Optional[str]) -> None:
+        self._explicit_model = value
+
+
     def _config(self, response_schema: type[BaseModel]) -> types.GenerateContentConfig:
         config_kwargs: dict = {
-            "temperature": settings.claims_extract_temperature,
+            "temperature": llm.get("claims_extract_temperature"),
             "response_mime_type": "application/json",
             "response_schema": response_schema,
         }
         # thinking_level is a Gemini-3+ control; only attach when configured so
         # a revert to a 2.5-era model runs with no thinking config and no error.
-        thinking_level = (settings.claims_extract_thinking_level or "").strip()
+        thinking_level = (llm.get("claims_extract_thinking_level") or "").strip()
         if thinking_level:
             config_kwargs["thinking_config"] = types.ThinkingConfig(
                 thinking_level=thinking_level,

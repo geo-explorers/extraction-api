@@ -12,6 +12,7 @@ from src.api.services.news_claim_extract_service import (
   extract_news_claims,
   extract_news_claims_claude,
 )
+from src.config.overrides import activate_for
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -39,7 +40,8 @@ def _extract_and_respond(
   )
 
   try:
-    result = extractor(request.headline, request.sources, request.topics)
+    with activate_for(request, f"http:news_claims:{provider}"):
+      result = extractor(request.headline, request.sources, request.topics)
 
     response_data = result.model_dump()
     response_data["error"] = None

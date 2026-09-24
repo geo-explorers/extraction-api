@@ -185,7 +185,19 @@ class Settings(BaseSettings):
         default="high",
         description="Gemini 3+ thinking level for news debate semantic review. Empty disables."
     )
+    # Collection review (news.review_collections). The defaults are the values
+    # the module docstring's numbers were measured on; the task runs on the
+    # WORKER service, whose env is separate from the API's.
+    news_collection_review_model: str = Field(
+        default="gemini-3.5-flash",
+        description="Gemini model for the news collection review (group/rescue/check/order/merge review)"
+    )
+    news_collection_review_temperature: float = Field(
+        default=0.1,
+        description="Temperature for the news collection review"
+    )
     news_debate_semantic_review_enforced: bool = Field(
+
         default=True,
         description="Reject candidates that fail semantic review. False runs the reviewer in shadow mode."
     )

@@ -6,14 +6,18 @@ lib/entity-types.ts). This extracts the whole-story curated/free topics and
 related entities — NOT the per-claim grouping topics (that is the separate
 news.extract_topics_and_claims task).
 
-The user prompt embeds a literal JSON example with braces, so it is assembled by
-concatenation (NOT str.format) to keep those braces intact. Only headline,
-summary, the topic rule, and the entity-type list vary.
+The user prompt embeds a literal JSON example with braces, so it is assembled
+from three chunks: a header template (headline, summary), the verbatim JSON
+example (never formatted, so its braces are safe), and a rules template
+(topic rule, entity-type list). Every chunk is fetched through the prompt
+registry at build time so a run can override it.
 
 Curated topics are NOT sourced here — extraction-api is stateless. The caller
 passes `curated_topic_names` (sourced/cached on its side); the curated-list
 system block is marked for prompt caching since it repeats across a batch.
 """
+
+from src.config.overrides import prompts
 
 # Entity type vocabulary offered to the LLM — verbatim from lib/entity-types.ts
 # ENTITY_TYPE_NAMES (order preserved). "Company"/"Organization"/"Public figure"/
@@ -35,7 +39,7 @@ SYSTEM_BASE = "You are a knowledge graph analyst. Return only valid JSON."
 
 # Curated-topic system block prefix (the curated names are appended after a
 # blank line). Verbatim from enrich.ts:957.
-_CURATED_SYSTEM_PREFIX = (
+CURATED_SYSTEM_PREFIX = (
     "## Curated Topics\n"
     "The following is the full list of curated topics available for tagging. "
     "You may use EXACT names (case-sensitive) from this list when a topic "
@@ -50,7 +54,7 @@ _CURATED_SYSTEM_PREFIX = (
 )
 
 # Topic rule, two variants (enrich.ts:962-970).
-_TOPIC_RULE_CURATED = (
+TOPIC_RULE_CURATED = (
     "- topics: 3-10 topic labels relevant to the story.\n"
     "  You may use EXACT names from the Curated Topics list (in system instructions), or use free-form labels.\n"
     "  CURATED TOPIC VALIDATION — before selecting any curated topic, apply this test:\n"
@@ -59,29 +63,19 @@ _TOPIC_RULE_CURATED = (
     "    Each word in the topic name matters: \"AI liability\" requires the article to be about liability caused by AI, \"AI regulation\" requires the article to be about regulating AI, \"blockchain gaming\" requires the article to be about games on blockchain. A lawsuit or regulation involving a tech company is NOT about AI unless AI itself is the subject.\n"
     "  When no curated topic accurately describes the story's actual subject, use a free-form label. Prefer accuracy over curated coverage."
 )
-_TOPIC_RULE_FREE = "- topics: 3-10 topic labels relevant to the story."
+TOPIC_RULE_FREE = "- topics: 3-10 topic labels relevant to the story."
 
+# User prompt, chunk 1 — str.format slots: {headline}, {summary}.
+USER_HEADER = (
+    "Identify the key topics and entities for this news story.\n"
+    "\n"
+    "## Story: \"{headline}\"\n"
+    "{summary}\n"
+    "\n"
+)
 
-def build_curated_system_block(curated_topic_names: list[str]) -> str:
-    """The cached system block: the literal prefix, a blank line, then the
-    curated names joined by newlines (enrich.ts:957)."""
-    return _CURATED_SYSTEM_PREFIX + "\n\n" + "\n".join(curated_topic_names)
-
-
-def build_user_prompt(headline: str, summary: str, has_curated: bool) -> str:
-    """Assemble the user prompt exactly as enrich.ts does (lines 972-1005).
-
-    Concatenation (not str.format) so the literal JSON-example braces survive.
-    """
-    topic_rule = _TOPIC_RULE_CURATED if has_curated else _TOPIC_RULE_FREE
-    header = (
-        "Identify the key topics and entities for this news story.\n"
-        "\n"
-        f"## Story: \"{headline}\"\n"
-        f"{summary}\n"
-        "\n"
-    )
-    json_block = (
+# User prompt, chunk 2 — literal JSON example; NEVER passed through str.format.
+USER_JSON_EXAMPLE = (
         "---\n"
         "\n"
         "Return JSON:\n"
@@ -100,17 +94,44 @@ def build_user_prompt(headline: str, summary: str, has_curated: bool) -> str:
         "}\n"
         "```\n"
         "\n"
-    )
-    rules = (
+)
+
+# User prompt, chunk 3 — str.format slots: {topic_rule}, {entity_types}.
+USER_RULES = (
         "Rules:\n"
-        f"{topic_rule}\n"
+        "{topic_rule}\n"
         "- Entities: People, companies, projects, organizations, cities, countries mentioned\n"
-        f"  - {ENTITY_TYPE_PROMPT}\n"
+        "  - {entity_types}\n"
         "  - Choose the most specific type that fits (e.g., \"City\" not \"Place\").\n"
         "  - Any company, business, startup, exchange, or for-profit organization → use \"Project\" (never \"Company\" or \"Organization\").\n"
         "  - Any individual person — including public figures, politicians, celebrities, founders, executives — → use \"Person\" (never \"Public figure\").\n"
         "  - role: brief description of their involvement (one phrase)\n"
         "- Use official/full names for entities\n"
         "- Relevance: 0.0-1.0 how central this topic/entity is to the story"
+)
+
+
+def build_curated_system_block(curated_topic_names: list[str]) -> str:
+    """The cached system block: the literal prefix, a blank line, then the
+    curated names joined by newlines (enrich.ts:957)."""
+    prefix = prompts.get("news_topics_entities.curated_prefix")
+    return prefix + "\n\n" + "\n".join(curated_topic_names)
+
+
+def build_user_prompt(headline: str, summary: str, has_curated: bool) -> str:
+    """Assemble the user prompt exactly as enrich.ts does (lines 972-1005):
+    header + JSON example + rules. The JSON example is concatenated verbatim
+    so its literal braces survive."""
+    topic_rule = prompts.get(
+        "news_topics_entities.topic_rule_curated"
+        if has_curated
+        else "news_topics_entities.topic_rule_free"
+    )
+    header = prompts.get("news_topics_entities.user_header").format(
+        headline=headline, summary=summary
+    )
+    json_block = prompts.get("news_topics_entities.user_json_example")
+    rules = prompts.get("news_topics_entities.user_rules").format(
+        topic_rule=topic_rule, entity_types=ENTITY_TYPE_PROMPT
     )
     return header + json_block + rules

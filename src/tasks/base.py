@@ -7,6 +7,7 @@ handlers never import Hatchet internals beyond the `Context` type — so swappin
 the engine later means rewriting only this file, not the task implementations.
 """
 
+import functools
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Awaitable, Callable, Generic, Optional, Type, TypeVar
@@ -14,7 +15,11 @@ from typing import Awaitable, Callable, Generic, Optional, Type, TypeVar
 from pydantic import BaseModel
 from hatchet_sdk import Context, RateLimit
 
+from src.config.overrides import activate, overrides_of
 from src.hatchet_client import hatchet
+from src.infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
 
 TIn = TypeVar("TIn", bound=BaseModel)
 TOut = TypeVar("TOut", bound=BaseModel)
@@ -47,12 +52,60 @@ class TaskSpec(Generic[TIn, TOut]):
     concurrency: Optional[int] = None
 
 
+def with_overrides(fn=None, *, label: Optional[str] = None):
+    """Run a task step under the override scope its input carries.
+
+    The input's `prompt_overrides` / `llm_overrides` (OverridesMixin) are
+    activated for the duration of the step, so every prompts.get / llm.get
+    down the call stack sees them. On exit the scope summary — which overrides
+    applied, which went unused, which prompts and settings were read — goes to
+    the worker log and, when overrides were given, to the run's own log in the
+    Hatchet dashboard.
+
+    build_task applies this to every standalone handler; DAG steps declare it
+    themselves, under the `@workflow.task(...)` decorator, because each step is
+    its own Hatchet execution with its own copy of the workflow input.
+    """
+
+    def decorate(handler):
+        name = label or getattr(handler, "__name__", "task")
+
+        @functools.wraps(handler)
+        async def wrapper(input, ctx: Context):
+            prompt_ov, llm_ov = overrides_of(input)
+            with activate(prompt_ov, llm_ov) as scope:
+                try:
+                    return await handler(input, ctx)
+                finally:
+                    line = scope.summary(name)
+                    logger.info(line)
+                    if scope.given:
+                        _ctx_log(ctx, line)
+
+        return wrapper
+
+    return decorate(fn) if fn is not None else decorate
+
+
+def _ctx_log(ctx: Context, line: str) -> None:
+    """Best-effort line into the run's dashboard log (a test Context stub may
+    not have .log, and a failed log must never fail the step)."""
+    log = getattr(ctx, "log", None)
+    if not callable(log):
+        return
+    try:
+        log(line)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def build_task(spec: TaskSpec):
     """Register a TaskSpec as a Hatchet standalone task and return the task object.
 
     All Hatchet-specific wiring (decorator, rate limits, retry/backoff/timeout)
-    lives here. The wrapped runner simply awaits the spec's handler; Hatchet
-    validates the input against `input_model` and serializes the returned model.
+    lives here. The wrapped runner awaits the spec's handler under the input's
+    override scope; Hatchet validates the input against `input_model` and
+    serializes the returned model.
     """
     kwargs: dict = {
         "name": spec.name,
@@ -69,8 +122,10 @@ def build_task(spec: TaskSpec):
             RateLimit(static_key=spec.rate_limit_key, units=spec.rate_limit_units)
         ]
 
+    handler = with_overrides(spec.handler, label=spec.name)
+
     @hatchet.task(**kwargs)
     async def _runner(input: spec.input_model, ctx: Context) -> spec.output_model:
-        return await spec.handler(input, ctx)
+        return await handler(input, ctx)
 
     return _runner

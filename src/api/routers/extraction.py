@@ -9,6 +9,7 @@ from src.api.schemas.requests import BatchExtractionRequest
 from src.api.schemas.responses import (
     SimplifiedBatchExtractionResponse,
 )
+from src.config.overrides import activate_for
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -89,13 +90,14 @@ async def extract_episodes_batch_premium(
     )
 
     service = PremiumExtractionService()
-    result = await service.extract_batch_episodes(
-        podcast_ids=request.podcast_ids,
-        target=request.target,
-        force=request.force,
-        continue_on_error=request.continue_on_error,
-        db_session=db,
-    )
+    with activate_for(request, "http:claims_premium"):
+        result = await service.extract_batch_episodes(
+            podcast_ids=request.podcast_ids,
+            target=request.target,
+            force=request.force,
+            continue_on_error=request.continue_on_error,
+            db_session=db,
+        )
 
     logger.info(
         f"API response: PREMIUM batch completed - {result.summary.successful_episodes}/"

@@ -12,6 +12,7 @@ imports Hatchet.
 from typing import Any
 
 from pydantic import BaseModel, Field
+from src.api.schemas.overrides_schema import OverridesMixin
 
 
 # --- Core graph shapes -------------------------------------------------------
@@ -79,7 +80,7 @@ class AssignedRow(BaseModel):
 # --- geo.fetch_entities (standalone reusable task) ---------------------------
 
 
-class GeoFetchEntitiesRequest(BaseModel):
+class GeoFetchEntitiesRequest(OverridesMixin):
     type_id: str = Field(
         ...,
         description="Geo type entity id to fetch (e.g. Project = 484a18c5030a499cb0f2ef588ff16d50)",
@@ -96,7 +97,7 @@ class GeoFetchEntitiesResponse(BaseModel):
 # --- sheets.export_table (standalone reusable task; fully generic) -----------
 
 
-class SheetTableExportRequest(BaseModel):
+class SheetTableExportRequest(OverridesMixin):
     """Generic tabular payload -> new Google Sheet. Knows nothing about
     entities/spaces; any pipeline can reuse it."""
 
@@ -118,7 +119,7 @@ class SheetTableExportResult(BaseModel):
 # --- geo.assign_spaces_to_sheet (the 4-task DAG) -----------------------------
 
 
-class GeoSpaceAssignInput(BaseModel):
+class GeoSpaceAssignInput(OverridesMixin):
     type_id: str = Field(
         ..., description="Geo type entity id to fetch and assign spaces to"
     )

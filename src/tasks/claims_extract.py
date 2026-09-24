@@ -21,7 +21,8 @@ from functools import lru_cache
 from hatchet_sdk import Context, RateLimit
 
 from src.hatchet_client import hatchet
-from src.config.settings import settings
+from src.tasks.base import with_overrides
+from src.config.overrides import llm
 from src.api.schemas.claims_extract_schema import (
     ClaimsExtractInput,
     ClaimsExtractResult,
@@ -62,6 +63,7 @@ claims_workflow = hatchet.workflow(
 @claims_workflow.task(
     rate_limits=_GEMINI, execution_timeout=_STEP_TIMEOUT, retries=3, backoff_factor=2.0
 )
+@with_overrides
 async def topics(input: ClaimsExtractInput, ctx: Context) -> dict:
     if not input.grouping:
         return {"topics": []}
@@ -74,6 +76,7 @@ async def topics(input: ClaimsExtractInput, ctx: Context) -> dict:
     parents=[topics], rate_limits=_GEMINI, execution_timeout=_EXTRACT_TIMEOUT,
     retries=3, backoff_factor=2.0,
 )
+@with_overrides
 async def extract(input: ClaimsExtractInput, ctx: Context) -> dict:
     topic_list = ctx.task_output(topics)["topics"]
     spend_guard.check_and_record("gemini")
@@ -87,6 +90,7 @@ async def extract(input: ClaimsExtractInput, ctx: Context) -> dict:
     parents=[extract], rate_limits=_GEMINI, execution_timeout=_STEP_TIMEOUT,
     retries=3, backoff_factor=2.0,
 )
+@with_overrides
 async def takeaways(input: ClaimsExtractInput, ctx: Context) -> dict:
     if not input.include_takeaways:
         return {"takeaways": []}
@@ -103,6 +107,7 @@ async def takeaways(input: ClaimsExtractInput, ctx: Context) -> dict:
 @claims_workflow.task(
     parents=[extract, takeaways], execution_timeout=timedelta(minutes=2)
 )
+@with_overrides
 async def finalize(input: ClaimsExtractInput, ctx: Context) -> ClaimsExtractResult:
     extraction = ctx.task_output(extract)["extraction"]
     takeaway_texts = ctx.task_output(takeaways)["takeaways"]
@@ -111,7 +116,7 @@ async def finalize(input: ClaimsExtractInput, ctx: Context) -> ClaimsExtractResu
         input,
         extraction,
         takeaway_texts,
-        model_used=settings.claims_extract_model,
+        model_used=llm.get("claims_extract_model"),
     )
     logger.info(
         f"finalize claims.extract ({input.media_type}, grouping={input.grouping}): "

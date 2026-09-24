@@ -13,34 +13,14 @@ from typing import List
 
 from src.api.schemas.claims_extract_schema import ClaimsExtractInput, InputDocument
 from src.preprocessing.transcript_parser import TranscriptParser
-from src.config.prompts.claims_extract import (
-    CORE_CLAIM_RULES,
-    MEDIA_LAYERS,
-    MEDIA_NOUNS,
-    GENERIC_TOPICS_PROMPT,
-    GENERIC_TAKEAWAYS_PROMPT,
-    GROUPING_SECTION,
-    FLAT_SECTION,
-    QUOTES_SECTION,
-    SUMMARY_SECTION,
-    FACTUALITY_SECTION,
-    CONTESTABILITY_SECTION,
-    TOPIC_VOCABULARY_SECTION,
-    CONSOLIDATION_SECTION,
-    FOCUS_TOPICS_SECTION,
-    LANGUAGE_SECTION,
-    MAX_CLAIMS_SECTION,
-    CUSTOM_INSTRUCTIONS_SECTION,
-    OUTPUT_CONTRACT_HEADER,
-    KEEP_GROUPS_EMPTY,
-    KEEP_QUOTES_EMPTY,
-    KEEP_SUMMARY_EMPTY,
-    KEEP_FACTUALITY_NULL,
-    KEEP_CONTESTABILITY_NULL,
-    KEEP_ASSIGNED_TOPICS_EMPTY,
-)
+from src.config.overrides import prompts
+from src.config.prompts.claims_extract import MEDIA_NOUNS
 
 _SECTION_SEP = "\n\n"
+
+# Every section is fetched through the registry at build time (never bound at
+# import) so a run's prompt_overrides can replace any one of them by key.
+_P = "claims_extract."
 
 
 @lru_cache(maxsize=1)
@@ -101,7 +81,7 @@ def build_topics_prompt(input: ClaimsExtractInput) -> str:
     inputs_parts = _overall_context_lines(input)
     inputs_parts.append("DOCUMENTS\n\n" + render_documents(input))
 
-    return GENERIC_TOPICS_PROMPT.format(
+    return prompts.get(_P + "topics").format(
         media_noun=MEDIA_NOUNS[input.media_type],
         focus_topics_block=focus_block,
         inputs="\n\n".join(inputs_parts),
@@ -208,19 +188,19 @@ def _final_validation(input: ClaimsExtractInput, grouping: bool) -> str:
 
 
 def _output_contract(input: ClaimsExtractInput, grouping: bool) -> str:
-    lines = [OUTPUT_CONTRACT_HEADER]
+    lines = [prompts.get(_P + "output_contract")]
     if not grouping:
-        lines.append(KEEP_GROUPS_EMPTY)
+        lines.append(prompts.get(_P + "keep_groups_empty"))
     if not input.include_quotes:
-        lines.append(KEEP_QUOTES_EMPTY)
+        lines.append(prompts.get(_P + "keep_quotes_empty"))
     if not input.include_summary:
-        lines.append(KEEP_SUMMARY_EMPTY)
+        lines.append(prompts.get(_P + "keep_summary_empty"))
     if not input.classify_factuality:
-        lines.append(KEEP_FACTUALITY_NULL)
+        lines.append(prompts.get(_P + "keep_factuality_null"))
     if not input.classify_contestability:
-        lines.append(KEEP_CONTESTABILITY_NULL)
+        lines.append(prompts.get(_P + "keep_contestability_null"))
     if not input.topic_vocabulary:
-        lines.append(KEEP_ASSIGNED_TOPICS_EMPTY)
+        lines.append(prompts.get(_P + "keep_assigned_topics_empty"))
     return "\n".join(lines)
 
 
@@ -228,47 +208,48 @@ def build_extract_prompt(input: ClaimsExtractInput, topics: List[str]) -> str:
     grouping = input.grouping and bool(topics)
     media_noun = MEDIA_NOUNS[input.media_type]
 
-    role = (
-        f"You are an expert fact extraction system for {media_noun}. Your "
-        "objective is to extract verifiable, atomic claims from the provided "
-        "documents"
-        + (", grouped under the provided topics" if grouping else "")
-        + ". You operate with high precision and zero hallucination tolerance."
+    role = prompts.get(_P + "role").format(
+        media_noun=media_noun,
+        grouped_clause=", grouped under the provided topics" if grouping else "",
     )
 
     sections = [
         role,
         _inputs_description(input, grouping),
-        MEDIA_LAYERS[input.media_type],
-        GROUPING_SECTION if grouping else FLAT_SECTION,
-        CORE_CLAIM_RULES,
+        prompts.get(_P + "media." + input.media_type),
+        prompts.get(_P + ("grouping" if grouping else "flat")),
+        prompts.get(_P + "core"),
     ]
     if len(input.documents) > 1:
-        sections.append(CONSOLIDATION_SECTION)
+        sections.append(prompts.get(_P + "consolidation"))
     if input.include_quotes:
-        sections.append(QUOTES_SECTION)
+        sections.append(prompts.get(_P + "quotes"))
     if input.include_summary:
-        sections.append(SUMMARY_SECTION)
+        sections.append(prompts.get(_P + "summary"))
     if input.classify_factuality:
-        sections.append(FACTUALITY_SECTION)
+        sections.append(prompts.get(_P + "factuality"))
     if input.classify_contestability:
-        sections.append(CONTESTABILITY_SECTION)
+        sections.append(prompts.get(_P + "contestability"))
     if input.topic_vocabulary:
-        sections.append(TOPIC_VOCABULARY_SECTION)
+        sections.append(prompts.get(_P + "topic_vocabulary"))
     if input.focus_topics:
         sections.append(
-            FOCUS_TOPICS_SECTION.format(focus_topics=", ".join(input.focus_topics))
+            prompts.get(_P + "focus_topics").format(
+                focus_topics=", ".join(input.focus_topics)
+            )
         )
     if input.language and input.language.lower() != "en":
-        sections.append(LANGUAGE_SECTION.format(language=input.language))
+        sections.append(prompts.get(_P + "language").format(language=input.language))
     if input.max_claims is not None:
-        sections.append(MAX_CLAIMS_SECTION.format(max_claims=input.max_claims))
+        sections.append(
+            prompts.get(_P + "max_claims").format(max_claims=input.max_claims)
+        )
 
     sections.append(_final_validation(input, grouping))
 
     if input.custom_instructions:
         sections.append(
-            CUSTOM_INSTRUCTIONS_SECTION.format(
+            prompts.get(_P + "custom_instructions").format(
                 custom_instructions=input.custom_instructions
             )
         )
@@ -307,7 +288,7 @@ def format_claims_for_takeaways(claims: List[dict]) -> str:
 
 
 def build_takeaways_prompt(input: ClaimsExtractInput, claims: List[dict]) -> str:
-    return GENERIC_TAKEAWAYS_PROMPT.format(
+    return prompts.get(_P + "takeaways").format(
         media_noun=MEDIA_NOUNS[input.media_type],
         claims=format_claims_for_takeaways(claims),
     )

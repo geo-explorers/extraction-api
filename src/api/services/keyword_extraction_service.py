@@ -1,7 +1,7 @@
 import json
 import re
 from typing import Any, Dict, List, Tuple
-from src.config.prompts.keyword_extraction_prompt import KEYWORD_EXTRACTION_PROMPT
+from src.config.overrides import prompts
 from src.api.utils import llm_model
 from src.infrastructure.logger import get_logger
 
@@ -20,7 +20,7 @@ def extract_keyword_and_topics(
 ) -> Tuple[List[str], List[str], Dict[str, List[str]]]:
   try:
     chain = llm_model.build_chain(
-      prompt=KEYWORD_EXTRACTION_PROMPT
+      prompt=prompts.get("keyword_extraction")
     )
   except Exception as e:
     raise Exception("Error building chain")

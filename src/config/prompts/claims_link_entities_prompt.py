@@ -13,6 +13,8 @@ empty selections are normal and keys are opaque — without biasing toward any
 caller's domain). Output-format rules are restated last for recency.
 """
 
+from src.config.overrides import prompts
+
 CLAIMS_LINK_ENTITIES_PROMPT = """You are an entity-linking annotator. You will link CLAIMS to entries from fixed candidate lists, by index.
 
 DEFINITIONS
@@ -77,7 +79,7 @@ def build_user_prompt(claims: list, facets: list, context: str) -> str:
     facets_block = "\n\n".join(_facet_block(f) for f in facets)
     selections_example = ", ".join(f'"{f.key}": [<int>, ...]' for f in facets)
     context_block = f"CONTEXT: {context}\n\n" if context else ""
-    return CLAIMS_LINK_ENTITIES_PROMPT.format(
+    return prompts.get("claims_link_entities").format(
         context_block=context_block,
         claims_block=claims_block,
         facets_block=facets_block,

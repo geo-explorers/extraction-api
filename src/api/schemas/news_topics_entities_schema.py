@@ -8,10 +8,11 @@ geo_id from its own name->geoId map (extraction-api stays stateless).
 """
 
 from pydantic import BaseModel, Field
+from src.api.schemas.overrides_schema import OverridesMixin
 from typing import List, Literal
 
 
-class NewsTopicsEntitiesRequest(BaseModel):
+class NewsTopicsEntitiesRequest(OverridesMixin):
   headline: str
   summary: str = ""
   curated_topic_names: List[str] = Field(
