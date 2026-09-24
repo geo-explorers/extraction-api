@@ -61,6 +61,10 @@ class CollectionReviewReport(BaseModel):
   dropped_claims: int = 0
   # "ok" | "repaired" (one regroup) | "rejected" (twice → discarded) | "".
   check: str = ""
+  # The reading order the check returned for the blocks: "same" (as grouped),
+  # "changed", "kept" (no usable order came back), "refused" (the block it
+  # put first shares no word with the headline — the grouped order stands).
+  order: str = ""
   # Human-readable refusals: a rescue the sources did not back, a merge that
   # lost a name, a block the check faulted.
   rejected: List[str] = Field(default_factory=list)
