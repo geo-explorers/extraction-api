@@ -21,6 +21,8 @@ All endpoints require an `X-API-Key` header. Interactive docs at `/docs`.
 
 ## Prompt and LLM overrides (hand-testing without a deploy)
 
+Step-by-step guide for testing a prompt from the Hatchet dashboard, with copy-paste inputs and a section written for coding agents: [docs/prompt-testing.md](docs/prompt-testing.md).
+
 Every prompt is cataloged by key in `src/config/prompt_registry.py`, and every task input
 and sync request body accepts two optional maps:
 
