@@ -7,18 +7,14 @@ from src.api.schemas.keyword_extraction_schema import (
   KeywordExtractionRequest,
 )
 from src.infrastructure.logger import get_logger
-from src.config.overrides import activate_for
+from src.config.overrides import with_payload_overrides
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 @router.post("/keywords")
+@with_payload_overrides("http:keywords")
 def keyword_extraction(request: KeywordExtractionRequest) -> JSONResponse:
-  with activate_for(request, "http:keywords"):
-    return _keyword_extraction(request)
-
-
-def _keyword_extraction(request: KeywordExtractionRequest) -> JSONResponse:
   # Log incoming request payload
   logger.info(f"Keyword extraction request - Episode: '{request.episode.get('title', 'N/A')}', Claims: {len(request.episode.get('claims', []))}, Topics: {len(request.topics_list)}")
 

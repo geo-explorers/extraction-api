@@ -49,18 +49,20 @@ def template_slots(text: str) -> List[str]:
     """Named slots of a str.format template, in order of first appearance.
 
     Raises ValueError on unbalanced braces (the same error str.format would
-    raise). A positional slot (`{}` or `{0}`) is reported as written so the
-    validator can reject it — every renderer here formats by keyword.
+    raise) and on any slot that is not a plain `{name}`: positional (`{}`,
+    `{0}`), attribute or index access (`{a.b}`, `{a[0]}`), conversions and
+    format specs. Every renderer here formats by keyword with plain names, and
+    an override must not be able to traverse into the format arguments.
     """
     seen: List[str] = []
-    for _, field_name, _, _ in Formatter().parse(text):
+    for _, field_name, format_spec, conversion in Formatter().parse(text):
         if field_name is None:
             continue
-        name = field_name.split(".")[0].split("[")[0]
-        if name == "" or name.isdigit():
-            name = "{" + field_name + "}"
-        if name not in seen:
-            seen.append(name)
+        if not field_name.isidentifier() or format_spec or conversion:
+            shown = field_name + ("!" + conversion if conversion else "") + (":" + format_spec if format_spec else "")
+            raise ValueError(f"slot {{{shown}}} is not a plain {{name}} slot")
+        if field_name not in seen:
+            seen.append(field_name)
     return seen
 
 

@@ -24,6 +24,8 @@ KeyError inside a billed LLM call.
 """
 
 import contextvars
+import functools
+import inspect
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Set
@@ -35,32 +37,72 @@ logger = get_logger(__name__)
 
 THINKING_LEVELS = ("", "minimal", "low", "medium", "high")
 MAX_PROMPT_OVERRIDE_CHARS = 200_000
-MAX_TEMPERATURE = 2.0
+# The Anthropic ceiling. The gemini_news_* temperatures also feed the Claude
+# fallback paths, and no pipeline here samples above 1, so one bound serves
+# every provider and an in-range override can never fail inside the call.
+MAX_TEMPERATURE = 1.0
 MAX_TOKENS_CEILING = 1_000_000
 
-# A settings field is an overridable LLM parameter when its name ends in one of
-# these and it is not an embedding model or a rate-limit knob.
-_LLM_SUFFIXES = ("_model", "_temperature", "_thinking_level", "_max_tokens")
-_LLM_EXCLUDED_SUBSTRINGS = ("embedding", "rate_limit")
+# The settings a run may override, explicitly. A new *_model / *_temperature /
+# *_thinking_level / *_max_tokens field must be added here or to
+# LLM_SETTINGS_NOT_OVERRIDABLE (tests/test_overrides.py enforces the choice),
+# so nothing becomes overridable by naming accident.
+LLM_SETTINGS: tuple[str, ...] = (
+    "gemini_extraction_model",
+    "gemini_extraction_temperature",
+    "gemini_premium_model",
+    "gemini_premium_temperature",
+    "gemini_news_claim_model",
+    "gemini_news_claim_temperature",
+    "gemini_news_claim_thinking_level",
+    "gemini_news_debate_model",
+    "gemini_news_debate_temperature",
+    "gemini_news_debate_thinking_level",
+    "gemini_news_debate_review_model",
+    "gemini_news_debate_review_temperature",
+    "gemini_news_debate_review_thinking_level",
+    "news_collection_review_model",
+    "news_collection_review_temperature",
+    "news_claim_claude_model",
+    "news_claim_claude_max_tokens",
+    "claims_extract_model",
+    "claims_extract_temperature",
+    "claims_extract_thinking_level",
+    "claims_link_model",
+    "claims_link_temperature",
+    "claims_link_thinking_level",
+    "claims_equivalence_model",
+    "claims_equivalence_temperature",
+    "claims_equivalence_thinking_level",
+    "gemini_space_assignment_model",
+    "gemini_space_assignment_temperature",
+)
+# Look like LLM knobs by name, but are not per-run model parameters.
+LLM_SETTINGS_NOT_OVERRIDABLE: tuple[str, ...] = (
+    "ollama_embedding_model",  # embedding dimensions are baked into stored vectors
+    "premium_extraction_rate_limit_max_tokens",  # a rate-limit budget, not a call parameter
+)
+LLM_SETTING_SUFFIXES = ("_model", "_temperature", "_thinking_level", "_max_tokens")
+
+_unknown = [n for n in LLM_SETTINGS if n not in Settings.model_fields]
+if _unknown:
+    raise RuntimeError(f"LLM_SETTINGS names fields Settings does not have: {_unknown}")
 
 
 def llm_setting_names() -> List[str]:
-    """Every settings field a run may override, in declaration order."""
-    return [
-        name
-        for name in Settings.model_fields
-        if name.endswith(_LLM_SUFFIXES)
-        and not any(s in name for s in _LLM_EXCLUDED_SUBSTRINGS)
-    ]
+    """Every settings field a run may override."""
+    return list(LLM_SETTINGS)
 
 
 @dataclass
 class OverrideScope:
     prompt_overrides: Dict[str, str]
     llm_overrides: Dict[str, Any]
+    # Sets, not lists: bind_context() shares one scope across pool threads and
+    # set.add is atomic, so concurrent reads cannot duplicate entries.
     applied: Set[str] = field(default_factory=set)  # override keys that took effect
-    prompts_read: List[str] = field(default_factory=list)
-    llm_read: List[str] = field(default_factory=list)
+    prompts_read: Set[str] = field(default_factory=set)
+    llm_read: Set[str] = field(default_factory=set)
 
     @property
     def given(self) -> Set[str]:
@@ -80,8 +122,8 @@ class OverrideScope:
             parts.append(f"unused={sorted(self.unused)}")
         else:
             parts.append("none given")
-        parts.append(f"prompts_read={self.prompts_read}")
-        parts.append(f"llm_read={self.llm_read}")
+        parts.append(f"prompts_read={sorted(self.prompts_read)}")
+        parts.append(f"llm_read={sorted(self.llm_read)}")
         return " ".join(parts)
 
 
@@ -131,19 +173,50 @@ def activate_for(payload: Any, label: str) -> Iterator[OverrideScope]:
 def bind_context(fn: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap `fn` so every call runs under a copy of the CALLER's context — the
     active override scope included. For ThreadPoolExecutor, whose worker
-    threads start with an empty context. Each call gets its own Context
-    object, since one Context cannot be entered by two threads at once."""
+    threads start with an empty context. Each call gets its own copy, since
+    one Context cannot be entered by two threads at once (this is what
+    asyncio.to_thread does per call)."""
     snapshot = contextvars.copy_context()
 
     def run(*args: Any, **kwargs: Any) -> Any:
-        def _inner() -> Any:
-            for var, value in snapshot.items():
-                var.set(value)
-            return fn(*args, **kwargs)
-
-        return contextvars.Context().run(_inner)
+        return snapshot.copy().run(fn, *args, **kwargs)
 
     return run
+
+
+def with_payload_overrides(label: str):
+    """Decorator for an HTTP handler (sync or async): activate the override
+    scope carried by its request model — the first argument that declares
+    `prompt_overrides` — for the duration of the call, and log the summary.
+    Put it under the route decorator; functools.wraps keeps the signature
+    FastAPI reads."""
+
+    def payload_in(args: tuple, kwargs: dict) -> Any:
+        for value in (*args, *kwargs.values()):
+            if hasattr(value, "prompt_overrides"):
+                return value
+        return None
+
+    def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
+        if inspect.iscoroutinefunction(fn):
+
+            @functools.wraps(fn)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                with activate_for(payload_in(args, kwargs), label):
+                    return await fn(*args, **kwargs)
+
+            async_wrapper.overrides_label = label  # type: ignore[attr-defined]
+            return async_wrapper
+
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            with activate_for(payload_in(args, kwargs), label):
+                return fn(*args, **kwargs)
+
+        wrapper.overrides_label = label  # type: ignore[attr-defined]
+        return wrapper
+
+    return decorate
 
 
 class _Prompts:
@@ -158,8 +231,7 @@ class _Prompts:
         scope = _scope.get()
         if scope is None:
             return entry.text
-        if key not in scope.prompts_read:
-            scope.prompts_read.append(key)
+        scope.prompts_read.add(key)
         text = scope.prompt_overrides.get(key)
         if text is None:
             return entry.text
@@ -174,8 +246,7 @@ class _Llm:
         scope = _scope.get()
         if scope is None:
             return getattr(settings, name)
-        if name not in scope.llm_read:
-            scope.llm_read.append(name)
+        scope.llm_read.add(name)
         if name in scope.llm_overrides:
             scope.applied.add(f"llm:{name}")
             return scope.llm_overrides[name]
@@ -211,9 +282,10 @@ def validate_prompt_overrides(value: Mapping[str, Any]) -> Dict[str, str]:
                 slots = template_slots(text)
             except ValueError as e:
                 raise ValueError(
-                    f"prompt override {key!r} has unbalanced braces ({e}); this "
-                    "prompt is a format template, so write literal braces as "
-                    "{{ and }}"
+                    f"prompt override {key!r} is not a valid format template "
+                    f"({e}); this prompt is rendered with str.format, so use only "
+                    f"plain {{name}} slots from {entry.slots} and write literal "
+                    "braces as {{ and }}"
                 ) from e
             unknown = [s for s in slots if s not in entry.slots]
             if unknown:

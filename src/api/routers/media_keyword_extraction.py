@@ -7,19 +7,15 @@ from src.api.schemas.media_keyword_extraction_schema import (
   MediaKeywordExtractionRequest,
 )
 from src.infrastructure.logger import get_logger
-from src.config.overrides import activate_for
+from src.config.overrides import with_payload_overrides
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 
 @router.post("/media/keywords")
+@with_payload_overrides("http:media_keywords")
 def media_keyword_extraction(request: MediaKeywordExtractionRequest) -> JSONResponse:
-  with activate_for(request, "http:media_keywords"):
-    return _media_keyword_extraction(request)
-
-
-def _media_keyword_extraction(request: MediaKeywordExtractionRequest) -> JSONResponse:
   logger.info(
     f"Media keyword extraction request - Type: '{request.media_type or 'content'}', "
     f"Title: '{request.media.get('title', 'N/A')}', Topics: {len(request.topics_list)}"

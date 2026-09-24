@@ -77,7 +77,7 @@ news_topics_and_claims_workflow = hatchet.workflow(
 @news_topics_and_claims_workflow.task(
     rate_limits=_CLAUDE, execution_timeout=_TOPIC_TIMEOUT, retries=3, backoff_factor=2.0
 )
-@with_overrides
+@with_overrides(label="news.extract_topics_and_claims:extract_topics")
 async def extract_topics(input: NewsTopicsAndClaimsRequest, ctx: Context) -> dict:
     spend_guard.check_and_record("claude")
     # Blocking Anthropic SDK call (incl. its own bounded feedback retry); offload
@@ -95,7 +95,7 @@ async def extract_topics(input: NewsTopicsAndClaimsRequest, ctx: Context) -> dic
     retries=3,
     backoff_factor=2.0,
 )
-@with_overrides
+@with_overrides(label="news.extract_topics_and_claims:extract_claims_fused")
 async def extract_claims_fused(
     input: NewsTopicsAndClaimsRequest, ctx: Context
 ) -> dict:
@@ -113,7 +113,7 @@ async def extract_claims_fused(
     parents=[extract_topics, extract_claims_fused],
     execution_timeout=_FINALIZE_TIMEOUT,
 )
-@with_overrides
+@with_overrides(label="news.extract_topics_and_claims:finalize")
 async def finalize(
     input: NewsTopicsAndClaimsRequest, ctx: Context
 ) -> NewsTopicsAndClaimsResponse:

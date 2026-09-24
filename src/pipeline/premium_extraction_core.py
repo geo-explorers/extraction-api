@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from typing import List, Optional
 import time
 
-from src.config.overrides import llm
 from src.preprocessing.transcript_parser import TranscriptParser
 from src.extraction.premium_claim_extractor import PremiumClaimExtractor
 from src.extraction.models import ClaimWithTopic
@@ -136,7 +135,7 @@ async def run_premium_extraction(
     """
     parser = parser or TranscriptParser()
     extractor = extractor or PremiumClaimExtractor()
-    model_used = llm.get("gemini_premium_model")
+    model_used = extractor.model_name  # honors a pinned model as well as an override
 
 
     # Step 1: Parse transcript

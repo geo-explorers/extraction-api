@@ -17,7 +17,6 @@ ROLE_SECTION = (
 
 GROUPING_SECTION = """─────────────────────────────────────────────
 EXTRACTION MODE: GROUPED BY TOPIC
-
 ─────────────────────────────────────────────
 
 A topic list for this material is provided under INPUTS. Iterate through the

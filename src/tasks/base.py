@@ -15,11 +15,8 @@ from typing import Awaitable, Callable, Generic, Optional, Type, TypeVar
 from pydantic import BaseModel
 from hatchet_sdk import Context, RateLimit
 
-from src.config.overrides import activate, overrides_of
+from src.config.overrides import activate_for
 from src.hatchet_client import hatchet
-from src.infrastructure.logger import get_logger
-
-logger = get_logger(__name__)
 
 TIn = TypeVar("TIn", bound=BaseModel)
 TOut = TypeVar("TOut", bound=BaseModel)
@@ -63,9 +60,10 @@ def with_overrides(fn=None, *, label: Optional[str] = None):
     line is visible in the dashboard too (verified against hatchet-lite: an
     explicit ctx.log would only duplicate it).
 
-    build_task applies this to every standalone handler; DAG steps declare it
-    themselves, under the `@workflow.task(...)` decorator, because each step is
-    its own Hatchet execution with its own copy of the workflow input.
+    build_task applies this to every standalone handler (label = the task
+    name); DAG steps declare it themselves, under the `@workflow.task(...)`
+    decorator with a "<workflow>:<step>" label, because each step is its own
+    Hatchet execution with its own copy of the workflow input.
     """
 
     def decorate(handler):
@@ -73,17 +71,12 @@ def with_overrides(fn=None, *, label: Optional[str] = None):
 
         @functools.wraps(handler)
         async def wrapper(input, ctx: Context):
-            prompt_ov, llm_ov = overrides_of(input)
-            with activate(prompt_ov, llm_ov) as scope:
-                try:
-                    return await handler(input, ctx)
-                finally:
-                    logger.info(scope.summary(name))
+            with activate_for(input, name):
+                return await handler(input, ctx)
 
         return wrapper
 
     return decorate(fn) if fn is not None else decorate
-
 
 
 def build_task(spec: TaskSpec):

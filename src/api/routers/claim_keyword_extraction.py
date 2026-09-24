@@ -7,19 +7,15 @@ from src.api.schemas.claim_keyword_extraction_schema import (
     ClaimKeywordExtractionRequest,
 )
 from src.infrastructure.logger import get_logger
-from src.config.overrides import activate_for
+from src.config.overrides import with_payload_overrides
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 
 @router.post("/claim-keywords")
+@with_payload_overrides("http:claim_keywords")
 def claim_keyword_extraction(request: ClaimKeywordExtractionRequest) -> JSONResponse:
-    with activate_for(request, "http:claim_keywords"):
-        return _claim_keyword_extraction(request)
-
-
-def _claim_keyword_extraction(request: ClaimKeywordExtractionRequest) -> JSONResponse:
     # Log incoming request payload
     logger.info(f"Claim keyword extraction request - Episode: '{request.title}', Claims: {len(request.claims)}, Topics: {len(request.topics_list)}")
 

@@ -7,6 +7,7 @@ now fetch their prompt through the registry.
 
 import asyncio
 import importlib
+import inspect
 import pkgutil
 from concurrent.futures import ThreadPoolExecutor
 
@@ -90,11 +91,11 @@ def test_registry_covers_every_task_family():
         assert expected in keys, expected
 
 
-def test_template_slots_reports_named_slots_and_flags_positional():
+def test_template_slots_accepts_only_plain_named_slots():
     assert template_slots("a {x} b {{lit}} {y} {x}") == ["x", "y"]
-    assert template_slots("{} and {0}") == ["{}", "{0}"]
-    with pytest.raises(ValueError):
-        template_slots("unbalanced {")
+    for bad in ["unbalanced {", "{} positional", "{0} positional", "{x.attr}", "{x[0]}", "{x!r}", "{x:>10}"]:
+        with pytest.raises(ValueError):
+            template_slots(bad)
 
 
 # ── Validation (what OverridesMixin runs at enqueue) ─────────────────────────
@@ -110,8 +111,11 @@ def test_validate_prompt_overrides_rejects_unknown_key_and_extra_slot():
         validate_prompt_overrides({"nope": "x"})
     with pytest.raises(ValueError, match="slots \\['bogus'\\]"):
         validate_prompt_overrides({"news_topics_extract": "{headline} {bogus}"})
-    with pytest.raises(ValueError, match="unbalanced braces"):
+    with pytest.raises(ValueError, match="not a valid format template"):
         validate_prompt_overrides({"news_topics_extract": "{headline"})
+    # traversal into the format arguments is rejected, not truncated to 'headline'
+    with pytest.raises(ValueError, match="not a plain"):
+        validate_prompt_overrides({"news_topics_extract": "{headline.__class__} {content}"})
     with pytest.raises(ValueError, match="non-empty"):
         validate_prompt_overrides({"news_topics_extract": "   "})
 
@@ -130,6 +134,19 @@ def test_llm_setting_names_are_the_tunable_model_params():
     assert "news_claim_claude_max_tokens" in names
     assert "news_collection_review_model" in names
     assert not any("embedding" in n or "rate_limit" in n for n in names)
+
+
+def test_every_llm_looking_setting_has_an_explicit_override_decision():
+    # A new *_model / *_temperature / *_thinking_level / *_max_tokens field must be
+    # listed as overridable or as deliberately not — never exposed by name alone.
+    from src.config.overrides import LLM_SETTINGS, LLM_SETTINGS_NOT_OVERRIDABLE, LLM_SETTING_SUFFIXES
+    from src.config.settings import Settings
+
+    looks_like_llm = {n for n in Settings.model_fields if n.endswith(LLM_SETTING_SUFFIXES)}
+    decided = set(LLM_SETTINGS) | set(LLM_SETTINGS_NOT_OVERRIDABLE)
+    assert looks_like_llm - decided == set(), "undecided LLM-looking settings"
+    assert set(LLM_SETTINGS) & set(LLM_SETTINGS_NOT_OVERRIDABLE) == set()
+    assert set(LLM_SETTINGS) <= set(Settings.model_fields)
 
 
 def test_validate_llm_overrides_types_and_ranges():
@@ -151,6 +168,7 @@ def test_validate_llm_overrides_types_and_ranges():
         {"not_a_setting": "x"},
         {"claims_extract_model": ""},
         {"claims_extract_temperature": 3},
+        {"gemini_news_claim_temperature": 1.5},  # also feeds Claude, whose ceiling is 1.0
         {"claims_extract_temperature": True},
         {"claims_extract_thinking_level": "max"},
         {"news_claim_claude_max_tokens": 0},
@@ -191,7 +209,7 @@ def test_prompts_get_prefers_active_override_and_records_it():
         assert prompts.get("news_topics_extract") == "custom {headline}"
         assert prompts.get("news_topics_extract.system") == PROMPTS["news_topics_extract.system"].text
         assert scope.applied == {"news_topics_extract"}
-        assert scope.prompts_read == ["news_topics_extract", "news_topics_extract.system"]
+        assert scope.prompts_read == {"news_topics_extract", "news_topics_extract.system"}
         assert scope.unused == set()
     assert prompts.get("news_topics_extract") == default
 
@@ -241,7 +259,7 @@ def test_with_overrides_activates_from_the_input_and_logs_summary(caplog):
         prompt_overrides={"claims_extract.core": "CORE!"},
         llm_overrides={"claims_extract_model": "probe-model", "claims_link_model": "unused"},
     )
-    with caplog.at_level(logging.INFO, logger="src.tasks.base"):
+    with caplog.at_level(logging.INFO, logger="src.config.overrides"):
         assert asyncio.run(step(inp, ctx=None)) == "done"
     assert seen == {"model": "probe-model", "prompt": "CORE!"}
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("overrides[probe]")]
@@ -252,10 +270,67 @@ def test_with_overrides_activates_from_the_input_and_logs_summary(caplog):
 
     # No overrides given: defaults resolve and the line says so.
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger="src.tasks.base"):
+    with caplog.at_level(logging.INFO, logger="src.config.overrides"):
         asyncio.run(step(PingInput(), ctx=None))
     assert seen["model"] == settings.claims_extract_model
     assert any("overrides[probe] none given" in r.getMessage() for r in caplog.records)
+
+
+def test_dag_steps_carry_qualified_labels():
+    import re
+    from pathlib import Path
+
+    for path in Path("src/tasks").glob("*.py"):
+        text = path.read_text()
+        for m in re.finditer(r"@(\w+_workflow)\.task\(", text):
+            # every DAG step is decorated with a "<workflow>:<step>" label
+            after = text[m.end():]
+            assert re.search(r'@with_overrides\(label="[a-z_.]+:\w+"\)\s*\nasync def', after), (path, m.start())
+
+
+def test_every_http_handler_with_an_override_payload_is_decorated():
+    import inspect
+
+    from src.api.main import app
+
+    checked = 0
+    for route in app.routes:
+        endpoint = getattr(route, "endpoint", None)
+        if endpoint is None or "POST" not in (getattr(route, "methods", None) or set()):
+            continue
+        params = inspect.signature(endpoint).parameters.values()
+        takes_payload = any(
+            hasattr(p.annotation, "model_fields") and "prompt_overrides" in p.annotation.model_fields
+            for p in params
+        )
+        if route.path == "/tasks":
+            continue  # the facade enqueues; the worker activates
+        if takes_payload:
+            assert getattr(endpoint, "overrides_label", None), f"{route.path} lacks @with_payload_overrides"
+            checked += 1
+    assert checked >= 7
+
+
+def test_with_payload_overrides_wraps_sync_and_async_handlers():
+    from src.config.overrides import with_payload_overrides
+    from src.tasks.ping import PingInput
+
+    @with_payload_overrides("http:probe")
+    def sync_handler(request: PingInput) -> str:
+        return llm.get("claims_extract_model")
+
+    @with_payload_overrides("http:probe-async")
+    async def async_handler(request: PingInput, extra: int = 0) -> str:
+        return llm.get("claims_extract_model")
+
+    req = PingInput(llm_overrides={"claims_extract_model": "http-model"})
+    assert sync_handler(req) == "http-model"
+    assert sync_handler(request=req) == "http-model"
+    assert asyncio.run(async_handler(req, extra=1)) == "http-model"
+    assert sync_handler(PingInput()) == settings.claims_extract_model
+    assert inspect.signature(sync_handler).parameters["request"].annotation is PingInput
+    assert current_scope() is None
+
 
 
 
@@ -391,3 +466,30 @@ def test_tasks_facade_rejects_bad_override_with_422():
     )
     assert resp.status_code == 422
     assert "unknown prompt key" in resp.text
+
+
+def test_decorated_route_activates_scope_through_fastapi(monkeypatch):
+    """The decorator must survive FastAPI's signature resolution (body parsing
+    via functools.wraps) and its threadpool for sync handlers."""
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+    from src.api.routers import guest_extraction as router_mod
+
+    def fake_extract(title, description, truncated_transcript=""):
+        return [{"name": llm.get("gemini_extraction_model"), "urls": [prompts.get("guest_extraction")[:12]]}]
+
+    monkeypatch.setattr(router_mod, "extract_podcast_guests", fake_extract)
+    client = TestClient(app)
+    resp = client.post(
+        "/extract/guests",
+        headers={"X-API-Key": settings.api_key},
+        json={
+            "title": "t", "description": "d", "truncated_transcript": "x",
+            "llm_overrides": {"gemini_extraction_model": "route-model"},
+            "prompt_overrides": {"guest_extraction": "PROMPT-VIA-ROUTE {title}"},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["guests"] == [{"name": "route-model", "urls": ["PROMPT-VIA-R"]}]
+    assert current_scope() is None

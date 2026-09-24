@@ -56,7 +56,7 @@ geo_workflow = hatchet.workflow(
 
 
 @geo_workflow.task(execution_timeout=timedelta(minutes=2), retries=3, backoff_factor=2.0)
-@with_overrides
+@with_overrides(label="geo.assign_spaces_to_sheet:fetch_spaces")
 async def fetch_spaces(input: GeoSpaceAssignInput, ctx: Context) -> dict:
     # Blocking HTTP read; offload so the worker event loop stays free. model_dump
     # so the step output is a JSON-serializable dict for ctx.task_output /
@@ -66,7 +66,7 @@ async def fetch_spaces(input: GeoSpaceAssignInput, ctx: Context) -> dict:
 
 
 @geo_workflow.task(execution_timeout=_FETCH_TIMEOUT, retries=3, backoff_factor=2.0)
-@with_overrides
+@with_overrides(label="geo.assign_spaces_to_sheet:fetch_entities")
 async def fetch_entities(input: GeoSpaceAssignInput, ctx: Context) -> dict:
     entities = await asyncio.to_thread(
         hypergraph_client.fetch_entities, input.type_id, input.entity_query
@@ -81,7 +81,7 @@ async def fetch_entities(input: GeoSpaceAssignInput, ctx: Context) -> dict:
     retries=3,
     backoff_factor=2.0,
 )
-@with_overrides
+@with_overrides(label="geo.assign_spaces_to_sheet:assign_spaces")
 async def assign_spaces(input: GeoSpaceAssignInput, ctx: Context) -> dict:
     spaces = [Space(**s) for s in ctx.task_output(fetch_spaces)["spaces"]]
     entities = [Entity(**e) for e in ctx.task_output(fetch_entities)["entities"]]
@@ -91,7 +91,7 @@ async def assign_spaces(input: GeoSpaceAssignInput, ctx: Context) -> dict:
 
 
 @geo_workflow.task(parents=[assign_spaces], execution_timeout=_EXPORT_TIMEOUT, retries=0)
-@with_overrides
+@with_overrides(label="geo.assign_spaces_to_sheet:export_sheet")
 async def export_sheet(input: GeoSpaceAssignInput, ctx: Context) -> GeoSpaceAssignResult:
     rows_data = ctx.task_output(assign_spaces)["rows"]
     # Title from the fetched type's human name when available (type_id is a UUID).
