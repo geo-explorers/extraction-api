@@ -119,6 +119,7 @@ See `.env.example` for all settings. Key flags:
 - `NEWS_DEBATE_ZERO_RETRY_ENABLED` — one fresh generation+review draw when review approves zero candidates despite generation producing some
 - `NEWS_CLAIM_CLAUDE_MODEL` — Claude fallback for news claims
 - `ENABLE_EMBEDDINGS` — optional claim embeddings via an Ollama embedding service (off in production)
+- `API_KEY` / `API_KEYS` — the single legacy key, plus a comma-separated list of per-caller keys (`label:key`); any listed key is accepted, remove an entry to revoke one caller, the label shows in the enqueue log
 
 ## Tests
 

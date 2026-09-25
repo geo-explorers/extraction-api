@@ -336,7 +336,15 @@ class Settings(BaseSettings):
     )
     api_key: str = Field(
         default="change-me-in-production",
-        description="API key for authentication (X-API-Key header)"
+        description="API key for authentication (X-API-Key header). Still accepted alongside API_KEYS."
+    )
+    api_keys: str = Field(
+        default="",
+        description=(
+            "Additional accepted API keys, comma-separated, each optionally 'label:key' "
+            "(e.g. 'news-worker:k1,agent-ops:k2'). Remove an entry to revoke that caller alone; "
+            "the label names the caller in logs."
+        ),
     )
 
     # Podcast publishing (postgres_to_geo "Export API").

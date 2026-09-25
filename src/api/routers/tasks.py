@@ -13,7 +13,7 @@ also serves the sync extraction endpoints).
 
 import json
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ValidationError
 
 from src.infrastructure.logger import get_logger
@@ -32,7 +32,7 @@ class EnqueueRequest(BaseModel):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def enqueue_task(req: EnqueueRequest) -> dict:
+def enqueue_task(req: EnqueueRequest, request: Request) -> dict:
     """Validate and enqueue a task run; returns the run id to poll."""
     from src.tasks.registry import get_task  # lazy: keep API boot Hatchet-free
 
@@ -59,7 +59,8 @@ def enqueue_task(req: EnqueueRequest) -> dict:
         )
 
     ref = entry.runnable.run(input_obj, wait_for_result=False)
-    logger.info(f"Enqueued {req.type} -> run {ref.workflow_run_id}")
+    caller = getattr(request.state, "api_caller", "unknown")
+    logger.info(f"Enqueued {req.type} -> run {ref.workflow_run_id} (caller={caller})")
     return {"id": ref.workflow_run_id, "type": req.type, "status": "queued"}
 
 
