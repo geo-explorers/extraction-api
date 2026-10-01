@@ -18,6 +18,9 @@ All endpoints require an `X-API-Key` header. Interactive docs at `/docs`.
 | `POST /extract/news/claims/claude` | Same prompt on Claude — fallback when the Gemini path fails | news-worker (main) |
 | `POST /extract/media/keywords` | Media-type-agnostic keyword/topic extraction (articles, papers, …) | news-worker (in progress) |
 | `POST /extract/claim-keywords` | Per-claim keyword/topic extraction | (reserved) |
+| `POST /tasks`, `GET /tasks/{id}` | Enqueue a Hatchet task run; poll its status/result | news-worker, postgres_to_geo |
+| `GET /tasks?type=…`, `GET /tasks/{id}/input`, `GET /tasks/{id}/steps`, `GET /tasks/{id}/logs` | Inspect recent runs: the exact input a run received, every DAG step's output, and the run's log lines. Read-only API keys (`label:ro:key`) can use these and nothing else | agents, prompt testing |
+| `GET /prompts`, `GET /prompts/{key}` | Prompt catalog for `prompt_overrides` (see below) | agents, prompt testing |
 
 ## Prompt and LLM overrides (hand-testing without a deploy)
 
@@ -119,7 +122,7 @@ See `.env.example` for all settings. Key flags:
 - `NEWS_DEBATE_ZERO_RETRY_ENABLED` — one fresh generation+review draw when review approves zero candidates despite generation producing some
 - `NEWS_CLAIM_CLAUDE_MODEL` — Claude fallback for news claims
 - `ENABLE_EMBEDDINGS` — optional claim embeddings via an Ollama embedding service (off in production)
-- `API_KEY` / `API_KEYS` — the single legacy key, plus a comma-separated list of per-caller keys (`label:key`); any listed key is accepted, remove an entry to revoke one caller, the label shows in the enqueue log
+- `API_KEY` / `API_KEYS` — the single legacy key, plus a comma-separated list of per-caller keys (`label:key`, or read-only `label:ro:key`); any listed key is accepted, remove an entry to revoke one caller, the label shows in the enqueue log; a read-only key can only make GET requests
 
 ## Tests
 
