@@ -592,6 +592,11 @@ tools.
 - `POST /tasks` with `{"type": "<task>", "payload": {...}}` → `201 {"id": ...}`;
   `GET /tasks/{id}` → `{"status", "result", "error"}`; poll until `COMPLETED`, `FAILED` or
   `CANCELLED`. Invalid overrides return `422` immediately with the reason.
+- Inspection (works with a read-only key): `GET /tasks?type=<task>&limit=20&since_hours=24`
+  lists recent runs; `GET /tasks/{id}/input` is the exact input a run received (for news runs,
+  every source article's body); `GET /tasks/{id}/steps` is every DAG step with its output or
+  error; `GET /tasks/{id}/logs` is the run's log lines per step, including the
+  `overrides[...] applied=[...] unused=[...]` summary.
 - Sync endpoints (`POST /extract/guests`, `/extract/hosts`, `/extract/keywords`,
   `/extract/media/keywords`, `/extract/claim-keywords`, `/extract/news/claims`,
   `/extract/news/claims/claude`) accept the same two maps in the request body and answer in one call.
@@ -645,10 +650,13 @@ To turn a multi-line prompt into a JSON string on its own: `jq -Rs . prompt.txt`
 - A retired or misspelled model name fails the run with the provider's error in `.error`; there is
   no fallback.
 - Every run is billed. Keep test documents short; `claims.extract` is up to three model calls.
-- What you cannot see over `curl`: the `overrides[...] applied=[...] unused=[...]` line is in the
-  run's log in the Hatchet dashboard and the worker log, not in `GET /tasks/{id}`. If a result
-  looks unchanged, ask the user to check that line, or confirm the key is read by the step (some
+- After a run, `GET /tasks/{id}/logs` shows the `overrides[...] applied=[...] unused=[...]`
+  line per step. If your key is under `unused`, the step did not read that prompt (some
   `claims.extract` sections only render when their option is on).
+- To reproduce a production run exactly, take its input from `GET /tasks/{id}/input`, add your
+  `prompt_overrides`, and enqueue it; compare `GET /tasks/{id}/steps` of both runs step by step.
+- A read-only key (`label:ro:key` in `API_KEYS`) can use every `GET` above but cannot enqueue
+  or call the sync endpoints; use it when an agent only needs to study runs.
 
 **Making it permanent**
 

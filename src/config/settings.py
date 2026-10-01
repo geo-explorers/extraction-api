@@ -341,9 +341,10 @@ class Settings(BaseSettings):
     api_keys: str = Field(
         default="",
         description=(
-            "Additional accepted API keys, comma-separated, each optionally 'label:key' "
-            "(e.g. 'news-worker:k1,agent-ops:k2'). Remove an entry to revoke that caller alone; "
-            "the label names the caller in logs."
+            "Additional accepted API keys, comma-separated, each 'label:key' or read-only "
+            "'label:ro:key' (e.g. 'news-worker:k1,agent-ops:ro:k2'). Remove an entry to revoke "
+            "that caller alone; the label names the caller in logs. A read-only key may only "
+            "make GET requests (inspect prompts, runs, inputs, step outputs, logs)."
         ),
     )
 

@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 import requests
 
-from src.api.auth import configured_keys, describe, resolve_caller
+from src.api.auth import READ_METHODS, configured_keys, describe, resolve_key
 from src.api.routers import extraction, guest_extraction, host_extraction, keyword_extraction, media_keyword_extraction, claim_keyword_extraction, news_claim_extract, prompts, tasks
 from src.api.exceptions import (
     database_exception_handler,
@@ -31,7 +31,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"Timeout: {settings.api_timeout}s (0 = no timeout)")
     logger.info(f"Database: {settings.database_url}")
     logger.info(f"Embeddings: {settings.enable_embeddings}")
-    logger.info(describe(configured_keys(settings)))
+    key_problems: list[str] = []
+    logger.info(describe(configured_keys(settings, key_problems)))
+    for problem in key_problems:
+        logger.error(f"API_KEYS entry rejected (it will not authenticate): {problem}")
     if settings.api_key == "change-me-in-production" and not settings.api_keys:
         logger.warning("API_KEY is the default value; set API_KEY and/or API_KEYS")
     logger.info("API Documentation: http://localhost:8000/docs")
@@ -96,8 +99,8 @@ async def verify_api_key(request: Request, call_next):
         )
 
     # Validate against API_KEY and every API_KEYS entry (constant-time).
-    caller = resolve_caller(api_key, configured_keys(settings))
-    if caller is None:
+    key = resolve_key(api_key, configured_keys(settings))
+    if key is None:
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={
@@ -105,8 +108,18 @@ async def verify_api_key(request: Request, call_next):
             }
         )
 
+    # A read-only key may inspect (GET) but never enqueue, extract or export.
+    if key.read_only and request.method not in READ_METHODS:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "detail": "This API key is read-only; it cannot enqueue tasks or run extractions"
+            }
+        )
+
     # API key is valid; remember which caller it was for logs, then proceed.
-    request.state.api_caller = caller
+    request.state.api_caller = key.label
+    request.state.api_scope = key.scope
     return await call_next(request)
 
 
