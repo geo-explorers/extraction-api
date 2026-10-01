@@ -19,7 +19,7 @@ All endpoints require an `X-API-Key` header. Interactive docs at `/docs`.
 | `POST /extract/media/keywords` | Media-type-agnostic keyword/topic extraction (articles, papers, …) | news-worker (in progress) |
 | `POST /extract/claim-keywords` | Per-claim keyword/topic extraction | (reserved) |
 | `POST /tasks`, `GET /tasks/{id}` | Enqueue a Hatchet task run; poll its status/result | news-worker, postgres_to_geo |
-| `GET /tasks?type=…`, `GET /tasks/{id}/input`, `GET /tasks/{id}/steps`, `GET /tasks/{id}/logs` | Inspect recent runs: the exact input a run received, every DAG step's output, and the run's log lines. Read-only API keys (`label:ro:key`) can use these and nothing else | agents, prompt testing |
+| `GET /tasks?type=…`, `GET /tasks/{id}/input`, `GET /tasks/{id}/steps`, `GET /tasks/{id}/logs` | Inspect recent runs: the exact input a run received, every DAG step's output, and the run's log lines. A read-only API key (`label:ro:key`) may call any `GET` route (these, `GET /tasks/{id}`, `GET /tasks/stats`, `GET /prompts`) and nothing else | agents, prompt testing |
 | `GET /prompts`, `GET /prompts/{key}` | Prompt catalog for `prompt_overrides` (see below) | agents, prompt testing |
 
 ## Prompt and LLM overrides (hand-testing without a deploy)

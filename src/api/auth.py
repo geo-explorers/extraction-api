@@ -38,34 +38,50 @@ class ApiKey:
         return self.scope == SCOPE_READ_ONLY
 
 
-def parse_api_keys(raw: str) -> List[ApiKey]:
+def parse_api_keys(raw: str, problems: Optional[List[str]] = None) -> List[ApiKey]:
     """Parse the API_KEYS setting. An entry is "label:key", "label:ro:key"
-    (or "label:rw:key") or a bare key; bare keys get positional labels
-    (key-1, key-2, ...) and every key is read-write unless marked "ro".
-    Blank entries are ignored."""
+    (or "label:rw:key", scope case-insensitive) or a bare key; bare keys get
+    positional labels (key-1, key-2, ...) and every key is read-write unless
+    marked "ro". Blank entries are ignored.
+
+    An entry that LOOKS scoped but is not — "label:RO-only:key", or "ro:key"
+    with the label left out — is rejected rather than silently admitted as a
+    read-write key; the reason is appended to `problems` and logged at startup.
+    A rejected entry never authenticates, so a typo fails closed."""
     keys: List[ApiKey] = []
     for item in (raw or "").split(","):
         item = item.strip()
         if not item:
             continue
         label, sep, rest = item.partition(":")
-        if sep and _LABEL_RE.fullmatch(label.strip()) and rest.strip():
+        label = label.strip()
+        if sep and _LABEL_RE.fullmatch(label) and rest.strip():
             scope, sep2, value = rest.partition(":")
-            if sep2 and scope.strip() in SCOPES and value.strip():
-                keys.append(ApiKey(label.strip(), value.strip(), scope.strip()))
+            if label.lower() in SCOPES:
+                _reject(problems, f"entry {label!r}:… has a scope where the label should be; write label:ro:key")
+            elif sep2 and value.strip():
+                if scope.strip().lower() in SCOPES:
+                    keys.append(ApiKey(label, value.strip(), scope.strip().lower()))
+                else:
+                    _reject(problems, f"entry {label!r} has unknown scope {scope.strip()!r}; use ro or rw")
             else:
-                keys.append(ApiKey(label.strip(), rest.strip()))
+                keys.append(ApiKey(label, rest.strip()))
         else:
             keys.append(ApiKey(f"key-{len(keys) + 1}", item))
     return keys
 
 
-def configured_keys(settings) -> List[ApiKey]:
+def _reject(problems: Optional[List[str]], reason: str) -> None:
+    if problems is not None:
+        problems.append(reason)
+
+
+def configured_keys(settings, problems: Optional[List[str]] = None) -> List[ApiKey]:
     """Every key the API accepts right now: the legacy API_KEY first, then API_KEYS."""
     keys: List[ApiKey] = []
     if settings.api_key:
         keys.append(ApiKey(LEGACY_LABEL, settings.api_key))
-    keys.extend(parse_api_keys(settings.api_keys))
+    keys.extend(parse_api_keys(settings.api_keys, problems))
     return keys
 
 

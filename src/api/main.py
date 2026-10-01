@@ -31,7 +31,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"Timeout: {settings.api_timeout}s (0 = no timeout)")
     logger.info(f"Database: {settings.database_url}")
     logger.info(f"Embeddings: {settings.enable_embeddings}")
-    logger.info(describe(configured_keys(settings)))
+    key_problems: list[str] = []
+    logger.info(describe(configured_keys(settings, key_problems)))
+    for problem in key_problems:
+        logger.error(f"API_KEYS entry rejected (it will not authenticate): {problem}")
     if settings.api_key == "change-me-in-production" and not settings.api_keys:
         logger.warning("API_KEY is the default value; set API_KEY and/or API_KEYS")
     logger.info("API Documentation: http://localhost:8000/docs")
