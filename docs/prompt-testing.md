@@ -137,6 +137,7 @@ others. Prompts marked plain text have no slots and may contain any braces.
 | `claims_extract.summary` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
 | `claims_extract.factuality` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
 | `claims_extract.contestability` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
+| `claims_extract.stance` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
 | `claims_extract.topic_vocabulary` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
 | `claims_extract.consolidation` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
 | `claims_extract.focus_topics` | `claims.extract` | `{focus_topics}` | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
@@ -149,6 +150,7 @@ others. Prompts marked plain text have no slots and may contain any braces.
 | `claims_extract.keep_summary_empty` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
 | `claims_extract.keep_factuality_null` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
 | `claims_extract.keep_contestability_null` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
+| `claims_extract.keep_stance_null` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
 | `claims_extract.keep_assigned_topics_empty` | `claims.extract` | none (plain text; braces allowed) | [`src/config/prompts/claims_extract/sections.py`](../src/config/prompts/claims_extract/sections.py) |
 | `space_assignment.system` | `geo.assign_spaces_to_sheet` | none (plain text; braces allowed) | [`src/config/prompts/space_assignment_prompt.py`](../src/config/prompts/space_assignment_prompt.py) |
 | `space_assignment.output` | `geo.assign_spaces_to_sheet` | none (plain text; braces allowed) | [`src/config/prompts/space_assignment_prompt.py`](../src/config/prompts/space_assignment_prompt.py) |

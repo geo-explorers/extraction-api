@@ -70,6 +70,12 @@ class ClaimsExtractInput(OverridesMixin):
   # and against, False = settled by verifying one narrowly scoped fact).
   # Independent of classify_factuality: a claim can be both.
   classify_contestability: bool = False
+  # When true, each claim is judged against the overall title (the debated
+  # main claim) and surfaced as `stance`: "supports", "opposes" or
+  # "addresses" (on the subject, but bearing neither way). Judged on what the
+  # claim says, never on which side its speaker argued. Requires `title`; a
+  # debate on an open question has no main claim and must leave this off.
+  classify_stance: bool = False
   # Closed labeling vocabulary: when non-empty, the model assigns each claim
   # ALL the entries that apply (zero is valid), surfaced per claim as
   # `assigned_topics`. Selection happens by index into this list, so the
@@ -81,6 +87,11 @@ class ClaimsExtractInput(OverridesMixin):
 
   @model_validator(mode="after")
   def _validate_caps(self) -> "ClaimsExtractInput":
+    if self.classify_stance and not (self.title or "").strip():
+      raise ValueError(
+        "classify_stance needs a title: stance is judged against the main "
+        "claim the title states"
+      )
     total = sum(len(d.content) for d in self.documents)
     if total > MAX_TOTAL_CONTENT_CHARS:
       raise ValueError(
@@ -96,6 +107,12 @@ class ClaimsExtractInput(OverridesMixin):
 
 
 # ── Response types ─────────────────────────────────────────────────────
+
+# A claim's stance toward the main claim. The three values map one-to-one
+# onto the Supports / Opposes / Addresses relations the debate publisher
+# writes from each extracted claim to the debated claim.
+Stance = Literal["supports", "opposes", "addresses"]
+STANCES: tuple = ("supports", "opposes", "addresses")
 
 
 class AssignedTopicOut(BaseModel):
@@ -114,6 +131,9 @@ class ExtractedClaimOut(BaseModel):
   # True = broad and contestable, False = narrowly verifiable; None when
   # contestability was not requested.
   is_contestable: Optional[bool] = None
+  # Stance toward the overall title (the debated main claim); None when
+  # stance was not requested, or when the model gave no valid verdict.
+  stance: Optional[Stance] = None
   # Vocabulary entries assigned to this claim; always [] unless the request
   # provided a topic_vocabulary.
   assigned_topics: List[AssignedTopicOut] = Field(default_factory=list)

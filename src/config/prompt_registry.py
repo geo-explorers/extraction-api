@@ -144,6 +144,7 @@ _register("claims_extract.quotes", _ce_sections.QUOTES_SECTION, formatted=False,
 _register("claims_extract.summary", _ce_sections.SUMMARY_SECTION, formatted=False, module=_ce_sections)
 _register("claims_extract.factuality", _ce_sections.FACTUALITY_SECTION, formatted=False, module=_ce_sections)
 _register("claims_extract.contestability", _ce_sections.CONTESTABILITY_SECTION, formatted=False, module=_ce_sections)
+_register("claims_extract.stance", _ce_sections.STANCE_SECTION, formatted=False, module=_ce_sections)
 _register("claims_extract.topic_vocabulary", _ce_sections.TOPIC_VOCABULARY_SECTION, formatted=False, module=_ce_sections)
 _register("claims_extract.consolidation", _ce_sections.CONSOLIDATION_SECTION, formatted=False, module=_ce_sections)
 _register("claims_extract.focus_topics", _ce_sections.FOCUS_TOPICS_SECTION, formatted=True, module=_ce_sections)
@@ -156,6 +157,7 @@ _register("claims_extract.keep_quotes_empty", _ce_sections.KEEP_QUOTES_EMPTY, fo
 _register("claims_extract.keep_summary_empty", _ce_sections.KEEP_SUMMARY_EMPTY, formatted=False, module=_ce_sections)
 _register("claims_extract.keep_factuality_null", _ce_sections.KEEP_FACTUALITY_NULL, formatted=False, module=_ce_sections)
 _register("claims_extract.keep_contestability_null", _ce_sections.KEEP_CONTESTABILITY_NULL, formatted=False, module=_ce_sections)
+_register("claims_extract.keep_stance_null", _ce_sections.KEEP_STANCE_NULL, formatted=False, module=_ce_sections)
 _register("claims_extract.keep_assigned_topics_empty", _ce_sections.KEEP_ASSIGNED_TOPICS_EMPTY, formatted=False, module=_ce_sections)
 
 # ── Geo ───────────────────────────────────────────────────────────────────────

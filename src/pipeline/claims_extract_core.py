@@ -20,6 +20,7 @@ from src.api.schemas.claims_extract_schema import (
     ClaimGroup,
     ExtractedClaimOut,
     ExtractedQuoteOut,
+    STANCES,
     TakeawayOut,
 )
 from src.infrastructure.logger import get_logger
@@ -137,6 +138,29 @@ def assign_vocabulary_topics(
         row["assigned_topics"] = assigned
         resolved.append(row)
     return resolved
+
+
+def normalize_stances(raw_claims: List[dict]) -> Tuple[List[dict], int]:
+    """Coerce each raw claim row's `stance` to one of STANCES or None, so a
+    verdict the model misspelled ("Supports", "neutral") costs that claim its
+    stance rather than the claim itself — sanitize validates rows against a
+    Literal and would otherwise drop the whole row. Returns the rows and how
+    many carried no usable verdict."""
+    normalized: List[dict] = []
+    missing = 0
+    for row in raw_claims:
+        if not isinstance(row, dict):
+            normalized.append(row)
+            continue
+        row = dict(row)
+        value = row.get("stance")
+        stance = value.strip().lower() if isinstance(value, str) else None
+        if stance not in STANCES:
+            stance = None
+            missing += 1
+        row["stance"] = stance
+        normalized.append(row)
+    return normalized, missing
 
 
 def sanitize_claims(raw_claims: List[dict], num_documents: int) -> List[ExtractedClaimOut]:
@@ -295,6 +319,18 @@ def assemble_result(
     raw_claims = extraction.get("claims", [])
     if input.topic_vocabulary:
         raw_claims = assign_vocabulary_topics(raw_claims, input.topic_vocabulary)
+    if input.classify_stance:
+        raw_claims, missing_stances = normalize_stances(raw_claims)
+        if missing_stances:
+            logger.warning(
+                f"{missing_stances} claim(s) came back without a valid stance; "
+                "publishing them without one"
+            )
+    else:
+        raw_claims = [
+            {**row, "stance": None} if isinstance(row, dict) else row
+            for row in raw_claims
+        ]
     claims = sanitize_claims(raw_claims, num_documents)
 
     # Strip unrequested sections even if the model emitted them.

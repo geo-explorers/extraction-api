@@ -77,6 +77,15 @@ class LLMClaim(BaseModel):
             "factuality classification was requested."
         ),
     )
+    stance: Optional[str] = Field(
+        default=None,
+        description=(
+            "The claim's stance toward the overall title (the main claim): "
+            "'supports', 'opposes' or 'addresses'. Judged on the claim's "
+            "content, never on the speaker's side. Leave null unless stance "
+            "classification was requested."
+        ),
+    )
 
 
 class LLMGroup(BaseModel):
