@@ -223,6 +223,52 @@ When this section is present, every claim must carry an explicit true or
 false — never leave `is_contestable` null."""
 
 
+STANCE_SECTION = """─────────────────────────────────────────────
+STANCE TOWARD THE MAIN CLAIM (REQUESTED)
+─────────────────────────────────────────────
+
+The overall title under INPUTS is the MAIN CLAIM the material argues about.
+For every claim, set `stance` to exactly one of:
+
+supports — if the claim is true, it is a reason to accept the main claim: it
+makes the main claim more likely, more important, or more justified.
+
+opposes — if the claim is true, it is a reason to reject the main claim: it
+makes the main claim less likely, undercuts its premises, or names a cost,
+risk or obstacle that weighs against it.
+
+addresses — the claim is about the main claim's subject but, taken on its
+own, is not a reason either way: background facts, definitions, history,
+descriptions of how something currently works, considerations that cut both
+ways, and claims whose bearing depends on an argument the claim itself does
+not make.
+
+Judge the CONTENT of the claim, never who said it:
+1. Ignore the speaker's side. The caller context may list each participant
+   with a side (Supports / Opposes, For / Against); that tells you who
+   argued what, not what a claim says, and must not decide any stance.
+   Debaters concede points, state shared facts and argue against their own
+   side's weaker versions; each such claim is judged on what it asserts.
+2. Concessions are judged by their content. If the speaker arguing FOR "Open-
+   source AI models should be restricted" says "Regulating open-source AI is
+   hard", that claim is a reason against restricting them: opposes.
+3. Ask "if this claim is true, does it push a reasonable reader toward
+   accepting the main claim, toward rejecting it, or neither?" Do not reward
+   a claim for sounding agreeable or penalize it for sounding critical; a
+   critical remark about the status quo can support a main claim that
+   proposes changing it.
+4. Direction needs a clear link. When the claim only bears on the main claim
+   through premises it does not state, or when reasonable readers on both
+   sides would cite it, choose addresses. Do not stretch a claim into a
+   direction to avoid addresses — addresses is a normal, frequent answer.
+5. Judge each claim on its own terms. Do not aim for balance between the
+   three labels or between the sides, and do not infer a stance from the
+   order of turns.
+
+When this section is present, every claim must carry one of the three
+values — never leave `stance` null."""
+
+
 CONSOLIDATION_SECTION = """─────────────────────────────────────────────
 CROSS-DOCUMENT CONSOLIDATION
 ─────────────────────────────────────────────
@@ -325,6 +371,10 @@ KEEP_ASSIGNED_TOPICS_EMPTY = (
 KEEP_CONTESTABILITY_NULL = (
     "- Contestability classification was not requested: leave every claim's "
     "is_contestable null."
+)
+
+KEEP_STANCE_NULL = (
+    "- Stance classification was not requested: leave every claim's stance null."
 )
 
 KEEP_FACTUALITY_NULL = "- Factuality classification was not requested: leave every claim's is_factual null."

@@ -152,6 +152,10 @@ def _final_validation(input: ClaimsExtractInput, grouping: bool) -> str:
             "pointed out — every such claim is rewritten as the proposition "
             "itself."
         )
+        checks.append(
+            "- No claim is an opponent's point that the speaker restated only "
+            "to rebut it and that cites the rebutting speaker's document."
+        )
         if input.title:
             checks.append(
                 "- No claim restates the overall title (the motion) or its "
@@ -172,6 +176,12 @@ def _final_validation(input: ClaimsExtractInput, grouping: bool) -> str:
         checks.append(
             "- Every claim has is_contestable set to an explicit true or false, "
             "judged on the scope of its main assertion rather than its truth."
+        )
+    if input.classify_stance:
+        checks.append(
+            "- Every claim has stance set to supports, opposes or addresses, "
+            "judged on what the claim asserts about the main claim — re-read "
+            "each one without looking at which participant said it."
         )
     if input.topic_vocabulary:
         checks.append(
@@ -199,6 +209,8 @@ def _output_contract(input: ClaimsExtractInput, grouping: bool) -> str:
         lines.append(prompts.get(_P + "keep_factuality_null"))
     if not input.classify_contestability:
         lines.append(prompts.get(_P + "keep_contestability_null"))
+    if not input.classify_stance:
+        lines.append(prompts.get(_P + "keep_stance_null"))
     if not input.topic_vocabulary:
         lines.append(prompts.get(_P + "keep_assigned_topics_empty"))
     return "\n".join(lines)
@@ -230,6 +242,8 @@ def build_extract_prompt(input: ClaimsExtractInput, topics: List[str]) -> str:
         sections.append(prompts.get(_P + "factuality"))
     if input.classify_contestability:
         sections.append(prompts.get(_P + "contestability"))
+    if input.classify_stance:
+        sections.append(prompts.get(_P + "stance"))
     if input.topic_vocabulary:
         sections.append(prompts.get(_P + "topic_vocabulary"))
     if input.focus_topics:

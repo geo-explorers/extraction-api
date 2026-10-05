@@ -794,3 +794,99 @@ def test_contestability_section_closes_the_null_and_independence_gaps():
     assert "never leave `is_contestable` null" in flat
     # An example where both flags agree, so the pairing does not read as an inverse.
     assert "specific enough to be factual AND broad enough to be contestable" in flat
+
+
+# ── Stance toward the main claim (GEO-3142) ──────────────────────────────────
+
+_MOTION = "Open-source AI models should be restricted"
+
+
+def test_stance_defaults_off_and_field_defaults_null():
+    assert _input().classify_stance is False
+    assert ExtractedClaimOut(text="x").stance is None
+
+
+def test_stance_requires_a_title_to_judge_against():
+    """Stance is relative to the main claim. Without one (a question debate, a
+    headline-less corpus) there is nothing to judge against, so the request is
+    refused at enqueue rather than answered with invented verdicts."""
+    with pytest.raises(ValueError, match="classify_stance needs a title"):
+        _input(classify_stance=True)
+    with pytest.raises(ValueError, match="classify_stance needs a title"):
+        _input(classify_stance=True, title="   ")
+    assert _input(classify_stance=True, title=_MOTION).classify_stance is True
+
+
+def test_stance_section_and_checklist_only_when_requested():
+    from src.extraction.claims_prompt_builder import build_extract_prompt
+
+    on = build_extract_prompt(_input(grouping=False, classify_stance=True, title=_MOTION), [])
+    assert "STANCE TOWARD THE MAIN CLAIM (REQUESTED)" in on
+    assert "Every claim has stance set to supports, opposes or addresses" in on
+    assert "Stance classification was not requested" not in on
+
+    off = build_extract_prompt(_input(grouping=False, title=_MOTION), [])
+    assert "STANCE TOWARD THE MAIN CLAIM" not in off
+    assert "Stance classification was not requested" in off
+
+
+def test_stance_section_judges_content_not_the_speakers_side():
+    """The reference behaviour (the 2 Oct backfill): side-guessing was right only
+    61% of the time, so the rubric must forbid using the side the caller context
+    lists, and must carry the ticket's concession example verbatim in substance."""
+    from src.extraction.claims_prompt_builder import build_extract_prompt
+
+    prompt = build_extract_prompt(
+        _input(
+            grouping=False,
+            classify_stance=True,
+            title=_MOTION,
+            context="Debate motion: x. Participants: A (Supports), B (Opposes).",
+        ),
+        [],
+    )
+    flat = " ".join(prompt.split())
+    assert "Ignore the speaker's side" in flat
+    assert "must not decide any stance" in flat
+    assert '"Regulating open-source AI is hard", that claim is a reason against restricting them: opposes' in flat
+    assert "addresses is a normal, frequent answer" in flat
+    assert "never leave `stance` null" in flat
+
+
+def test_debate_layer_does_not_attribute_a_rebutted_point_to_the_rebutter():
+    from src.extraction.claims_prompt_builder import build_extract_prompt
+
+    flat = " ".join(build_extract_prompt(_input(grouping=False), []).split())
+    assert "extract the speaker's OWN proposition — the rebuttal — not X" in flat
+    assert "never cite the rebutting speaker's document for it in document_indices" in flat
+    assert "restated only to rebut it and that cites the rebutting speaker's document" in flat
+
+
+def test_stance_stripped_when_off_normalized_when_on():
+    from src.pipeline.claims_extract_core import assemble_result
+
+    extraction = {
+        "claims": [
+            {"text": "Regulating open-source AI is hard.", "confidence": 0.9, "stance": "opposes"},
+            {"text": "Open weights let anyone remove safety training.", "confidence": 0.9, "stance": " Supports "},
+            {"text": "Meta released Llama 3 in April 2024.", "confidence": 0.9, "stance": "addresses"},
+            # A verdict outside the vocabulary costs the claim its stance, never the claim.
+            {"text": "Open models speed up research.", "confidence": 0.9, "stance": "neutral"},
+            {"text": "Most labs publish model cards.", "confidence": 0.9},
+        ],
+        "groups": [], "quotes": [], "summary": "",
+    }
+    off = assemble_result(_input(grouping=False, title=_MOTION), extraction, [], model_used="m")
+    assert [c.stance for c in off.claims] == [None] * 5
+
+    on = assemble_result(
+        _input(grouping=False, classify_stance=True, title=_MOTION), extraction, [], model_used="m"
+    )
+    assert [c.stance for c in on.claims] == ["opposes", "supports", "addresses", None, None]
+
+
+def test_stance_prompt_keys_are_overridable():
+    from src.config.overrides import prompts
+
+    assert "STANCE TOWARD THE MAIN CLAIM" in prompts.get("claims_extract.stance")
+    assert "stance null" in prompts.get("claims_extract.keep_stance_null")

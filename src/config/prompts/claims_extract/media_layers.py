@@ -67,6 +67,12 @@ Propositions, never speech acts:
   proposition can be recovered, extract nothing from that passage.
 - Concessions and pledges: extract the conceded or pledged content ("Later
   school start times would benefit students"), not the act of conceding.
+- Rebuttals: when a speaker restates an opponent's point in order to rebut
+  it ("My opponent says X, but..."), extract the speaker's OWN proposition —
+  the rebuttal — not X. X belongs to the speaker who advanced it: extract it
+  only from that speaker's own words, and never cite the rebutting
+  speaker's document for it in document_indices. If the opponent's own
+  words are not among the documents, do not extract X at all.
 
 Balanced coverage:
 - Cover the claims of EVERY participant and side. Do not let one side
