@@ -1,6 +1,8 @@
 """claims.score_highlights without a provider: the rubric as questions, what the model is
 shown, the score arithmetic, the Perplexity wire format, failure handling, and registry wiring."""
 
+import asyncio
+
 import pytest
 
 from src.api.schemas.claims_score_highlights_schema import (
@@ -115,21 +117,17 @@ def test_score_claim_rejects_an_answer_set_missing_the_decision():
         score_claim(0, HighlightClaim(text="x"), {"other": YesNoAnswer(1.0)})
 
 
-def test_assemble_keeps_every_claim_in_order_with_nulls_for_failures():
+def test_assemble_keeps_every_claim_in_order_and_refuses_an_incomplete_set():
     inp = _input()
-    outcomes = [
-        _answers(essential=0.62),
-        DecisionError("HTTP 504"),
-        _answers(),
-    ]
-    out = assemble_result(inp, outcomes, "fake", "fake-model")
+    out = assemble_result(inp, [_answers(essential=0.62), _answers(essential=1.0), _answers()], "fake", "fake-model")
     assert [c.index for c in out.claims] == [0, 1, 2]
     assert out.claims[0].id == "c0" and out.claims[0].score == pytest.approx(0.62)
     assert out.claims[0].decisions == {"essential": 0.62}
-    assert out.claims[1].score is None and out.claims[1].error == "HTTP 504"
-    assert out.claims[1].decisions == {}
-    assert out.claims[2].score == 0.0
-    assert out.claims_scored == 2 and out.provider == "fake" and out.model_used == "fake-model"
+    assert out.claims[1].score == 1.0 and out.claims[2].score == 0.0
+    assert out.claims_scored == 3 and out.provider == "fake" and out.model_used == "fake-model"
+    # Fewer answer sets than claims is a broken contract, not two unscored claims.
+    with pytest.raises(DecisionError, match="answer sets"):
+        assemble_result(inp, [_answers()], "fake", "fake-model")
 
 
 # ── Perplexity wire format ───────────────────────────────────────────────────
@@ -229,24 +227,65 @@ async def test_perplexity_decide_sends_state_and_questions_and_returns_typed_ans
 
 
 @pytest.mark.asyncio
-async def test_perplexity_waits_retry_after_on_429_and_gives_up_on_a_client_error(monkeypatch):
+async def test_perplexity_waits_retry_after_on_429_and_backs_off_on_an_outage(monkeypatch):
     ok = _Response(200, {"answers": DOCS_ANSWERS})
     calls, sleeps = _patch_http(monkeypatch, [_Response(429, headers={"Retry-After": "3"}), _Response(504, text="<html>"), ok])
     model = pplx.PerplexityDecisionModel(api_key="k")
     await model.decide({"t": "x"}, {"defect": YesNo(instructions="?")}, model="m")
-    assert len(calls) == 3 and sleeps == [3.0, 4.0]  # Retry-After, then exponential backoff
+    # Retry-After for the 429; the 504 is the first outage failure, so the first backoff step.
+    assert len(calls) == 3 and sleeps == [3.0, 2.0]
 
+    # A Retry-After the server sets to minutes is capped: a run has a budget of its own.
+    calls, sleeps = _patch_http(monkeypatch, [_Response(429, headers={"Retry-After": "600"}), ok])
+    await model.decide({"t": "x"}, {"defect": YesNo(instructions="?")}, model="m")
+    assert sleeps == [pplx.MAX_RETRY_AFTER_SECONDS]
+
+    # A missing or HTTP-date Retry-After falls back to the backoff.
+    calls, sleeps = _patch_http(monkeypatch, [_Response(429), _Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}), ok])
+    await model.decide({"t": "x"}, {"defect": YesNo(instructions="?")}, model="m")
+    assert sleeps == [2.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_perplexity_classifies_what_can_be_retried(monkeypatch):
+    model = pplx.PerplexityDecisionModel(api_key="k")
+
+    # A refused key is final: no retry, not retryable.
     unauthorized = _Response(401, {"error": {"message": "Invalid API key", "type": "unauthorized"}})
     calls, sleeps = _patch_http(monkeypatch, [unauthorized])
-    with pytest.raises(DecisionError, match="HTTP 401: Invalid API key"):
+    with pytest.raises(DecisionError, match="HTTP 401: Invalid API key") as refused:
         await model.decide({"t": "x"}, {"defect": YesNo(instructions="?")}, model="m")
-    assert len(calls) == 1 and sleeps == []
+    assert len(calls) == 1 and sleeps == [] and refused.value.retryable is False
 
-    # Retries are bounded: the third retryable failure is the error.
-    calls, _ = _patch_http(monkeypatch, [_Response(503), _Response(503), _Response(503)])
-    with pytest.raises(DecisionError, match="HTTP 503"):
+    # An outage is retried a bounded number of times, then reported as retryable.
+    calls, _ = _patch_http(monkeypatch, [_Response(503)] * pplx.MAX_ATTEMPTS)
+    with pytest.raises(DecisionError, match="HTTP 503") as outage:
         await model.decide({"t": "x"}, {"defect": YesNo(instructions="?")}, model="m")
-    assert len(calls) == 3
+    assert len(calls) == pplx.MAX_ATTEMPTS and outage.value.retryable is True
+
+    # Rate limiting has its own, longer budget and does not spend the outage one.
+    calls, _ = _patch_http(monkeypatch, [_Response(429, headers={"Retry-After": "1"})] * pplx.MAX_RATE_LIMIT_ATTEMPTS)
+    with pytest.raises(DecisionError, match="HTTP 429") as limited:
+        await model.decide({"t": "x"}, {"defect": YesNo(instructions="?")}, model="m")
+    assert len(calls) == pplx.MAX_RATE_LIMIT_ATTEMPTS and limited.value.retryable is True
+
+    # A dropped connection is retried like an outage.
+    def drop(*args, **kwargs):
+        raise pplx.requests.ConnectionError("reset")
+
+    monkeypatch.setattr(pplx.requests, "post", drop)
+    with pytest.raises(DecisionError, match="request failed") as dropped:
+        await model.decide({"t": "x"}, {"defect": YesNo(instructions="?")}, model="m")
+    assert dropped.value.retryable is True
+
+    # A 200 that is not JSON, or not an object, is drift: final.
+    calls, _ = _patch_http(monkeypatch, [_Response(200, None, text="<html>")])
+    with pytest.raises(DecisionError, match="not JSON") as html:
+        await model.decide({"t": "x"}, {"defect": YesNo(instructions="?")}, model="m")
+    assert html.value.retryable is False
+    calls, _ = _patch_http(monkeypatch, [_Response(200, [1, 2])])
+    with pytest.raises(DecisionError, match="not a JSON object"):
+        await model.decide({"t": "x"}, {"defect": YesNo(instructions="?")}, model="m")
 
 
 def test_provider_factory_needs_a_known_provider_and_a_key(monkeypatch):
@@ -263,40 +302,96 @@ def test_provider_factory_needs_a_known_provider_and_a_key(monkeypatch):
 class _FakeDecider:
     provider = "fake"
 
-    def __init__(self, fail_on=()):
+    def __init__(self, fail_on=(), hang_on=(), retryable=False, delay=0.0):
         self.fail_on = set(fail_on)
+        self.hang_on = set(hang_on)
+        self.retryable = retryable
+        self.delay = delay
         self.seen = []
+        self.in_flight = 0
+        self.max_in_flight = 0
 
     async def decide(self, content, questions, *, model):
         self.seen.append((content["claim_under_test"], list(questions), model))
-        claim_number = int(content["claim_under_test"].split(",")[0].split()[1])
-        if claim_number - 1 in self.fail_on:
-            raise DecisionError(f"claim {claim_number} failed")
-        return _answers(essential=0.5)
+        claim_index = int(content["claim_under_test"].split(",")[0].split()[1]) - 1
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            if claim_index in self.hang_on:
+                await asyncio.Event().wait()  # until cancelled
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            if claim_index in self.fail_on:
+                raise DecisionError(f"claim {claim_index + 1} failed", retryable=self.retryable)
+            return _answers(essential=0.5)
+        finally:
+            self.in_flight -= 1
 
 
 @pytest.mark.asyncio
 async def test_task_scores_each_claim_with_the_configured_model(monkeypatch):
     from src.tasks import claims_score_highlights as task
 
-    fake = _FakeDecider(fail_on={1})
+    fake = _FakeDecider()
     monkeypatch.setattr(task, "get_decision_model", lambda provider: fake)
     with activate(llm_overrides={"claims_highlights_model": "other-model"}):
         result = await task._handle(_input(), None)
-    assert [c.score for c in result.claims] == [0.5, None, 0.5]
-    assert result.claims[1].error == "claim 2 failed"
-    assert result.claims_scored == 2 and result.provider == "fake" and result.model_used == "other-model"
+    assert [c.score for c in result.claims] == [0.5, 0.5, 0.5]
+    assert result.claims_scored == 3 and result.provider == "fake" and result.model_used == "other-model"
     assert len(fake.seen) == 3
     assert all(q == ["essential"] and m == "other-model" for _, q, m in fake.seen)
 
 
 @pytest.mark.asyncio
-async def test_task_fails_the_run_when_no_claim_could_be_scored(monkeypatch):
+async def test_one_failed_claim_fails_the_run_and_stops_the_others(monkeypatch):
+    """All or nothing: a consumer keeps what it gets, so a half-scored list would stay
+    half-scored for good. The other requests are cancelled, not awaited — the hanging claims
+    here would otherwise never return."""
     from src.tasks import claims_score_highlights as task
 
-    monkeypatch.setattr(task, "get_decision_model", lambda provider: _FakeDecider(fail_on={0, 1, 2}))
-    with pytest.raises(DecisionError, match="failed"):
-        await task._handle(_input(), None)
+    for retryable in (False, True):
+        fake = _FakeDecider(fail_on={1}, hang_on={0, 2}, retryable=retryable)
+        monkeypatch.setattr(task, "get_decision_model", lambda provider, fake=fake: fake)
+        with pytest.raises(DecisionError, match="claim 2 failed") as failed:
+            await asyncio.wait_for(task._handle(_input(), None), timeout=2)
+        assert failed.value.retryable is retryable
+        assert fake.in_flight == 0, "the hanging requests were cancelled"
+
+
+@pytest.mark.asyncio
+async def test_in_flight_requests_are_bounded_and_each_is_counted_by_the_spend_guard(monkeypatch):
+    from src.infrastructure import spend_guard as guard_module
+    from src.pipeline import claims_score_highlights_core as core
+
+    counted = []
+    monkeypatch.setattr(guard_module.spend_guard, "check_and_record", lambda provider: counted.append(provider))
+    fake = _FakeDecider(delay=0.01)
+    many = _input(claims=[HighlightClaim(text=f"Claim {i}", document_indices=[0]) for i in range(20)])
+    answers = await core.decide_claims(many, fake, "m")
+    assert len(answers) == 20
+    assert fake.max_in_flight <= core.DECISION_CONCURRENCY
+    assert fake.max_in_flight > 1, "the bound is a bound, not a serialisation"
+    assert counted == ["fake"] * 20
+
+
+def test_prompt_overrides_for_the_rubric_are_accepted_at_enqueue():
+    accepted = _input(prompt_overrides={"claims_score_highlights.debate.essential.yes": "A changed bar."})
+    assert accepted.prompt_overrides == {"claims_score_highlights.debate.essential.yes": "A changed bar."}
+    with pytest.raises(ValueError, match="unknown prompt key"):
+        _input(prompt_overrides={"claims_score_highlights.debate.essential.maybe": "x"})
+
+
+def test_every_media_type_has_a_registered_rubric_and_nothing_else_is_registered():
+    from typing import get_args
+
+    from src.api.schemas.claims_score_highlights_schema import MediaType
+    from src.config.prompt_registry import PROMPTS
+
+    media_types = set(get_args(MediaType))
+    for media_type in media_types:
+        assert list(build_questions(media_type)) == ["essential"], media_type
+    registered = {key.split(".")[1] for key in PROMPTS if key.startswith("claims_score_highlights.")}
+    assert registered == media_types
 
 
 def test_registry_has_the_task_with_its_contract():

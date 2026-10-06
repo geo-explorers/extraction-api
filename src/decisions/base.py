@@ -65,7 +65,17 @@ Answer = Union[YesNoAnswer, ChoiceAnswer]
 
 class DecisionError(Exception):
     """The provider could not answer: a failed request (after its own retries)
-    or a response that does not answer every question in the expected shape."""
+    or a response that does not answer every question in the expected shape.
+
+    `retryable` says whether asking again later could succeed — a rate limit
+    or an outage — as opposed to a request the provider will keep refusing
+    (bad credentials, an unknown model, a malformed answer). A task uses it to
+    stop a run at the first unretryable failure instead of repeating it for
+    every claim."""
+
+    def __init__(self, message: str, *, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class DecisionModel(Protocol):

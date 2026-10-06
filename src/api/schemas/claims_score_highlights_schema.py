@@ -74,22 +74,21 @@ class ScoredClaim(BaseModel):
     index: int = Field(description="Position in the input `claims` list.")
     id: Optional[str]
     text: str
-    score: Optional[float] = Field(
-        default=None,
+    score: float = Field(
         ge=0.0,
         le=1.0,
         description="Highlight score: the probability that the list would misrepresent the "
-        "discussion without this claim; null when it could not be scored (see `error`).",
+        "discussion without this claim. Every claim of a successful run has one; a run that "
+        "could not score a claim fails instead.",
     )
     decisions: Dict[str, float] = Field(
-        default_factory=dict,
         description="Probability of yes per decision asked. One today, `essential`, which is the score.",
     )
-    error: Optional[str] = None
 
 
 class ClaimsScoreHighlightsResult(BaseModel):
     claims: List[ScoredClaim] = Field(description="Every input claim with its score, in input order.")
+    # Always the number of claims; kept so a consumer can check the result is whole.
     claims_scored: int
     provider: str
     model_used: str

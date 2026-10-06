@@ -51,8 +51,7 @@ Poll `GET /tasks/{id}`. The result:
     {
       "index": 0, "id": null, "text": "The vast majority of undocumented immigrants…",
       "score": 0.42,
-      "decisions": {"essential": 0.42},
-      "error": null
+      "decisions": {"essential": 0.42}
     }
   ],
   "claims_scored": 2,
@@ -63,8 +62,11 @@ Poll `GET /tasks/{id}`. The result:
 
 (The numbers are from the 2026-10-05 evaluation run, debate 12, claim 1.)
 
-`claims` carries every input claim in input order. A claim whose request failed keeps its place
-with `score: null` and the reason in `error`. If no claim could be scored, the run fails.
+`claims` carries every input claim in input order, each with a score. **A run scores every claim
+or fails**: the first claim whose request fails stops the others and fails the run, so Hatchet
+retries it (`retries=2`). A consumer stores what it gets and does not ask again, so a half-scored
+list would stay half-scored for good; a failed run is the honest alternative. A refused key or an
+unknown model fails on the first request rather than once per claim.
 
 ## How the score is reached
 
@@ -125,10 +127,20 @@ The first provider is Perplexity's [Decisions API](https://docs.perplexity.ai/do
 | `PERPLEXITY_API_KEY` | required for the `perplexity` provider |
 | `DECISIONS_GLOBAL_RATE_PER_MIN` | task runs per minute across all workers (default `20`) |
 
-Cost: one request per claim, each carrying the whole discussion. The rate limit counts runs, not
-requests; within a run four requests are in flight at a time, and the provider client waits out a
-`429` using its `Retry-After`. Every request is counted by the spend guard under the provider's
-name.
+Cost: one request per claim, each carrying the whole discussion. Three things keep requests under
+Perplexity's 10 per second per organisation:
+
+- a **per-worker bound of 6 requests in flight** across all runs the worker is executing (a
+  per-run bound would multiply by the worker's slots);
+- the task's **engine-level `concurrency=2`**: at most two runs at once across all workers, the
+  rest queue;
+- the `decisions_global` rate limit, which counts **runs**, not requests, and only smooths how
+  fast runs start.
+
+A `429` is retried up to 8 times, waiting the server's `Retry-After` capped at 30 s; an outage
+(5xx, timeout, dropped connection) up to 3 times with backoff. Each is its own budget. A request
+that outlasts its budget fails the run as retryable. Every request is counted by the spend guard
+under the provider's name; a tripped guard fails the run.
 
 ## Evaluation
 

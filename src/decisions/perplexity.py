@@ -35,8 +35,16 @@ logger = get_logger(__name__)
 PERPLEXITY_DECISIONS_URL = "https://api.perplexity.ai/v1/decisions"
 # The docs' own figure: 30 s covers any request under the input limit.
 TIMEOUT_SECONDS = 30
+# Attempts for an outage or a dropped connection (5xx, 408, network errors).
 MAX_ATTEMPTS = 3
+# Attempts when the organisation's 10 requests/second are exhausted. A 429 is
+# not a failure of this request, only of its timing, and the task runs several
+# requests at once, so it gets a longer budget and waits what the server asks.
+MAX_RATE_LIMIT_ATTEMPTS = 8
 RETRY_INITIAL_DELAY = 2.0
+# A Retry-After longer than this is treated as the backoff instead: the task's
+# whole run has a budget of minutes, and one request must not sleep it away.
+MAX_RETRY_AFTER_SECONDS = 30.0
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 
@@ -81,10 +89,13 @@ def from_wire(name: str, question: Question, answers: Mapping[str, Any]) -> Answ
 
 
 def _retry_after_seconds(response: requests.Response) -> Optional[float]:
+    """The server's Retry-After in seconds, capped; None when absent or not a
+    number (an HTTP-date form falls back to the backoff)."""
     try:
-        return max(0.0, float(response.headers.get("Retry-After", "")))
+        seconds = float(response.headers.get("Retry-After", ""))
     except ValueError:
         return None
+    return min(max(0.0, seconds), MAX_RETRY_AFTER_SECONDS)
 
 
 def _error_message(response: requests.Response) -> str:
@@ -125,8 +136,14 @@ class PerplexityDecisionModel:
         return {name: from_wire(name, question, answers) for name, question in questions.items()}
 
     async def _post(self, body: Dict[str, Any]) -> Dict[str, Any]:
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            backoff = RETRY_INITIAL_DELAY * (2 ** (attempt - 1))
+        # Two budgets, counted separately: a 429 spends from the rate-limit one, every
+        # other transient failure from the outage one, so a busy minute cannot use up
+        # the retries an outage would need or the other way round.
+        failures = 0
+        rate_limited = 0
+        while True:
+            attempt = failures + rate_limited + 1
+            backoff = RETRY_INITIAL_DELAY * (2**failures)
             try:
                 response = await asyncio.to_thread(
                     requests.post,
@@ -136,14 +153,14 @@ class PerplexityDecisionModel:
                     timeout=TIMEOUT_SECONDS,
                 )
             except requests.RequestException as e:
-                if attempt < MAX_ATTEMPTS:
+                failures += 1
+                if failures < MAX_ATTEMPTS:
                     logger.warning(
-                        f"Perplexity decisions request failed (attempt {attempt}/{MAX_ATTEMPTS}): {e}. "
-                        f"Retrying in {backoff:.0f}s..."
+                        f"Perplexity decisions request failed (attempt {attempt}): {e}. Retrying in {backoff:.0f}s..."
                     )
                     await asyncio.sleep(backoff)
                     continue
-                raise DecisionError(f"Perplexity decisions request failed: {e}") from e
+                raise DecisionError(f"Perplexity decisions request failed: {e}", retryable=True) from e
 
             status = response.status_code
             if status == 200:
@@ -155,18 +172,27 @@ class PerplexityDecisionModel:
                     raise DecisionError("Perplexity decisions returned a 200 that is not a JSON object")
                 return payload
 
-            if status in RETRYABLE_STATUS_CODES and attempt < MAX_ATTEMPTS:
-                retry_after = _retry_after_seconds(response)
-                wait = retry_after if retry_after is not None else backoff
-                logger.warning(
-                    f"Perplexity decisions failed (attempt {attempt}/{MAX_ATTEMPTS}): HTTP {status}. "
-                    f"Retrying in {wait:.0f}s..."
-                )
-                await asyncio.sleep(wait)
-                continue
+            if status == 429:
+                rate_limited += 1
+                if rate_limited < MAX_RATE_LIMIT_ATTEMPTS:
+                    retry_after = _retry_after_seconds(response)
+                    wait = retry_after if retry_after is not None else backoff
+                    logger.warning(
+                        f"Perplexity decisions rate limited (attempt {attempt}): waiting {wait:.0f}s..."
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+            elif status in RETRYABLE_STATUS_CODES:
+                failures += 1
+                if failures < MAX_ATTEMPTS:
+                    logger.warning(
+                        f"Perplexity decisions failed (attempt {attempt}): HTTP {status}. Retrying in {backoff:.0f}s..."
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
 
             raise DecisionError(
                 f"Perplexity decisions returned HTTP {status}: {_error_message(response)} "
-                f"(request id {response.headers.get('x-request-id')})"
+                f"(request id {response.headers.get('x-request-id')})",
+                retryable=status in RETRYABLE_STATUS_CODES,
             )
-        raise RuntimeError("unreachable")

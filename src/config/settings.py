@@ -111,8 +111,9 @@ class Settings(BaseSettings):
         description="Global Claude calls/min across all workers (Hatchet static key 'claude_global')"
     )
     # Counts RUNS, not requests: a decision-model run makes one request per claim
-    # (a debate has ~15). 20 runs/min is ~300 requests/min against Perplexity's
-    # 10 requests/second; the provider client retries a 429 on its own.
+    # (a debate has ~15, the task accepts up to 100). What actually holds requests
+    # under Perplexity's 10/second is the task's `concurrency` (runs at once) times
+    # the core's per-worker in-flight bound; this only smooths how fast runs start.
     decisions_global_rate_per_min: int = Field(
         default=20,
         description="Global decision-model task runs/min across all workers (Hatchet static key 'decisions_global')"

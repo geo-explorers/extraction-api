@@ -9,10 +9,15 @@ The score: one yes/no decision — would the list misrepresent the discussion
 without this claim? — and its probability of yes is the score. `DECISIONS`
 is the extension point: a second decision asked here is returned beside it
 in `decisions`, and `highlight_score` says how the score is read off them.
+
+A run scores every claim or fails. A consumer stores what it gets and does
+not ask again, so a partially scored result would leave claims unscored for
+good; failing the run instead lets the engine retry the whole thing.
 """
 
 import asyncio
-from typing import Dict, List, Mapping, Sequence, Union
+import weakref
+from typing import Dict, List, Mapping, Sequence
 
 from src.api.schemas.claims_score_highlights_schema import (
     ClaimsScoreHighlightsInput,
@@ -24,7 +29,7 @@ from src.api.schemas.claims_score_highlights_schema import (
 from src.config.overrides import prompts
 from src.decisions.base import Answer, DecisionError, DecisionModel, Question, YesNo, YesNoAnswer
 from src.infrastructure.logger import get_logger
-from src.infrastructure.spend_guard import spend_guard
+from src.infrastructure.spend_guard import SpendLimitExceeded, spend_guard
 
 logger = get_logger(__name__)
 
@@ -37,9 +42,27 @@ _P = "claims_score_highlights."
 ESSENTIAL = "essential"
 DECISIONS = (ESSENTIAL,)
 
-# Requests in flight per run. With the run-level `decisions_global` rate limit
-# this keeps a burst of runs under the provider's per-second limit.
-DECISION_CONCURRENCY = 4
+# Requests in flight per worker process, across every run it is executing at
+# once — a per-run bound would multiply by the worker's slots and a burst of runs
+# would turn the provider's 10 requests/second into rate-limit failures. Six in
+# flight at the ~1 s a request takes stays under that limit on its own; the
+# task's engine-level `concurrency` caps how many runs share the bound.
+DECISION_CONCURRENCY = 6
+
+# One semaphore per event loop (asyncio primitives bind to the loop they are
+# first used on): the worker has one loop, tests have one per test.
+_slots_by_loop: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _slots() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    slots = _slots_by_loop.get(loop)
+    if slots is None:
+        slots = asyncio.Semaphore(DECISION_CONCURRENCY)
+        _slots_by_loop[loop] = slots
+    return slots
 
 UNKNOWN_SPEAKER = "Unknown speaker"
 
@@ -107,23 +130,34 @@ async def decide_claims(
     input: ClaimsScoreHighlightsInput,
     decider: DecisionModel,
     model: str,
-) -> List[Union[Mapping[str, Answer], DecisionError]]:
-    """One decision request per claim, a few at a time. Returns, per claim in
-    input order, its answers or the DecisionError that stopped it — one claim
-    failing does not cost the others their scores."""
+) -> List[Mapping[str, Answer]]:
+    """One decision request per claim, a few at a time, with the answers
+    returned in claim order. All or nothing: the first claim that fails stops
+    the rest (a refused key or an unknown model would fail every claim the
+    same way, and a rate limit that outlasted its retries is a reason to run
+    again later), and its DecisionError is raised for the run."""
     questions = build_questions(input.media_type)
-    slots = asyncio.Semaphore(DECISION_CONCURRENCY)
+    slots = _slots()
 
-    async def decide(claim_index: int) -> Union[Mapping[str, Answer], DecisionError]:
+    async def decide(claim_index: int) -> Mapping[str, Answer]:
         async with slots:
             spend_guard.check_and_record(decider.provider)
             try:
                 return await decider.decide(build_content(input, claim_index), questions, model=model)
             except DecisionError as e:
-                logger.warning(f"claims.score_highlights: claim {claim_index} not scored: {e}")
-                return e
+                logger.warning(
+                    f"claims.score_highlights: claim {claim_index} failed "
+                    f"({'retryable' if e.retryable else 'not retryable'}): {e}"
+                )
+                raise
 
-    return list(await asyncio.gather(*(decide(i) for i in range(len(input.claims)))))
+    try:
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(decide(i)) for i in range(len(input.claims))]
+    except* (DecisionError, SpendLimitExceeded) as failures:
+        # The group cancelled the other requests; the run fails on the first failure.
+        raise failures.exceptions[0] from None
+    return [task.result() for task in tasks]
 
 
 def highlight_score(decisions: Mapping[str, float]) -> float:
@@ -147,22 +181,20 @@ def score_claim(index: int, claim: HighlightClaim, answers: Mapping[str, Answer]
 
 def assemble_result(
     input: ClaimsScoreHighlightsInput,
-    outcomes: Sequence[Union[Mapping[str, Answer], DecisionError]],
+    answers: Sequence[Mapping[str, Answer]],
     provider: str,
     model_used: str,
 ) -> ClaimsScoreHighlightsResult:
-    """One ScoredClaim per input claim, in input order. A claim whose decision
-    failed keeps its place with a null score and the error, so indices always
-    line up with the input."""
-    scored: List[ScoredClaim] = []
-    for index, (claim, outcome) in enumerate(zip(input.claims, outcomes)):
-        if isinstance(outcome, DecisionError):
-            scored.append(ScoredClaim(index=index, id=claim.id, text=claim.text, error=str(outcome)))
-        else:
-            scored.append(score_claim(index, claim, outcome))
+    """One ScoredClaim per input claim, in input order. An answer set of the
+    wrong shape raises DecisionError and fails the run: it means the provider
+    broke the DecisionModel contract, which no retry fixes and no claim should
+    paper over with a null."""
+    if len(answers) != len(input.claims):
+        raise DecisionError(f"{len(answers)} answer sets for {len(input.claims)} claims")
+    scored = [score_claim(index, claim, answer) for index, (claim, answer) in enumerate(zip(input.claims, answers))]
     return ClaimsScoreHighlightsResult(
         claims=scored,
-        claims_scored=sum(1 for c in scored if c.score is not None),
+        claims_scored=len(scored),
         provider=provider,
         model_used=model_used,
     )

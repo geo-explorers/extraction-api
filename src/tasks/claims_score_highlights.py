@@ -5,6 +5,9 @@ per claim out. One decision-model request per claim, each with the whole
 discussion in view. The model sits behind the DecisionModel interface
 (src/decisions), chosen by CLAIMS_HIGHLIGHTS_PROVIDER, so it can be swapped
 without touching this task. DB-free: results return to the caller.
+
+All or nothing: a run returns a score for every claim or fails, so the engine
+retries it and a consumer never stores a half-scored list.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from src.api.schemas.claims_score_highlights_schema import (
 )
 from src.config.overrides import llm
 from src.config.settings import settings
-from src.decisions import DecisionError, get_decision_model
+from src.decisions import get_decision_model
 from src.infrastructure.logger import get_logger
 from src.pipeline.claims_score_highlights_core import assemble_result, decide_claims
 from src.tasks.base import TaskSpec
@@ -32,16 +35,9 @@ CLAIMS_SCORE_HIGHLIGHTS_MAX_PAYLOAD_BYTES = 1024 * 1024
 async def _handle(input: ClaimsScoreHighlightsInput, ctx: Context) -> ClaimsScoreHighlightsResult:
     decider = get_decision_model(settings.claims_highlights_provider)
     model = llm.get("claims_highlights_model")
-    outcomes = await decide_claims(input, decider, model)
-    result = assemble_result(input, outcomes, decider.provider, model)
-    if result.claims_scored == 0:
-        # Nothing answered: a bad key, a bad model name, an outage. Fail the
-        # run so the engine retries it instead of returning a page of nulls.
-        raise next(o for o in outcomes if isinstance(o, DecisionError))
-    logger.info(
-        f"claims.score_highlights: {result.claims_scored}/{len(input.claims)} claims scored "
-        f"({decider.provider}/{model})"
-    )
+    answers = await decide_claims(input, decider, model)
+    result = assemble_result(input, answers, decider.provider, model)
+    logger.info(f"claims.score_highlights: {result.claims_scored} claims scored ({decider.provider}/{model})")
     return result
 
 
@@ -55,4 +51,8 @@ CLAIMS_SCORE_HIGHLIGHTS_SPEC = TaskSpec(
     retries=2,
     execution_timeout=timedelta(minutes=10),
     max_payload_bytes=CLAIMS_SCORE_HIGHLIGHTS_MAX_PAYLOAD_BYTES,
+    # Runs at once across all workers. Each run keeps up to DECISION_CONCURRENCY
+    # requests in flight, so this times that is the ceiling on concurrent
+    # requests at the provider — two runs stay near its 10 requests/second.
+    concurrency=2,
 )
