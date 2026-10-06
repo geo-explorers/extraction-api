@@ -52,6 +52,7 @@ from src.tasks.claims_extract import (
 )
 from src.tasks.geo_fetch_entities import GEO_FETCH_ENTITIES_SPEC
 from src.tasks.claims_judge_equivalence import CLAIMS_JUDGE_EQUIVALENCE_SPEC
+from src.tasks.claims_score_highlights import CLAIMS_SCORE_HIGHLIGHTS_SPEC
 from src.tasks.geo_resolve_entities import GEO_RESOLVE_ENTITIES_SPEC
 from src.tasks.sheets_export_table import SHEETS_EXPORT_TABLE_SPEC
 from src.tasks.geo_spaces_to_sheet import (
@@ -88,6 +89,7 @@ _STANDALONE_SPECS: list[TaskSpec] = [
     GEO_RESOLVE_ENTITIES_SPEC,
     SHEETS_EXPORT_TABLE_SPEC,
     CLAIMS_JUDGE_EQUIVALENCE_SPEC,
+    CLAIMS_SCORE_HIGHLIGHTS_SPEC,
     NEWS_REVIEW_COLLECTIONS_SPEC,
 ]
 

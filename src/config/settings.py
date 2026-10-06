@@ -66,6 +66,18 @@ class Settings(BaseSettings):
         description="Gemini 3+ thinking level for claims.judge_equivalence: minimal|low|medium|high. Empty disables.",
     )
 
+    # claims.score_highlights: a decision model (src/decisions) answers a fixed rubric
+    # about each extracted claim with probabilities. The provider is a deployment
+    # choice; the model is that provider's model name and must change with it.
+    claims_highlights_provider: str = Field(
+        default="perplexity",
+        description="Decision-model provider for claims.score_highlights (see src/decisions)",
+    )
+    claims_highlights_model: str = Field(
+        default="pplx-decider-v1-27b",
+        description="Model name sent to the claims.score_highlights provider (one request per claim)",
+    )
+
     # API keys for LLM providers
     anthropic_api_key: str | None = Field(
         default=None,
@@ -74,6 +86,10 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(
         default=None,
         description="Google Gemini API key"
+    )
+    perplexity_api_key: str | None = Field(
+        default=None,
+        description="Perplexity API key (Decisions API, used by the perplexity decision model)"
     )
 
     # Hatchet worker.
@@ -93,6 +109,13 @@ class Settings(BaseSettings):
     claude_global_rate_per_min: int = Field(
         default=100,
         description="Global Claude calls/min across all workers (Hatchet static key 'claude_global')"
+    )
+    # Counts RUNS, not requests: a decision-model run makes one request per claim
+    # (a debate has ~15). 20 runs/min is ~300 requests/min against Perplexity's
+    # 10 requests/second; the provider client retries a 429 on its own.
+    decisions_global_rate_per_min: int = Field(
+        default=20,
+        description="Global decision-model task runs/min across all workers (Hatchet static key 'decisions_global')"
     )
     # Spend circuit breaker: hard hourly ceiling on LLM calls per provider.
     # 0 disables it. Distinct from the rate limiter — this caps total volume/$.

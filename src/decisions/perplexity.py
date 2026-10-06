@@ -1,0 +1,172 @@
+"""Perplexity Decisions API behind the DecisionModel interface.
+
+POST https://api.perplexity.ai/v1/decisions takes the content as `state` and
+named questions, and returns a probability per question instead of text. The
+wire names differ from ours: a yes/no question is type `noul` with criteria
+keyed "true"/"false", and its answer is the `noul` field.
+
+Contract read from https://docs.perplexity.ai/docs/decisions/quickstart
+(2026-10-02): 10 requests/second per organization, 429 carries Retry-After in
+seconds, 5xx (504 after about a minute) is retryable, and a 404/405/504 body
+is not JSON — so the status is checked before the body is parsed.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any, Dict, Mapping, Optional
+
+import requests
+
+from src.config.settings import settings
+from src.decisions.base import (
+    Answer,
+    Choice,
+    ChoiceAnswer,
+    DecisionError,
+    Question,
+    YesNo,
+    YesNoAnswer,
+)
+from src.infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
+
+PERPLEXITY_DECISIONS_URL = "https://api.perplexity.ai/v1/decisions"
+# The docs' own figure: 30 s covers any request under the input limit.
+TIMEOUT_SECONDS = 30
+MAX_ATTEMPTS = 3
+RETRY_INITIAL_DELAY = 2.0
+RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+
+
+def to_wire(question: Question) -> Dict[str, Any]:
+    if isinstance(question, YesNo):
+        wire: Dict[str, Any] = {"type": "noul", "instructions": question.instructions}
+        if question.yes is not None:
+            wire["criteria"] = {"true": question.yes, "false": question.no}
+        return wire
+    return {
+        "type": "choice",
+        "instructions": question.instructions,
+        "criteria": dict(question.options),
+    }
+
+
+def _is_probability(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0.0 <= value <= 1.0
+
+
+def from_wire(name: str, question: Question, answers: Mapping[str, Any]) -> Answer:
+    raw = answers.get(name)
+    if not isinstance(raw, dict):
+        raise DecisionError(f"Perplexity returned no answer for question {name!r}")
+    if isinstance(question, YesNo):
+        probability = raw.get("noul")
+        if not _is_probability(probability):
+            raise DecisionError(f"Perplexity answer for {name!r} has no usable `noul`: {raw!r}")
+        return YesNoAnswer(probability=float(probability))
+    probabilities = raw.get("probabilities")
+    if not isinstance(probabilities, dict) or not all(
+        _is_probability(probabilities.get(option)) for option in question.options
+    ):
+        raise DecisionError(f"Perplexity answer for {name!r} lacks a probability per option: {raw!r}")
+    choice = raw.get("choice")
+    if choice not in question.options:
+        raise DecisionError(f"Perplexity answer for {name!r} chose an unknown option: {choice!r}")
+    return ChoiceAnswer(
+        choice=choice,
+        probabilities={option: float(probabilities[option]) for option in question.options},
+    )
+
+
+def _retry_after_seconds(response: requests.Response) -> Optional[float]:
+    try:
+        return max(0.0, float(response.headers.get("Retry-After", "")))
+    except ValueError:
+        return None
+
+
+def _error_message(response: requests.Response) -> str:
+    try:
+        error = response.json().get("error")
+        return str(error.get("message")) if isinstance(error, dict) else response.text[:200]
+    except (ValueError, AttributeError):
+        return response.text[:200]
+
+
+class PerplexityDecisionModel:
+    provider = "perplexity"
+
+    def __init__(self, api_key: Optional[str] = None):
+        key = api_key or settings.perplexity_api_key
+        if not key:
+            raise ValueError("PERPLEXITY_API_KEY is required for the perplexity decision model")
+        self._headers = {"Authorization": f"Bearer {key}"}
+
+    async def decide(
+        self,
+        content: Mapping[str, str],
+        questions: Mapping[str, Question],
+        *,
+        model: str,
+    ) -> Dict[str, Answer]:
+        body = {
+            "model": model,
+            "state": dict(content),
+            "questions": {name: to_wire(question) for name, question in questions.items()},
+        }
+        payload = await self._post(body)
+        answers = payload.get("answers")
+        if not isinstance(answers, dict):
+            raise DecisionError("Perplexity decisions response has no `answers` object")
+        usage = payload.get("usage") or {}
+        logger.debug(f"perplexity decisions: {len(questions)} questions, {usage.get('input_tokens')} input tokens")
+        return {name: from_wire(name, question, answers) for name, question in questions.items()}
+
+    async def _post(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            backoff = RETRY_INITIAL_DELAY * (2 ** (attempt - 1))
+            try:
+                response = await asyncio.to_thread(
+                    requests.post,
+                    PERPLEXITY_DECISIONS_URL,
+                    json=body,
+                    headers=self._headers,
+                    timeout=TIMEOUT_SECONDS,
+                )
+            except requests.RequestException as e:
+                if attempt < MAX_ATTEMPTS:
+                    logger.warning(
+                        f"Perplexity decisions request failed (attempt {attempt}/{MAX_ATTEMPTS}): {e}. "
+                        f"Retrying in {backoff:.0f}s..."
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+                raise DecisionError(f"Perplexity decisions request failed: {e}") from e
+
+            status = response.status_code
+            if status == 200:
+                try:
+                    payload = response.json()
+                except ValueError as e:
+                    raise DecisionError("Perplexity decisions returned a 200 that is not JSON") from e
+                if not isinstance(payload, dict):
+                    raise DecisionError("Perplexity decisions returned a 200 that is not a JSON object")
+                return payload
+
+            if status in RETRYABLE_STATUS_CODES and attempt < MAX_ATTEMPTS:
+                retry_after = _retry_after_seconds(response)
+                wait = retry_after if retry_after is not None else backoff
+                logger.warning(
+                    f"Perplexity decisions failed (attempt {attempt}/{MAX_ATTEMPTS}): HTTP {status}. "
+                    f"Retrying in {wait:.0f}s..."
+                )
+                await asyncio.sleep(wait)
+                continue
+
+            raise DecisionError(
+                f"Perplexity decisions returned HTTP {status}: {_error_message(response)} "
+                f"(request id {response.headers.get('x-request-id')})"
+            )
+        raise RuntimeError("unreachable")

@@ -74,6 +74,7 @@ LLM_SETTINGS: tuple[str, ...] = (
     "claims_equivalence_model",
     "claims_equivalence_temperature",
     "claims_equivalence_thinking_level",
+    "claims_highlights_model",
     "gemini_space_assignment_model",
     "gemini_space_assignment_temperature",
 )
