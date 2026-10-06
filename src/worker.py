@@ -31,9 +31,13 @@ def _declare_rate_limits() -> None:
     hatchet.rate_limits.put(
         "claude_global", settings.claude_global_rate_per_min, RateLimitDuration.MINUTE
     )
+    hatchet.rate_limits.put(
+        "decisions_global", settings.decisions_global_rate_per_min, RateLimitDuration.MINUTE
+    )
     logger.info(
         f"Declared rate limits: gemini_global={settings.gemini_global_rate_per_min}/min, "
-        f"claude_global={settings.claude_global_rate_per_min}/min"
+        f"claude_global={settings.claude_global_rate_per_min}/min, "
+        f"decisions_global={settings.decisions_global_rate_per_min}/min"
     )
 
 

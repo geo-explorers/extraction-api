@@ -24,6 +24,7 @@ from src.config.prompts import claim_extraction_prompt as _podcast_claims
 from src.config.prompts import claim_keyword_extraction_prompt as _claim_keywords
 from src.config.prompts import claims_judge_equivalence_prompt as _judge
 from src.config.prompts import claims_link_entities_prompt as _link
+from src.config.prompts import claims_score_highlights_prompt as _highlights
 from src.config.prompts import guest_extraction_prompt as _guest
 from src.config.prompts import host_extraction_prompt as _host
 from src.config.prompts import key_takeaways_prompt as _podcast_takeaways
@@ -131,6 +132,12 @@ _register("news_collection_review.source_check", _review.SOURCE_CHECK_PROMPT, fo
 # ── Claims tasks (generalized extraction, linking, equivalence) ───────────────
 _register("claims_link_entities", _link.CLAIMS_LINK_ENTITIES_PROMPT, formatted=True, module=_link)
 _register("claims_judge_equivalence.rubric", _judge.CLAIMS_JUDGE_EQUIVALENCE_RUBRIC, formatted=False, module=_judge)
+
+# claims.score_highlights: the one yes/no decision, its instructions and its yes/no
+# criteria, under the media type.
+_register("claims_score_highlights.debate.essential", _highlights.DEBATE_ESSENTIAL_INSTRUCTIONS, formatted=False, module=_highlights)
+_register("claims_score_highlights.debate.essential.yes", _highlights.DEBATE_ESSENTIAL_YES, formatted=False, module=_highlights)
+_register("claims_score_highlights.debate.essential.no", _highlights.DEBATE_ESSENTIAL_NO, formatted=False, module=_highlights)
 
 _register("claims_extract.role", _ce_sections.ROLE_SECTION, formatted=True, module=_ce_sections)
 _register("claims_extract.core", _ce_core.CORE_CLAIM_RULES, formatted=False, module=_ce_core)
