@@ -82,7 +82,10 @@ class ScoredClaim(BaseModel):
         "could not score a claim fails instead.",
     )
     decisions: Dict[str, float] = Field(
-        description="Probability of yes per decision asked. One today, `essential`, which is the score.",
+        description="Every decision asked, 0–1. `essential` is the probability of yes, which is the "
+        "score; `relevance`, `quality` and `controversy` are positions on a four-level scale "
+        "(0 = surely the lowest level, 1 = surely the highest), reported beside the score and not "
+        "folded into it.",
     )
 
 

@@ -2,10 +2,10 @@
 
 A decision model answers named questions about a piece of content with
 probabilities instead of text: a yes/no question gets the probability of yes,
-a choice question gets a probability per option. Tasks build questions from
-the types here and read typed answers back; which provider computes them is a
-deployment setting, so the model behind a task can be swapped without touching
-the task.
+a choice question gets a probability per option, a scale question gets a
+position on an ordered rubric. Tasks build questions from the types here and
+read typed answers back; which provider computes them is a deployment
+setting, so the model behind a task can be swapped without touching the task.
 
 To add a provider, implement `DecisionModel` and register it in
 src/decisions/__init__.py. A provider that has no native probabilities (a chat
@@ -16,7 +16,7 @@ number per question in the shapes below.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Protocol, Union
+from typing import Dict, List, Mapping, Optional, Protocol, Sequence, Union
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,23 @@ class Choice:
             raise ValueError("Choice needs at least one option")
 
 
-Question = Union[YesNo, Choice]
+@dataclass(frozen=True)
+class Scale:
+    """Rate on an ordered rubric: `levels` describe the rungs from the lowest
+    to the highest, two or more. Only the descriptions reach the model — a
+    rung has a position, not a name — and the answer is that position,
+    probability-weighted, as a number from 0 (surely the lowest) to 1."""
+
+    instructions: str
+    levels: Sequence[str]
+
+    def __post_init__(self) -> None:
+        # A bare string is a Sequence too, and would be sent as one level per character.
+        if isinstance(self.levels, str) or len(self.levels) < 2:
+            raise ValueError("Scale needs at least two levels, as a list of descriptions")
+
+
+Question = Union[YesNo, Choice, Scale]
 
 
 @dataclass(frozen=True)
@@ -60,7 +76,13 @@ class ChoiceAnswer:
     probabilities: Dict[str, float]  # one per option, summing to about 1
 
 
-Answer = Union[YesNoAnswer, ChoiceAnswer]
+@dataclass(frozen=True)
+class ScaleAnswer:
+    score: float  # 0..1: the probability-weighted position on the scale
+    probabilities: List[float]  # one per level, lowest first, summing to about 1
+
+
+Answer = Union[YesNoAnswer, ChoiceAnswer, ScaleAnswer]
 
 
 class DecisionError(Exception):
@@ -91,7 +113,8 @@ class DecisionModel(Protocol):
     ) -> Dict[str, Answer]:
         """Answer every question about `content` (named sections, in reading
         order). Returns one answer per question name, typed by its question
-        (YesNo -> YesNoAnswer, Choice -> ChoiceAnswer, with a probability for
-        every option). Raises DecisionError rather than return a partial or
+        (YesNo -> YesNoAnswer, Choice -> ChoiceAnswer with a probability for
+        every option, Scale -> ScaleAnswer with a probability for every
+        level). Raises DecisionError rather than return a partial or
         malformed set."""
         ...

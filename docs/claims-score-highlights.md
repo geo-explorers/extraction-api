@@ -1,8 +1,11 @@
 # `claims.score_highlights`
 
-A discussion and the claims extracted from it in; a **highlight score** per claim out. The score
-says how much a claim carries the discussion, so a consumer can show the few claims that matter
-instead of all of them.
+A discussion and the claims extracted from it in; a **highlight score** per claim out, with three
+**axis scores** beside it. The highlight score says how much a claim carries the discussion, so a
+consumer can show the few claims that matter instead of all of them. The axes — relevance, quality,
+controversy — describe the claim on three planes the highlight score does not: how directly it
+bears on the main claim, whether it stands as a clean statement, and how likely an audience is to
+split on it.
 
 The task is a pure scorer. It does not extract, drop, or reorder claims, and it does not pick a
 cut-off: what to do with a score (a threshold, the top N) is the consumer's decision. A consumer
@@ -50,17 +53,20 @@ Poll `GET /tasks/{id}`. The result:
   "claims": [
     {
       "index": 0, "id": null, "text": "The vast majority of undocumented immigrants…",
-      "score": 0.42,
-      "decisions": {"essential": 0.42}
+      "score": 0.29,
+      "decisions": {"essential": 0.29, "relevance": 0.94, "quality": 0.97, "controversy": 0.88}
     }
   ],
   "claims_scored": 2,
   "provider": "perplexity",
-  "model_used": "pplx-decider-v1-27b"
+  "model_used": "pplx-decider-v1.1-27b"
 }
 ```
 
-(The numbers are from the 2026-10-05 evaluation run, debate 12, claim 1.)
+(The numbers are from the 2026-10-08 evaluation run, debate 12, claim 1.)
+
+`score` is the highlight score; `decisions` holds every decision asked — `essential`, which is the
+score, and the three axes described below — each 0 to 1.
 
 `claims` carries every input claim in input order, each with a score. **A run scores every claim
 or fails**: the first claim whose request fails stops the others and fails the run, so Hatchet
@@ -100,6 +106,33 @@ contract.
 Not covered: two claims that say nearly the same thing both lose some score (each makes the other
 less essential), but nothing says which copy to keep.
 
+## The three axes
+
+The same request asks three more questions, each a **four-level scale**: the model gets the level
+descriptions in order from the lowest to the highest and returns a probability per level; the
+axis score is the probability-weighted position, 0 meaning surely the lowest level and 1 surely the
+highest. They are reported in `decisions` beside the highlight score and are not folded into it.
+The content is shared, so the three add only their own wording to each request: about half again
+the input tokens of the highlight question alone (the rubrics are long; see the evaluation for the
+figure), and no extra requests.
+
+| Axis | Question | Levels, lowest first |
+|---|---|---|
+| `relevance` | How directly does the claim bear on the main claim (the title)? Content only — a reason for, a reason against and a relevant fact count equally. | unrelated · tangential (same topic, bearing unclear) · connected (one explicit step away) · direct (a position on the main claim, or a reason that bears on it with no further step) |
+| `quality` | Compared with the passage it came from, what is wrong with the claim as a standalone statement? The top level only when nothing an editor would change is found. | misleading (not what the speaker said, or not a claim) · unusable (needs the transcript, or bundles several assertions) · flawed (one fix left: a vague subject, a missing scope) · clean |
+| `controversy` | How likely is a general audience to split on it? Not whether the debaters disagreed, not whether it is true, not how boldly it is put. | none (a plain fact, a truism, an anecdote) · mild · debatable (most lean one way) · divisive (reasonable people split) |
+
+The full wording is in the rubric module, under the keys `claims_score_highlights.debate.<axis>`
+(instructions) and `.<axis>.<level>` (one text per level), all overridable per run. The level
+names only key the registry; the model never sees them.
+
+What a consumer should expect (from the evaluation below): relevance and controversy spread across
+their scales and rank the references they were checked against well; quality is compressed near
+the top — the extractor's claims mostly *are* clean — and what it ranks low is the bundled,
+list-like claim and the one that sharpened what the speaker said. Because the model behind the
+scores can change (see the evaluation), use them to rank claims within a debate rather than
+against a fixed threshold.
+
 ## The decision model
 
 The scorer talks to a **decision model**: a model that answers named questions about content with
@@ -108,9 +141,15 @@ probabilities instead of text. The interface is `src/decisions/base.py`:
 ```python
 answers = await decider.decide(content, questions, model=model)
 # content:   {"title": …, "transcript": …, …}        named sections, in reading order
-# questions: {"essential": YesNo(…)}                 or a Choice(…) between named options
-# answers:   {"essential": YesNoAnswer(probability)}  or a ChoiceAnswer(choice, probabilities)
+# questions: {"essential": YesNo(…), "relevance": Scale(…)}   or a Choice(…) between named options
+# answers:   {"essential": YesNoAnswer(probability),          or a ChoiceAnswer(choice, probabilities)
+#             "relevance": ScaleAnswer(score, probabilities)}
 ```
+
+A `Scale` is an ordered rubric (two or more level descriptions, lowest first); its answer is the
+probability-weighted position on it, 0 to 1, with a probability per level. Perplexity answers it
+natively (its `score` question type); a provider without one can ask a choice between the levels
+and weight the result the same way.
 
 The task knows only this interface. To use another model, implement `DecisionModel`, add it to
 `_PROVIDERS` in `src/decisions/__init__.py`, and set the two variables below.
@@ -123,7 +162,7 @@ The first provider is Perplexity's [Decisions API](https://docs.perplexity.ai/do
 | Variable | Meaning |
 |---|---|
 | `CLAIMS_HIGHLIGHTS_PROVIDER` | decision-model provider (default `perplexity`) |
-| `CLAIMS_HIGHLIGHTS_MODEL` | that provider's model name (default `pplx-decider-v1-27b`); overridable per run with `llm_overrides` |
+| `CLAIMS_HIGHLIGHTS_MODEL` | that provider's model name (default `pplx-decider-v1.1-27b`); overridable per run with `llm_overrides` |
 | `PERPLEXITY_API_KEY` | required for the `perplexity` provider |
 | `DECISIONS_GLOBAL_RATE_PER_MIN` | task runs per minute across all workers (default `20`) |
 
@@ -154,14 +193,26 @@ PERPLEXITY_API_KEY=… uv run python scripts/eval_claim_highlights.py [--debates
 
 It runs the task's own code over each debate and reports: AUC of the score for selected claims
 against the rest, precision at k per debate (k = the reader's number of picks), the mean score per
-label. A full run is 444 requests, about 760,000 input tokens.
+label, and the axes against the references the set carries (relevance against the `peripheral`
+and `background` labels, quality against `faithfulness_concern`, controversy against the
+extractor's own `is_contestable` flag, kept on each claim for this). A full run is 444 requests,
+about 1,170,000 input tokens with the four questions (760,000 with the highlight question alone —
+the three rubrics are what the other 54% is).
 
 ### Results — `perplexity` / `pplx-decider-v1-27b`
 
 Seven rubric versions, each a full run over the 444 claims (about 70 s; a request that hits the
-10/s limit is retried and succeeds). Scores are deterministic: repeat runs return identical
-numbers, and a decision's answer does not change when other questions are added to or removed
-from the request.
+10/s limit is retried and succeeds). Within a run scores are deterministic: repeat runs return
+identical numbers, and a decision's answer does not change when other questions are added to or
+removed from the request — the axes below were added without moving the highlight score.
+
+**The model behind an id moves.** The v7 run of 2026-10-05 could not be reproduced on 2026-10-07
+with the same prompt, content and model id: the median highlight score fell from 0.38 to 0.18,
+claims at or above 0.5 from 117 to 45, with rank correlation 0.76 between the two runs and AUC
+0.800 → 0.779. On 2026-10-08 `pplx-decider-v1-27b` returned the same numbers as the newly listed
+`pplx-decider-v1.1-27b`, so the unversioned id had become an alias of the new model; the default
+now names the versioned id. The lesson for a consumer: the ranking survives a model change far
+better than the absolute values, so rank within a debate rather than cut at a fixed score.
 
 | Version | Questions | AUC, selected vs rest | Precision at k | …counting runner-ups |
 |---|---|---|---|---|
@@ -190,6 +241,35 @@ What the runs showed:
   is the kind of highlight it credits least.
 - **Per debate (v7):** of the reader's picks, the top k by score recovers all of them in 1 debate,
   all but one in 15, and fewer in 14; the weakest is 1 of 3.
+
+### Results — the axes, `pplx-decider-v1.1-27b`, 2026-10-08
+
+One full run of the shipped questions (the highlight question plus the three scales, 444 claims in
+99 s). The axes have no labels of their own, so each is checked against what the set does carry.
+
+| Axis | Median (p10–p90) | Check | AUC |
+|---|---|---|---|
+| `relevance` | 0.76 (0.57–0.89) | other claims vs the reader's `peripheral` / `background` | 0.828 / 0.740 |
+| `quality` | 0.88 (0.73–0.94) | other claims vs the reader's `faithfulness_concern` | 0.774 |
+| `controversy` | 0.75 (0.44–0.91) | the extractor's `is_contestable` true vs false | 0.892 |
+
+- The axes are different instruments from the highlight score: as rankers of the reader's picks
+  they reach 0.67 (relevance), 0.55 (quality) and 0.70 (controversy) against 0.78 for the
+  highlight question; relevance and controversy share about half their ranking (Spearman 0.53),
+  quality correlates with nothing.
+- **Relevance** follows the stance pattern: claims the stance backfill called `addresses` sit at
+  *connected*, directional ones at *direct*; the reader's peripheral claims are the lowest. No
+  claim reached *unrelated* — the extractor already filters those.
+- **Controversy** puts background facts at 0.34 and anecdotes at 0.44 against 0.80 for the
+  reader's picks; the lowest are definitions and dates ("the NATO alliance was created during the
+  Cold War"), the highest policy positions.
+- **Quality** is the strict wording of a first version that rated 427 of 444 claims at the top
+  level; it still sits near the top (191 claims in 0.8–0.9, 176 above) because most extracted
+  claims pass its tests, and what it ranks low is the right thing: bundled lists of assertions
+  and the claims that sharpened the speaker's words. Treat it as a flag for the bottom of a
+  debate's list rather than a spread to rank the top by.
+- The same questions asked as a `choice` between named levels (the 2026-10-07 trial) rank the
+  claims identically (Spearman 0.99 per axis); the level names add nothing.
 
 Per-claim results for every run are in `~/Documents/debate-highlight-eval/results/` (not in the
 repo). To print one debate as a table from a saved run:

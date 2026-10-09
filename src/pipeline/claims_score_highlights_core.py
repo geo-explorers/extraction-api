@@ -6,9 +6,12 @@ DecisionModel, so the task and scripts/eval_claim_highlights.py run the same
 code, and tests drive it with a fake.
 
 The score: one yes/no decision — would the list misrepresent the discussion
-without this claim? — and its probability of yes is the score. `DECISIONS`
-is the extension point: a second decision asked here is returned beside it
-in `decisions`, and `highlight_score` says how the score is read off them.
+without this claim? — and its probability of yes is the score. Three more
+decisions ride in the same request (the content is shared; only their own
+wording is added, about half again the input tokens): relevance, quality
+and controversy, each a four-level scale read as a position from 0 to 1.
+They are returned beside the score in `decisions`; `highlight_score` says
+how the score is read off them, and leaves them alone.
 
 A run scores every claim or fails. A consumer stores what it gets and does
 not ask again, so a partially scored result would leave claims unscored for
@@ -27,7 +30,16 @@ from src.api.schemas.claims_score_highlights_schema import (
     ScoredClaim,
 )
 from src.config.overrides import prompts
-from src.decisions.base import Answer, DecisionError, DecisionModel, Question, YesNo, YesNoAnswer
+from src.decisions.base import (
+    Answer,
+    DecisionError,
+    DecisionModel,
+    Question,
+    Scale,
+    ScaleAnswer,
+    YesNo,
+    YesNoAnswer,
+)
 from src.infrastructure.logger import get_logger
 from src.infrastructure.spend_guard import SpendLimitExceeded, spend_guard
 
@@ -35,12 +47,25 @@ logger = get_logger(__name__)
 
 _P = "claims_score_highlights."
 
-# The decisions asked of every claim. One: whether the list would misrepresent
-# the discussion without this claim. Chosen over three role decisions
-# (position / clash / turn) and a holistic "is this pivotal?", which it
-# outranked alone and in every combination (2026-10-05, see the rubric module).
+# The decisions asked of every claim. The score: whether the list would
+# misrepresent the discussion without this claim. Chosen over three role
+# decisions (position / clash / turn) and a holistic "is this pivotal?", which
+# it outranked alone and in every combination (2026-10-05, see the rubric
+# module).
 ESSENTIAL = "essential"
-DECISIONS = (ESSENTIAL,)
+# The axes: scales reported beside the score. Their level names, lowest first,
+# key the rubric texts in the prompt registry (`<media_type>.<axis>.<level>`);
+# the model sees the texts in this order and never the names.
+RELEVANCE = "relevance"
+QUALITY = "quality"
+CONTROVERSY = "controversy"
+AXIS_LEVELS: Dict[str, Sequence[str]] = {
+    RELEVANCE: ("unrelated", "tangential", "connected", "direct"),
+    QUALITY: ("misleading", "unusable", "flawed", "clean"),
+    CONTROVERSY: ("none", "mild", "debatable", "divisive"),
+}
+AXES = tuple(AXIS_LEVELS)
+DECISIONS = (ESSENTIAL, *AXES)
 
 # Requests in flight per worker process, across every run it is executing at
 # once — a per-run bound would multiply by the worker's slots and a burst of runs
@@ -68,17 +93,23 @@ UNKNOWN_SPEAKER = "Unknown speaker"
 
 
 def build_questions(media_type: str) -> Dict[str, Question]:
-    """The rubric for `media_type` as decision questions, one yes/no each. The
-    same questions are asked of every claim."""
+    """The rubric for `media_type` as decision questions: the yes/no score
+    decision, then one scale per axis. The same questions are asked of every
+    claim."""
     p = f"{_P}{media_type}."
-    return {
-        decision: YesNo(
-            instructions=prompts.get(p + decision),
-            yes=prompts.get(f"{p}{decision}.yes"),
-            no=prompts.get(f"{p}{decision}.no"),
+    questions: Dict[str, Question] = {
+        ESSENTIAL: YesNo(
+            instructions=prompts.get(p + ESSENTIAL),
+            yes=prompts.get(f"{p}{ESSENTIAL}.yes"),
+            no=prompts.get(f"{p}{ESSENTIAL}.no"),
         )
-        for decision in DECISIONS
     }
+    for axis, levels in AXIS_LEVELS.items():
+        questions[axis] = Scale(
+            instructions=prompts.get(p + axis),
+            levels=[prompts.get(f"{p}{axis}.{level}") for level in levels],
+        )
+    return questions
 
 
 def _speaker(document: HighlightDocument) -> str:
@@ -167,9 +198,11 @@ def highlight_score(decisions: Mapping[str, float]) -> float:
 
 
 def score_claim(index: int, claim: HighlightClaim, answers: Mapping[str, Answer]) -> ScoredClaim:
-    if not all(isinstance(answers.get(decision), YesNoAnswer) for decision in DECISIONS):
+    essential = answers.get(ESSENTIAL)
+    axes = {axis: answer for axis in AXES if isinstance(answer := answers.get(axis), ScaleAnswer)}
+    if not isinstance(essential, YesNoAnswer) or len(axes) != len(AXES):
         raise DecisionError("decision answers do not match the highlight questions")
-    decisions = {decision: answers[decision].probability for decision in DECISIONS}
+    decisions = {ESSENTIAL: essential.probability, **{axis: answer.score for axis, answer in axes.items()}}
     return ScoredClaim(
         index=index,
         id=claim.id,

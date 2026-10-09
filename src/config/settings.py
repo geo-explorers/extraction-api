@@ -74,7 +74,9 @@ class Settings(BaseSettings):
         description="Decision-model provider for claims.score_highlights (see src/decisions)",
     )
     claims_highlights_model: str = Field(
-        default="pplx-decider-v1-27b",
+        # The versioned id: `pplx-decider-v1-27b` became an alias of it in
+        # October 2026 and the scores moved with it, so the name says what runs.
+        default="pplx-decider-v1.1-27b",
         description="Model name sent to the claims.score_highlights provider (one request per claim)",
     )
 

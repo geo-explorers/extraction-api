@@ -14,6 +14,8 @@ from src.decisions.base import (
     DecisionError,
     DecisionModel,
     Question,
+    Scale,
+    ScaleAnswer,
     YesNo,
     YesNoAnswer,
 )
@@ -46,6 +48,8 @@ __all__ = [
     "DecisionError",
     "DecisionModel",
     "Question",
+    "Scale",
+    "ScaleAnswer",
     "YesNo",
     "YesNoAnswer",
     "get_decision_model",
