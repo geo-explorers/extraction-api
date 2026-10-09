@@ -57,8 +57,9 @@ class Scale:
     levels: Sequence[str]
 
     def __post_init__(self) -> None:
-        if len(self.levels) < 2:
-            raise ValueError("Scale needs at least two levels")
+        # A bare string is a Sequence too, and would be sent as one level per character.
+        if isinstance(self.levels, str) or len(self.levels) < 2:
+            raise ValueError("Scale needs at least two levels, as a list of descriptions")
 
 
 Question = Union[YesNo, Choice, Scale]

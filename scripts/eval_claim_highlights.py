@@ -112,7 +112,7 @@ def axis_report(rows: list[dict]) -> None:
     """The axes against the references the set carries. Each is a number from 0 to 1 — the
     position on a four-level scale — so the checks are rankings, not thresholds."""
     axes = [a for a in AXES if all(a in r["decisions"] for r in rows)]
-    if not axes:
+    if not rows or not axes:
         return
     of = lambda axis, group: [r["decisions"][axis] for r in group]  # noqa: E731
     labels = sorted({r["label"] for r in rows})
@@ -212,12 +212,11 @@ async def main() -> int:
 
     print(f"\n{len(scored)}/{len(rows)} claims scored in {time.time() - started:.0f}s")
     print(f"AUC, selected vs the rest: {auc([r['score'] for r in selected], [r['score'] for r in rest]):.3f}")
-    if len(DECISIONS) > 1:
-        for decision in DECISIONS:
-            print(
-                f"  {decision} alone: "
-                f"{auc([r['decisions'][decision] for r in selected], [r['decisions'][decision] for r in rest]):.3f}"
-            )
+    for decision in DECISIONS:
+        print(
+            f"  {decision} alone: "
+            f"{auc([r['decisions'][decision] for r in selected], [r['decisions'][decision] for r in rest]):.3f}"
+        )
     if precision_at_k:
         print(
             f"precision at k (k = the reader's picks per debate): {sum(precision_at_k) / len(precision_at_k):.3f}; "

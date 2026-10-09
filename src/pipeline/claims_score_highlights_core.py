@@ -7,10 +7,11 @@ code, and tests drive it with a fake.
 
 The score: one yes/no decision — would the list misrepresent the discussion
 without this claim? — and its probability of yes is the score. Three more
-decisions ride in the same request at no extra input cost (the content is
-shared): relevance, quality and controversy, each a four-level scale read as
-a position from 0 to 1. They are returned beside the score in `decisions`;
-`highlight_score` says how the score is read off them, and leaves them alone.
+decisions ride in the same request (the content is shared; only their own
+wording is added, about half again the input tokens): relevance, quality
+and controversy, each a four-level scale read as a position from 0 to 1.
+They are returned beside the score in `decisions`; `highlight_score` says
+how the score is read off them, and leaves them alone.
 
 A run scores every claim or fails. A consumer stores what it gets and does
 not ask again, so a partially scored result would leave claims unscored for
@@ -198,11 +199,10 @@ def highlight_score(decisions: Mapping[str, float]) -> float:
 
 def score_claim(index: int, claim: HighlightClaim, answers: Mapping[str, Answer]) -> ScoredClaim:
     essential = answers.get(ESSENTIAL)
-    if not isinstance(essential, YesNoAnswer) or not all(isinstance(answers.get(axis), ScaleAnswer) for axis in AXES):
+    axes = {axis: answer for axis in AXES if isinstance(answer := answers.get(axis), ScaleAnswer)}
+    if not isinstance(essential, YesNoAnswer) or len(axes) != len(AXES):
         raise DecisionError("decision answers do not match the highlight questions")
-    decisions = {ESSENTIAL: essential.probability}
-    for axis in AXES:
-        decisions[axis] = answers[axis].score  # type: ignore[union-attr]
+    decisions = {ESSENTIAL: essential.probability, **{axis: answer.score for axis, answer in axes.items()}}
     return ScoredClaim(
         index=index,
         id=claim.id,

@@ -112,8 +112,9 @@ The same request asks three more questions, each a **four-level scale**: the mod
 descriptions in order from the lowest to the highest and returns a probability per level; the
 axis score is the probability-weighted position, 0 meaning surely the lowest level and 1 surely the
 highest. They are reported in `decisions` beside the highlight score and are not folded into it.
-Because the content is shared and the provider bills input only, the three cost nothing on top of
-the highlight question.
+The content is shared, so the three add only their own wording to each request: about half again
+the input tokens of the highlight question alone (the rubrics are long; see the evaluation for the
+figure), and no extra requests.
 
 | Axis | Question | Levels, lowest first |
 |---|---|---|
@@ -195,7 +196,8 @@ against the rest, precision at k per debate (k = the reader's number of picks), 
 label, and the axes against the references the set carries (relevance against the `peripheral`
 and `background` labels, quality against `faithfulness_concern`, controversy against the
 extractor's own `is_contestable` flag, kept on each claim for this). A full run is 444 requests,
-about 760,000 input tokens.
+about 1,170,000 input tokens with the four questions (760,000 with the highlight question alone —
+the three rubrics are what the other 54% is).
 
 ### Results — `perplexity` / `pplx-decider-v1-27b`
 

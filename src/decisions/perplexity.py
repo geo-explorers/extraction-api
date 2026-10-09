@@ -24,7 +24,6 @@ import requests
 from src.config.settings import settings
 from src.decisions.base import (
     Answer,
-    Choice,
     ChoiceAnswer,
     DecisionError,
     Question,
@@ -53,6 +52,8 @@ MAX_RETRY_AFTER_SECONDS = 30.0
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 # A `score` question takes 2 to 10 levels.
 MAX_SCALE_LEVELS = 10
+# How far a distribution may stray from summing to one before it is not one.
+PROBABILITY_SUM_TOLERANCE = 0.05
 
 
 def to_wire(question: Question) -> Dict[str, Any]:
@@ -91,13 +92,25 @@ def from_wire(name: str, question: Question, answers: Mapping[str, Any]) -> Answ
         return YesNoAnswer(probability=float(probability))
     probabilities = raw.get("probabilities")
     if isinstance(question, Scale):
-        # Levels come back keyed by their index as a string. The position is
-        # recomputed from them rather than read from `score`, so the answer is
-        # consistent with its own probabilities whatever the provider rounds.
+        # Levels come back keyed by their index as a string, exactly our levels
+        # and no others, and the `legend` echoes each level's text by index —
+        # so an answer to a differently shaped or reordered question is caught
+        # here rather than read as a confident position. The position is
+        # recomputed from the probabilities rather than read from `score`, so
+        # the answer is consistent with itself whatever the provider rounds.
         keys = [str(i) for i in range(len(question.levels))]
-        if not isinstance(probabilities, dict) or not all(_is_probability(probabilities.get(k)) for k in keys):
+        if (
+            not isinstance(probabilities, dict)
+            or set(probabilities) != set(keys)
+            or not all(_is_probability(probabilities[k]) for k in keys)
+        ):
             raise DecisionError(f"Perplexity answer for {name!r} lacks a probability per level: {raw!r}")
         per_level = [float(probabilities[k]) for k in keys]
+        if abs(sum(per_level) - 1.0) > PROBABILITY_SUM_TOLERANCE:
+            raise DecisionError(f"Perplexity answer for {name!r} has level probabilities that do not sum to one: {raw!r}")
+        legend = raw.get("legend")
+        if legend is not None and legend != dict(zip(keys, question.levels)):
+            raise DecisionError(f"Perplexity answer for {name!r} describes other levels than asked: {raw!r}")
         top = len(per_level) - 1
         score = sum(p * i for i, p in enumerate(per_level)) / top
         return ScaleAnswer(score=min(1.0, max(0.0, score)), probabilities=per_level)

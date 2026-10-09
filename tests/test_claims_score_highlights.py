@@ -68,9 +68,16 @@ def test_questions_are_the_score_decision_and_one_scale_per_axis():
     assert "answer yes only when the loss is major" in essential.instructions
     assert "no other extracted claim carries it" in essential.yes
     assert "another extracted claim carries the same point" in essential.no
-    # Each axis is a four-level scale, lowest level first.
+    # Each axis is a four-level scale, lowest level first: the rubric module lists the texts in the
+    # task's order, and the wire order is the task's — a swap in either would reach the model as
+    # a reversed rung with every key still registered.
+    from src.config.prompts.claims_score_highlights_prompt import DEBATE_AXES
+
     for axis in AXES:
         assert isinstance(questions[axis], Scale) and len(questions[axis].levels) == len(AXIS_LEVELS[axis]) == 4
+        texts = DEBATE_AXES[axis][1]
+        assert list(texts) == list(AXIS_LEVELS[axis]), axis
+        assert list(questions[axis].levels) == [texts[level] for level in AXIS_LEVELS[axis]], axis
     relevance, quality, controversy = (questions[axis] for axis in AXES)
     assert "not about the main claim's subject" in relevance.levels[0] and "sees at once" in relevance.levels[-1]
     assert quality.levels[0].startswith("Misrepresents") and quality.levels[-1].startswith("Nothing to fix")
@@ -96,9 +103,12 @@ def test_yes_no_criteria_come_as_a_pair():
     assert YesNo(instructions="?").yes is None
 
 
-def test_a_scale_needs_two_levels():
+def test_a_scale_needs_two_levels_given_as_a_list():
     with pytest.raises(ValueError, match="two levels"):
         Scale(instructions="?", levels=["only one"])
+    # A string is a sequence of characters, which is not a rubric.
+    with pytest.raises(ValueError, match="two levels"):
+        Scale(instructions="?", levels="low to high")
     assert len(Scale(instructions="?", levels=["low", "high"]).levels) == 2
 
 
@@ -238,12 +248,22 @@ def test_perplexity_rejects_missing_or_malformed_answers():
     narrower = Choice(instructions="?", options={"positive": None, "negative": None})
     with pytest.raises(DecisionError, match="unknown option"):
         pplx.from_wire("sentiment", narrower, DOCS_ANSWERS)
-    # A scale with more levels than the answer has probabilities for is a broken contract.
+    # A scale answered at other levels than asked is a broken contract, whichever way it differs:
+    # fewer probabilities than levels, more, a distribution that is not one, or a legend that
+    # describes different rungs.
     taller = Scale(instructions="?", levels=["a", "b", "c", "d"])
     with pytest.raises(DecisionError, match="probability per level"):
         pplx.from_wire("severity", taller, DOCS_ANSWERS)
     with pytest.raises(DecisionError, match="probability per level"):
         pplx.from_wire("severity", SEVERITY, {"severity": {"type": "score", "score": 1.5}})
+    shorter = Scale(instructions="?", levels=["a", "b"])
+    with pytest.raises(DecisionError, match="probability per level"):
+        pplx.from_wire("severity", shorter, DOCS_ANSWERS)
+    with pytest.raises(DecisionError, match="do not sum to one"):
+        pplx.from_wire("severity", SEVERITY, {"severity": {"type": "score", "probabilities": {"0": 0, "1": 0, "2": 0}}})
+    reordered = Scale(instructions="?", levels=["Product unusable", "Inconvenient", "Cosmetic"])
+    with pytest.raises(DecisionError, match="other levels than asked"):
+        pplx.from_wire("severity", reordered, DOCS_ANSWERS)
 
 
 class _Response:
@@ -280,16 +300,18 @@ async def test_perplexity_decide_sends_state_and_questions_and_returns_typed_ans
     model = pplx.PerplexityDecisionModel(api_key="k")
     answers = await model.decide(
         {"title": "T", "transcript": "[0] Ann: hi"},
-        {"defect": YesNo(instructions="Defect?"), "sentiment": SENTIMENT},
+        {"defect": YesNo(instructions="Defect?"), "sentiment": SENTIMENT, "severity": SEVERITY},
         model="pplx-decider-v1-27b",
     )
     assert answers["defect"].probability == pytest.approx(0.942, abs=1e-3) and answers["sentiment"].choice == "mixed"
+    assert isinstance(answers["severity"], ScaleAnswer) and answers["severity"].score == pytest.approx(0.892, abs=1e-3)
     (call,) = calls
     assert call["url"] == "https://api.perplexity.ai/v1/decisions"
     assert call["headers"] == {"Authorization": "Bearer k"}
     assert call["json"]["model"] == "pplx-decider-v1-27b"
     assert call["json"]["state"] == {"title": "T", "transcript": "[0] Ann: hi"}
     assert call["json"]["questions"]["defect"] == {"type": "noul", "instructions": "Defect?"}
+    assert call["json"]["questions"]["severity"]["criteria"] == ["Cosmetic", "Inconvenient", "Product unusable"]
     assert set(call["json"]) == {"model", "state", "questions"}  # an unknown top-level field is a 400
 
 
