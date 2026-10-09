@@ -3,7 +3,10 @@
 POST https://api.perplexity.ai/v1/decisions takes the content as `state` and
 named questions, and returns a probability per question instead of text. The
 wire names differ from ours: a yes/no question is type `noul` with criteria
-keyed "true"/"false", and its answer is the `noul` field.
+keyed "true"/"false", and its answer is the `noul` field; a scale question is
+type `score` with the level descriptions as an ordered list, and its answer
+carries a probability per level index ("0", "1", …) and a probability-weighted
+index as `score`.
 
 Contract read from https://docs.perplexity.ai/docs/decisions/quickstart
 (2026-10-02): 10 requests/second per organization, 429 carries Retry-After in
@@ -25,6 +28,8 @@ from src.decisions.base import (
     ChoiceAnswer,
     DecisionError,
     Question,
+    Scale,
+    ScaleAnswer,
     YesNo,
     YesNoAnswer,
 )
@@ -46,6 +51,8 @@ RETRY_INITIAL_DELAY = 2.0
 # whole run has a budget of minutes, and one request must not sleep it away.
 MAX_RETRY_AFTER_SECONDS = 30.0
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+# A `score` question takes 2 to 10 levels.
+MAX_SCALE_LEVELS = 10
 
 
 def to_wire(question: Question) -> Dict[str, Any]:
@@ -54,6 +61,14 @@ def to_wire(question: Question) -> Dict[str, Any]:
         if question.yes is not None:
             wire["criteria"] = {"true": question.yes, "false": question.no}
         return wire
+    if isinstance(question, Scale):
+        if len(question.levels) > MAX_SCALE_LEVELS:
+            raise DecisionError(f"Perplexity scores at most {MAX_SCALE_LEVELS} levels; got {len(question.levels)}")
+        return {
+            "type": "score",
+            "instructions": question.instructions,
+            "criteria": list(question.levels),
+        }
     return {
         "type": "choice",
         "instructions": question.instructions,
@@ -75,6 +90,17 @@ def from_wire(name: str, question: Question, answers: Mapping[str, Any]) -> Answ
             raise DecisionError(f"Perplexity answer for {name!r} has no usable `noul`: {raw!r}")
         return YesNoAnswer(probability=float(probability))
     probabilities = raw.get("probabilities")
+    if isinstance(question, Scale):
+        # Levels come back keyed by their index as a string. The position is
+        # recomputed from them rather than read from `score`, so the answer is
+        # consistent with its own probabilities whatever the provider rounds.
+        keys = [str(i) for i in range(len(question.levels))]
+        if not isinstance(probabilities, dict) or not all(_is_probability(probabilities.get(k)) for k in keys):
+            raise DecisionError(f"Perplexity answer for {name!r} lacks a probability per level: {raw!r}")
+        per_level = [float(probabilities[k]) for k in keys]
+        top = len(per_level) - 1
+        score = sum(p * i for i, p in enumerate(per_level)) / top
+        return ScaleAnswer(score=min(1.0, max(0.0, score)), probabilities=per_level)
     if not isinstance(probabilities, dict) or not all(
         _is_probability(probabilities.get(option)) for option in question.options
     ):

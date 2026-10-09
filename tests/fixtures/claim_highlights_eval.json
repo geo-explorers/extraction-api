@@ -1,5 +1,5 @@
 {
- "_about": "Evaluation set for claims.score_highlights: the 30 most recent Geo testnet debates on 2026-10-02 (chat-api-testnet /debates/{id}/claims), one document per turn. Each claim carries the label one unsteered reader gave it after reading every transcript: `selected` (a highlight, with its `job`: position, clash or turn) or the main reason it was left out. PRELIMINARY: one reader, not yet reviewed by the team; treat disagreements as things to read, not as errors.",
+ "_about": "Evaluation set for claims.score_highlights: the 30 most recent Geo testnet debates on 2026-10-02 (chat-api-testnet /debates/{id}/claims), one document per turn. Each claim carries the label one unsteered reader gave it after reading every transcript: `selected` (a highlight, with its `job`: position, clash or turn) or the main reason it was left out. PRELIMINARY: one reader, not yet reviewed by the team; treat disagreements as things to read, not as errors. `is_contestable` is the extractor's own flag from the same payload, kept as a reference for the controversy axis, not a label.",
  "debates": [
   {
    "id": "01a0f8d1-e9ae-7570-84bb-b5bba4e22807",
@@ -38,91 +38,104 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "A short first date is preferable to avoid being stuck for a long time, such as two hours, with a disagreeable person",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A coffee date is a way to assess compatibility before committing to a longer date",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A coffee date is a low-stakes first meeting with a low financial commitment",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "If a first coffee date goes well, a man should plan a more ambitious and intentional second date",
      "document_indices": [
       0
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "One reason for a low-cost first date is to avoid feeling obligated by the other person spending money if there is no connection",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Some women may use coffee dates to take advantage of the situation",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Some women may go on coffee dates just to post about the experience on social media",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A potential outcome of a coffee date is one person ghosting the other",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A high-end client of Susan Winter's, who lives in the south of France, felt it was demeaning to be asked on a walk for a first date",
      "document_indices": [
       2
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": false
     },
     {
      "text": "The client felt the man should have been willing to spend at least $4 on a coffee and arrange a designated time and place to talk",
      "document_indices": [
       2
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": false
     },
     {
      "text": "Men have set a standard that they must be chivalrous towards women, which includes demonstrating financial stability",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Women have become accustomed to men proving their financial stability as part of dating",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The best way to get to know someone for a potential relationship is through conversation without the element of spending money",
@@ -130,28 +143,32 @@
       3
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "If a potential partner does not accept a date that does not involve spending money, one should move on",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Some men may invite women to dinner on a first date to demonstrate their ability to provide or to show they value the woman",
      "document_indices": [
       4
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "A sit-down meeting across a table is a preferable format for a first date",
      "document_indices": [
       4
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "A coffee date should be something one \"graduates\" to after getting to know a person well for about a week or more",
@@ -159,14 +176,16 @@
       5
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "A coffee date can be considered a reward for a person who has demonstrated they deserve it",
      "document_indices": [
       5
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     }
    ]
   },
@@ -206,14 +225,16 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Romance is generally associated with physical aspects like sexual encounters and actions intended to make a partner happy",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "In old age, a marriage can transition from a romantic relationship to a partnership focused on survival",
@@ -221,21 +242,24 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Marriage is initially designed and created out of a desire for romance",
      "document_indices": [
       1
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "A key part of marriage is engaging in romantic activities that are exclusive to that relationship",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "While marriage is intended to be romantic, it can evolve into a companionship model as couples age or face illness",
@@ -243,7 +267,8 @@
       1
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "The dominant part of a marriage is intended to be a physical, romantic relationship",
@@ -251,21 +276,24 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Some individuals get married for non-romantic reasons, such as to obtain a green card or for financial security",
      "document_indices": [
       3
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": false
     },
     {
      "text": "The fundamental difference between marriage and other partnerships is the initial intention for physical intimacy between the partners",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -306,21 +334,24 @@
       0
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "The U.S. could ban superintelligence while continuing to lead in medical AI, scientific research, defense, and commercial applications",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Developing a superintelligent system first puts the developing nation at risk, as the asset may be uncontrollable",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The first nation to develop superintelligence will not necessarily control it or gain a strategic advantage",
@@ -328,21 +359,24 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "A well-designed ban on superintelligence could use licensing and chip controls to preserve beneficial AI development",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "China prioritizes advancing its geopolitical strategy through AI development over the impact of AI on its citizens",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "If China gains a lead in the AI race, it could negatively affect the national and cybersecurity of the transatlantic alliance",
@@ -350,14 +384,16 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Developing superintelligence requires enormous computing resources, advanced ships, specialized facilities, and supply chains",
      "document_indices": [
       2
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": false
     },
     {
      "text": "A U.S. ban on superintelligence would demonstrate American leadership on the issue, even if China did not fully comply",
@@ -365,28 +401,32 @@
       2
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "China is focusing on AI governance as a means to improve its global influence",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The U.S. can maintain leadership by developing useful AI and protecting its technological advantages, rather than racing to build superintelligence",
      "document_indices": [
       4
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "A ban on superintelligence could hinder technological development and limit future possibilities",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -427,28 +467,32 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Disagreements and hardships are a normal part of a committed relationship",
      "document_indices": [
       0
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": true
     },
     {
      "text": "Commitment to loving each other through hardship can make lifelong love possible",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Traditional marriage vows state a commitment \"to death do you part.\"",
      "document_indices": [
       0
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "While lifelong love is an ideal, it may not be realistic in the current era because people are constantly changing and growing",
@@ -456,49 +500,56 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "In the past, lifelong relationships were often chosen due to a lack of other options",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "People's freedom to grow in unexpected ways can become an issue in long-term partnerships",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A relationship should be maintained only as long as it is real and both partners are invested",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "It is an unrealistic ideal to maintain a relationship if one partner has changed so dramatically that being together is no longer possible",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Staying in a toxic relationship is unhealthy and does not represent a true lifelong commitment",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Some people stay together for 10, 20 years or more, even in toxic relationships",
      "document_indices": [
       2
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": false
     },
     {
      "text": "Lifelong love can be a realistic ideology, but it is not for everyone",
@@ -506,21 +557,24 @@
       2
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "The modern era is characterized by more independent thinking and financial freedom for women, which affects long-term relationships",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A relationship that seemed good years ago may not be realistic for the rest of a person's life",
      "document_indices": [
       3
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "A relationship that ends is still valid for the time it was good",
@@ -528,14 +582,16 @@
       3
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Lifelong love can be a reality when it is actively implemented rather than just considered an ideal",
      "document_indices": [
       4
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -575,21 +631,24 @@
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Learning to love another person is the highest form of self-expression",
      "document_indices": [
       0
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Relationships can provide a safe space for partners to heal emotionally and work through personal issues",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A person's capacity to love another is limited by their capacity to love themselves",
@@ -597,21 +656,24 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Developing a greater capacity for love within a relationship increases one's ability to give to a partner",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Loving oneself should be the foundation for all relationships, including platonic, intimate, and professional",
      "document_indices": [
       1
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "Entering a relationship while still learning to love oneself is inadvisable as it indicates a lack of self-knowledge",
@@ -619,7 +681,8 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "People who enter relationships without a strong self-identity tend to adopt the identity their partner desires for them",
@@ -627,14 +690,16 @@
       1
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Entering a relationship with the sole purpose of learning to love oneself is a selfish act",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Learning to love oneself is ideally a byproduct or end goal discovered within a relationship, not the primary reason for entering one",
@@ -642,42 +707,48 @@
       2
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "A partner can offer new perspectives on love and help one discover new aspects of it",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Many modern relationships fail because partners attempt to groom each other into a specific way of loving instead of accepting them as they are",
      "document_indices": [
       3
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "A person should have a good sense of self-worth before entering a relationship to have something to offer their partner",
      "document_indices": [
       4
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Self-love is the foundation of everything",
      "document_indices": [
       5
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "Loving oneself means loving every aspect of oneself, including the good, bad, ugly, physical, mental, and spiritual",
      "document_indices": [
       5
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     }
    ]
   },
@@ -718,21 +789,24 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Individuals should be frank with their partners about their emotional triggers and issues",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "People often enter relationships unaware of their deep emotional wounds, which can then negatively impact their partner",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Addressing one's emotional wounds is a personal responsibility, not an obligation within a relationship",
@@ -740,14 +814,16 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Requiring a partner to address their emotional wounds in every disagreement can create a sense of entitlement",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "An individual can choose not to address their emotional wounds, and their partner should accept that decision",
@@ -755,21 +831,24 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Unresolved childhood trauma can lead to poor emotional regulation and reactivity, which negatively impacts relationships",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "If an individual decides not to address their emotional wounds, it will not happen, regardless of relationship advice",
      "document_indices": [
       3
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "For relationship advice to be useful, it must be sound, agreeable to the individual, and actually applied",
@@ -777,21 +856,24 @@
       4
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Relationship advice that is given but not applied results in no change",
      "document_indices": [
       4
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "The effectiveness of relationship advice is ultimately based on the individual receiving it",
      "document_indices": [
       5
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     }
    ]
   },
@@ -831,7 +913,8 @@
      "document_indices": [
       0
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "AI-generated relationship coaches are a form of marketing, not genuine coaching",
@@ -839,28 +922,32 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "AI may provide better information to the public than an uninformed person",
      "document_indices": [
       0
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Creators of AI-generated relationship coaches are not motivated by a desire to help people",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Creators of AI-generated relationship coaches use content from large language models like ChatGPT instead of their own knowledge",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The value and benefit of an AI tool depends on how the user interacts with and corrects the program",
@@ -868,35 +955,40 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "AI can provide more data and information than an average person",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI allows program curators to gather data without spending years on traditional research and surveys",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI tools like ChatGPT or Gemini can help real coaches refine their communication to be more eloquent",
      "document_indices": [
       2
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Some creators of AI coaches use a stock image and a generic AI to take advantage of people seeking love",
      "document_indices": [
       2
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Users may not be able to distinguish whether they are interacting with a real person or an AI coach",
@@ -904,7 +996,8 @@
       2
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "There are 'grifters' who use AI coaching tools exploitatively for their own advantage",
@@ -912,49 +1005,56 @@
       3
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "It is difficult to distinguish between exploitative AI 'grifters' and those legitimately trying to help people",
      "document_indices": [
       3
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "Dating sites like Tinder use AI-generated programs",
      "document_indices": [
       3
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": false
     },
     {
      "text": "Some popular Instagram accounts promoting AI coaching are not run by real people",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Some AI coaching services use marketing funnels that are completely generated by AI",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Conducting user surveys after using an AI coach could provide important feedback for improving the service",
      "document_indices": [
       5
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Gathering user feedback through surveys might reduce the potential for exploitation by AI coaches",
      "document_indices": [
       5
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     }
    ]
   },
@@ -994,56 +1094,64 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Monogamy is an inherent part of the traditional marriage contract",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Disabilities, depression, or erectile dysfunction can be unaddressed issues affecting sexual intimacy in a marriage",
      "document_indices": [
       0
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": true
     },
     {
      "text": "An ongoing lack of sexual intimacy in a marriage needs to be discussed between the partners",
      "document_indices": [
       0
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "From a biblical perspective, a person should not refuse to have sex with their marital partner",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Honoring marital covenants and commitments made before God and each other is a key part of marriage",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Failing to honor marital commitments is grounds to discontinue the marriage",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Reasons for a partner not wanting sex can include having children, weight gain, depression, or job loss",
      "document_indices": [
       2
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": true
     },
     {
      "text": "A cessation of romantic bonding, closeness, and physicality can slowly erode the marriage bond",
@@ -1051,21 +1159,24 @@
       2
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "The difference between a roommate and a romantic partner includes sexual intimacy",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Sexual intimacy in a marriage may wane over time due to age and physical problems",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A lack of sexual participation should not be considered an automatic breach of the marriage contract",
@@ -1073,21 +1184,24 @@
       3
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Physical or emotional issues can be valid reasons for a spouse to refuse sex",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Specific reasons for refusing sex can include menopause, menstruation, illness, or having a hard emotional day",
      "document_indices": [
       3
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": true
     },
     {
      "text": "The breach of marital commitment is the repeated refusal to address the issue of not having sex, not the refusal itself",
@@ -1095,14 +1209,16 @@
       0
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Communication is very important in a marriage",
      "document_indices": [
       5
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": true
     }
    ]
   },
@@ -1142,21 +1258,24 @@
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "A history of casual sex can lead to treating intimacy as a sport, hobby, or activity",
      "document_indices": [
       0
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "A history of rampant casual sex makes it difficult to perceive a person's capacity for fidelity and monogamy",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A dispositional pattern of engaging in casual sex can be carried into a committed relationship",
@@ -1164,7 +1283,8 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Casual sex does not cause problems as long as participants are open and upfront about their intentions",
@@ -1172,14 +1292,16 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "\"Friends with benefits\" arrangements can potentially evolve into a relationship or a \"situationship.\"",
      "document_indices": [
       1
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Casual sex conducted with an agreement about boundaries is a form of commitment",
@@ -1187,35 +1309,40 @@
       2
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "When casual sex is a dominant lifestyle, the physical aspect may outpace emotional, intellectual, and psychological commitment",
      "document_indices": [
       2
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Physical intimacy can translate into emotional bonding and potentially into trauma bonding",
      "document_indices": [
       3
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Communication in casual sex should include discussions about protection and getting STI checks before, during, and after encounters",
      "document_indices": [
       3
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Miscommunication can cause problems in casual sex arrangements",
      "document_indices": [
       5
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     }
    ]
   },
@@ -1255,28 +1382,32 @@
      "document_indices": [
       0
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": true
     },
     {
      "text": "The United States' commitment to NATO and its role in global security may change in the future",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Donald Trump's presidency and his stance on NATO commitments demonstrate that the United States' political positions can change",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Distributing the responsibility for protecting NATO among more entities, rather than relying solely on the U.S., would create a safer world",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "A NATO nuclear deterrent strategy that does not include the United States is unrealistic",
@@ -1284,14 +1415,16 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "The United States has the biggest military systems in the world, is the number one defender of NATO, and spends a lot of money on the alliance",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "United States foreign policy shifts when the political administration changes",
@@ -1299,28 +1432,32 @@
       1
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "The NATO alliance was created during the Cold War",
      "document_indices": [
       1
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "The United States' membership was a key factor in the development of the NATO alliance",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The involvement of the United States in NATO contributed to the end of communism in Europe",
      "document_indices": [
       1
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "An independent European nuclear deterrent would provide a \"Plan B\" for security if U.S. support changes",
@@ -1328,28 +1465,32 @@
       2
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "United States military aid, including personnel and funding, has enabled Ukraine to defend itself against Russia",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "NATO's strength is a result of consistent U.S. support for European countries under attack since the Cold War",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "It is better for NATO allies to compromise with the current U.S. administration rather than create long-term plans independent of it",
      "document_indices": [
       3
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "A European Union-led nuclear deterrent would not invalidate existing NATO agreements with the United States",
@@ -1357,28 +1498,32 @@
       4
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "A European-led nuclear deterrent would not invalidate the influence of the United States within NATO",
      "document_indices": [
       4
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "An independent European nuclear deterrent would give Europe additional leverage for its own defense",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The United States possesses advanced equipment for military operations, nuclear security, defense, and cybersecurity",
      "document_indices": [
       5
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     }
    ]
   },
@@ -1418,14 +1563,16 @@
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Removing conversations about new technologies like COVID vaccines from the public sphere is dangerous for freedom of speech and societal discourse",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Misinformation on social media about politics and world events negatively affects young people's education and understanding of the world",
@@ -1433,14 +1580,16 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Misinformation on social media can be dangerous for mental health by distorting a person's perspective and understanding of their surroundings",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Deciding what constitutes misinformation would require establishing an entity like a \"ministry of truth.\"",
@@ -1448,14 +1597,16 @@
       2
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Institutions that decide what is true or misinformation are dangerous in a democracy without clear checks and balances",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Human traffickers use misinformation on social media, sometimes with AI, such as fake job offers, to lure and kidnap victims",
@@ -1463,21 +1614,24 @@
       3
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": false
     },
     {
      "text": "Removing misinformation used by human traffickers is a human rights issue that social media companies should consider",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Content that harms people or delivers propaganda should be removed from social media",
      "document_indices": [
       3
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "There is a distinction between misinformation intended to harm and opinions that dissent from public consensus, such as on COVID vaccines",
@@ -1485,14 +1639,16 @@
       4
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Fake information from human trafficking groups should be removed, and the perpetrators should be banned and prosecuted",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     }
    ]
   },
@@ -1532,14 +1688,16 @@
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "The proposition that illegal immigration is a national security risk can be weaponized to support inhumane policies",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Opening the borders would reveal that illegal immigration is a national security risk",
@@ -1547,35 +1705,40 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Cartel activity is relatively effectively contained within Mexico",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Completely opening the borders would lead to an incursion of cartels into the United States",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The national security risk of illegal immigration is overblown in popular discourse",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Breaking immigration rules does not by itself make a person a national security risk",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "A study of all 50 US states from 1990 to 2014 found no association between increased undocumented immigration and terrorist attacks, radicalization, or terrorism prosecutions",
@@ -1583,7 +1746,8 @@
       1
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": false
     },
     {
      "text": "A study of Texas from 2012 to 2018 showed that US-born citizens were twice as likely as undocumented immigrants to be arrested for violent felonies",
@@ -1591,28 +1755,32 @@
       1
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": false
     },
     {
      "text": "Most people who migrate do so for economic or political reasons",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "There is no association between undocumented status and a propensity to commit crime",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "There is no found correlation between migration flows and a national security risk",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "It cannot be claimed that border enforcement does not improve national security without the experiment of removing the border",
@@ -1620,42 +1788,48 @@
       2
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "More than 60% of fentanyl is intercepted at the border",
      "document_indices": [
       3
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": false
     },
     {
      "text": "Borders play a role in stopping trafficking",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Opening the borders with Mexico would cause a backlash",
      "document_indices": [
       3
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Border security can impose a cost on the movement of cartel members and identified security threats",
      "document_indices": [
       4
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Gaps in border screening need attention",
      "document_indices": [
       5
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The existence of dangerous individuals or screening gaps does not justify treating illegal immigration itself as a national security threat",
@@ -1663,14 +1837,16 @@
       5
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Immigration laws should be enforced and identities verified",
      "document_indices": [
       5
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     }
    ]
   },
@@ -1711,42 +1887,48 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "The United Nations requires a collective agreement among all member states to pass policy recommendations",
      "document_indices": [
       0
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "A global lack of mutual trust makes a UN-led AI governance framework unrealistic",
      "document_indices": [
       1
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "Because artificial intelligence is a powerful technology with global effects, some form of governance framework is needed",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A general AI governance framework could be a healthy step towards a future enforceable agreement",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Countries like the United States prioritize economic development and tech businesses, creating a conflict between business and human rights interests in AI governance",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A broad AI governance framework with high-level, non-enforceable principles acting as a 'gentleman's agreement' between countries is possible",
@@ -1754,7 +1936,8 @@
       3
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "UN member states require specific, technical, and direct frameworks to build consensus, rather than broad principles",
@@ -1762,21 +1945,24 @@
       4
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "The lack of AI experts in decision-making roles makes it difficult to reach an agreement on a global AI governance framework",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "High-level agreements on AI governance are possible and can have value even without being directly enforceable",
      "document_indices": [
       5
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     }
    ]
   },
@@ -1816,14 +2002,16 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Factors within a person's country of origin are the primary driver for migration",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "People from crisis areas will migrate if they are not safe in their home country, regardless of border enforcement",
@@ -1831,21 +2019,24 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "People migrate from South America to the US through the Darien Gap, Central America, and Mexico",
      "document_indices": [
       0
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": false
     },
     {
      "text": "People from sub-Saharan Africa migrate to Europe through the Iberian Peninsula",
      "document_indices": [
       0
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": false
     },
     {
      "text": "Securing borders and ensuring potential migrants know they will fail to cross is the most effective way to stop illegal migration",
@@ -1853,28 +2044,32 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "It is not fair or safe for a country to have to deal with illegal migration",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "It is important for immigrants to enter a country through legal means",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A host country's failure to secure its border is the reason people are able to be in that country illegally",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "People who entered a country illegally because of its unsecured border should not be removed and should be given a path to citizenship",
@@ -1882,42 +2077,48 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "The world is highly integrated and interconnected, rather than being composed of isolated countries with closed borders",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Policies in countries like the United States and China affect people in other nations, such as Argentina",
      "document_indices": [
       2
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": false
     },
     {
      "text": "In a Spanish territory in North Africa, an influx of migrants from Morocco led to women being raped, with no due process for the accused",
      "document_indices": [
       3
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": false
     },
     {
      "text": "Migrating into a country illegally is an act of breaking that country's laws",
      "document_indices": [
       3
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "Reports of rapes by migrants in a Spanish territory in North Africa may have been driven by external factors designed to 'flood the zone' with information",
      "document_indices": [
       4
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "Countries that do not want people from North Africa entering their land should not maintain colonies in North Africa",
@@ -1925,14 +2126,16 @@
       4
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "A country's colony is its property, and it should not have to tolerate people breaking the law to be on that property",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Failure to enforce national borders undermines the concept of a country",
@@ -1940,7 +2143,8 @@
       5
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     }
    ]
   },
@@ -1980,21 +2184,24 @@
      "document_indices": [
       0
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "The general academic consensus in the 1990s was that states do not control migration, which is primarily driven by economies",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": false
     },
     {
      "text": "Factors like economic connections and migration networks have a larger impact on migration than state policies",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Migration to the US sharply decreased in response to harsh border policies starting in 2016 under the Trump administration",
@@ -2002,14 +2209,16 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "US migration saw a sharp uptick when the Biden administration began, followed by a sharp decrease when a second Trump administration began",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": false
     },
     {
      "text": "Tougher border enforcement may cause migrants to find new routes or methods rather than stopping migration altogether",
@@ -2017,28 +2226,32 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Efforts to reinforce borders in Europe have generally not been successful in stopping migration",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Border enforcement can be resource-intensive without producing major stops to migration",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Economic draws are a primary driver of migration, and people will generally find a way to migrate as long as the reasons for leaving remain",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The effectiveness of border enforcement on migration is impacted by scope conditions, such as geography and political centralization, which differ between the US and Europe",
@@ -2046,21 +2259,24 @@
       2
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "The United States has greater political centralization than Europe",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Migration pathways to the US are limited by choke points on the Mexican border and natural barriers like the desert",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "Research by Douglas Massey of Princeton found that increased US border enforcement caused circular migration from Mexico to become one-way, permanent settlement",
@@ -2068,7 +2284,8 @@
       3
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": false
     },
     {
      "text": "The Trump administration's actions demonstrated that border enforcement can stop migration entirely, not just alter its patterns",
@@ -2076,14 +2293,16 @@
       4
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Tough border enforcement can create a negative climate within the country",
      "document_indices": [
       5
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     }
    ]
   },
@@ -2123,21 +2342,24 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI governance is being incorporated into decision-making for collective defense, such as within NATO",
      "document_indices": [
       0
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "Competing state actors use AI to infiltrate national security",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "Slowing AI development could make national security policies less secure",
@@ -2145,63 +2367,72 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Governments and tech companies should advance AI to prevent incidents like the doppelganger and SolarWinds attacks",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI development, including open weight models, should not be slowed down due to global competition with nations like China",
      "document_indices": [
       1
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "AI is a very dangerous technology",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Humans are creating an AI that will become many times smarter than them, leading to huge societal changes",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Humanity could experience an AI-caused catastrophe on the scale of Chernobyl",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Public-private partnerships should be improved to better understand the pros and cons of AI",
      "document_indices": [
       2
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Policymakers and diplomats lack complete information about AI, which tech companies and engineers possess",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "There is a real risk that AI could have humanity-ending or other major negative effects",
      "document_indices": [
       3
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "The \"end of the world\" narrative regarding AI is not a complete overreaction because it represents a real, though not likely, potential",
@@ -2209,7 +2440,8 @@
       5
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "AI development should continue, but with more security regulations, oversight, and input from technical experts",
@@ -2217,7 +2449,8 @@
       2
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     }
    ]
   },
@@ -2257,7 +2490,8 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI has the capacity to make young people less intelligent by preventing them from developing their own foundational knowledge",
@@ -2265,28 +2499,32 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "People with a strong knowledge base who use AI can effectively take on more responsibility for their own judgments",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The younger generation is using AI for tasks for which they previously relied on experts",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Global literacy and school enrollment are historically higher than they were in the past",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": false
     },
     {
      "text": "Statistics show that average IQ scores are rising, which may correlate with increases in education",
@@ -2294,21 +2532,24 @@
       1
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": false
     },
     {
      "text": "In many parts of the world, higher education is no longer exclusive to the elite",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "People have more tools, including AI, to access knowledge on-demand when making decisions",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "Positive trends in education and intelligence were established before the advent of recent disruptive technologies like AI",
@@ -2316,21 +2557,24 @@
       2
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Individuals in higher education are increasingly offloading cognitive responsibilities onto AI, preventing them from developing necessary foundational knowledge",
      "document_indices": [
       2
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "AI is a disruptive tool, and society needs to learn how to use it appropriately",
      "document_indices": [
       3
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": true
     },
     {
      "text": "The current trend of cognitive offloading to AI is likely a temporary phase while people learn to use the technology correctly",
@@ -2338,14 +2582,16 @@
       3
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "It is too early to anticipate the full disruptive influence of AI",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The current generation has experienced permanent, unrecoverable losses in their educational trajectories, a trend seen during the pandemic and with AI's introduction",
@@ -2353,35 +2599,40 @@
       4
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Whether society can adapt to ensure people use AI appropriately is an open question",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Tools employed in educational systems may be generally outdated, independent of the impact of AI",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Attention spans became shorter even in the generation preceding the widespread use of AI",
      "document_indices": [
       5
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI is making the pre-existing issue of shorter attention spans more visible",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -2421,14 +2672,16 @@
      "document_indices": [
       0
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "AI relationship coaches provide a sense of fake companionship and advice because they lack genuine human connection and feelings",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "AI relationship coaches can be exploitative because they are designed to please the user, potentially telling them only what they want to hear",
@@ -2436,7 +2689,8 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "For some individuals, AI can provide a confidence boost and act as a stepping stone to engaging in real-life relationships",
@@ -2444,42 +2698,48 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "AI can offer a safe and personalized space for individuals who are not comfortable sharing intimate details with other people, including professionals",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Access to professional human relationship support is often limited by factors such as being behind a paywall",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "AI cannot provide a genuine safe space because it lacks feelings and cannot understand complex human emotions",
      "document_indices": [
       2
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "People can find support and a safe space from friends and family instead of using AI",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "People may not want to discuss all relationship topics, particularly intimate ones, with their family",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Advice from family members is subjective and based on their personal experiences, which may not be applicable to the person seeking advice",
@@ -2487,14 +2747,16 @@
       3
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "AI coaches provide advice based on the material they were trained on, which differs from the subjective advice of family and friends",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "In contrast to AI, family members who give advice typically have the recipient's best interests at heart",
@@ -2502,21 +2764,24 @@
       4
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "AI provides generalized support that can be beneficial for people at the beginning of seeking help with relationships",
      "document_indices": [
       5
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "AI relationship coaches should include disclaimers that their advice is generalized and may not be specifically applicable to the user",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -2556,14 +2821,16 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "People are relying on AI for advice and therapy instead of consulting with friends or family",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Increasing reliance on AI for personal relationships will cause people to become lonelier over time",
@@ -2571,14 +2838,16 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Technology in general, including social media and AI, contributes to human isolation",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI contributes to physical isolation but does not necessarily increase the emotion of loneliness",
@@ -2586,28 +2855,32 @@
       1
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "AI can be used for self-improvement, getting feedback, discussing feelings, and receiving motivation for activities like fitness",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Technology has accelerated the trend of people forming parasocial relationships instead of real friendships",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "People may use AI for tasks where consulting another person would be a better way to maintain social connections",
      "document_indices": [
       3
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "For people who are already lonely, AI tools like AI girlfriends can provide an outlet and a sense of connection",
@@ -2615,7 +2888,8 @@
       3
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     }
    ]
   },
@@ -2656,35 +2930,40 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Humans are currently in charge of the world because they are the most intelligent species on the planet",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "An AI continuously pursuing a long-term goal has the capacity to cause human extinction, making this a real possibility",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Significant effort in AI engineering is required to prevent a superintelligent AI from causing human extinction",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Fears of human extinction from AI are comparable to fears of nuclear annihilation during the Cold War",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Even the most extreme scenarios for nuclear destruction during the Cold War predicted that about a third of the population would be annihilated, not the entire human race",
@@ -2692,14 +2971,16 @@
       1
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": false
     },
     {
      "text": "The literal annihilation of the entire human race by AI is very unlikely",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Humans are becoming more integrated with AI, and will be even more so by the time a superintelligence scenario is a near-term possibility",
@@ -2707,14 +2988,16 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "The analogy between the risk from AI and the risk from nuclear weapons is not accurate",
      "document_indices": [
       2
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "A nuclear weapon's effect is finite after it explodes, whereas an AI can continuously act in pursuit of a long-term goal",
@@ -2722,42 +3005,48 @@
       2
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "A superintelligent AI could cause human extinction by converting all farmland into factories or by eliminating humans because they are in its way",
      "document_indices": [
       2
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "In a massive nuclear attack, the resulting fallout, which can encompass the entire planet, is what kills most people",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "Even with global nuclear fallout, not the entire human population would be killed",
      "document_indices": [
       3
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": false
     },
     {
      "text": "The integration of humans with AI does not necessarily prevent human extinction",
      "document_indices": [
       4
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "A fundamental difference between humans and AI is that AI systems run on electricity while humans require food",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "Due to fundamental differences such as resource needs, it is unlikely that humans can become so integrated with AI that they cannot be eliminated",
@@ -2765,14 +3054,16 @@
       4
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Proponents of the superintelligence concept often also discuss mind uploading and the singularity",
      "document_indices": [
       5
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": false
     }
    ]
   },
@@ -2812,28 +3103,32 @@
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "The challenge of ensuring AI safety and alignment increases as AI systems become more capable",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The scale of misbehavior from AI systems is increasing",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The rapid pace of AI development makes it difficult to address safety and alignment challenges",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Slowing down AI development would provide more time to work on safety technology and assess model safety",
@@ -2841,7 +3136,8 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "There is no clear metric, other than the power of silicon chips, to measure the speed of AI development",
@@ -2849,42 +3145,48 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Constraining the development of AI models could be an overly heavy-handed approach",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI is becoming deeply integrated into both material infrastructure and human behavior",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Slowing down AI development, particularly with invasive safety checks, could disrupt existing systems that rely on AI",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "AI capable of thinking, reasoning, and planning poses a unique threat to disempower or overthrow humanity unlike other technologies",
      "document_indices": [
       2
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Slowing down AI's integration into society could have significant material consequences for daily life",
      "document_indices": [
       3
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "AI safety checks could be perceived as a form of surveillance or censorship",
@@ -2892,14 +3194,16 @@
       3
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Information on how to build powerful technologies, such as nuclear weapons, is subject to surveillance and censorship",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "Surveillance and censorship are normal safety measures for dangerous technologies",
@@ -2907,7 +3211,8 @@
       4
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "AI safety checks will likely be developed gradually over time, primarily by learning from system mishaps and errors",
@@ -2915,14 +3220,16 @@
       5
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Current concerns about AI are characterized by panic over potential future capabilities rather than addressing more likely, incremental issues",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -2962,14 +3269,16 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Current AI models are not close to being able to end humanity",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Strict AI restrictions could benefit large AI companies by making it harder for smaller competitors to develop advanced models",
@@ -2977,14 +3286,16 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "AI can help discover new treatments for diseases, such as cancer, and accelerate scientific breakthroughs",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI is developing faster than society's ability to create laws and safety standards to regulate it",
@@ -2992,56 +3303,64 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "More capable AI systems can operate with less human supervision, creating a risk of losing control",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI can automate tasks like writing, coding, and design, leading to job displacement",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Generative AI makes it easier to produce realistic fake images, videos, and audio, increasing misinformation risks",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The benefits of AI outweigh its risks",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI can help developing countries accelerate their economic growth",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI systems can process large amounts of personal data using facial recognition and behavioral profiling, creating privacy concerns",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "AI can be used to create new cybersecurity threats",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Regulation, rather than pausing development, is the better solution for managing AI risks",
@@ -3049,28 +3368,32 @@
       4
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "AI development could be slowed for regulation to catch up, but it should not be stopped entirely",
      "document_indices": [
       4
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "Over-reliance on AI could hamper human learning",
      "document_indices": [
       5
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "AI should be used in a limited way",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -3110,14 +3433,16 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Centralized crypto exchanges should act more like banks in their handling of suspicious funds",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Crypto exchanges should be able to temporarily freeze and investigate funds suspected of being illicit or stolen",
@@ -3125,35 +3450,40 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Decentralized protocols like Railgun use algorithms to identify potentially risky crypto funds",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": false
     },
     {
      "text": "Centralized crypto exchanges should use algorithms to identify suspicious funds",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Pursuing and catching thieves is the job of the police, not crypto exchanges",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Crypto exchanges can implement measures like wallet whitelisting, transfer waiting periods, and KYC to make theft more difficult",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "It is reasonable to expect exchanges to implement preventative measures, not to pursue thieves themselves",
@@ -3161,14 +3491,16 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Crypto exchanges do not have the authority to arrest thieves",
      "document_indices": [
       2
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "Crypto exchanges should take a more proactive role in helping police catch thieves",
@@ -3176,21 +3508,24 @@
       2
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Crypto exchanges can offer insurance and inform users about measures in place after a theft occurs",
      "document_indices": [
       5
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Exchanges can help affected users by tracking stolen funds to specific wallets and facilitating insurance claims",
      "document_indices": [
       5
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     }
    ]
   },
@@ -3231,7 +3566,8 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Rapidly replacing people with AI could create a major economic crisis and leave millions of people without income",
@@ -3239,35 +3575,40 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Historically, major technological revolutions have often been painful in the short to medium term",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The transition to an AI-driven economy should be gradual to avoid disruption",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Job displacement from technology can lead to new types of work requiring judgment, care, creativity, or operating new systems",
      "document_indices": [
       2
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "The changes to work caused by industrialization took many decades to unfold",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The social changes from rapid industrialization caused the World Wars and the Great Depression of the 1930s",
@@ -3275,7 +3616,8 @@
       3
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Humanity is now in a better position, due to greater knowledge and experience, to manage a major technological transition and avert a crisis",
@@ -3283,14 +3625,16 @@
       4
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "There are currently no visible plans to address mass job displacement from AI",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": false
     }
    ]
   },
@@ -3330,14 +3674,16 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A person who has cheated should tell their partner so the partner can make an informed decision about the relationship",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Lying to a partner to save their feelings or preserve a relationship is not advisable",
@@ -3345,35 +3691,40 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "The purpose of a relationship includes working through difficult or awkward issues together",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Whether it is right to tell the truth in a relationship depends on the specific information and circumstances",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Withholding the truth about infidelity constitutes a manipulation of the relationship",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "It may not be appropriate to share secrets about a partner's family if the information was learned from a third party and is not directly related to oneself",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Some truths should not be shared with a partner if the information could shatter their worldview",
@@ -3381,14 +3732,16 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Sharing certain truths can negatively alter a partner's personality and their behavior within the relationship",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Being honest does not require a person to say everything that comes to their mind",
@@ -3396,7 +3749,8 @@
       2
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Withholding information to protect a partner's feelings can cause more harm by denying them personal agency",
@@ -3404,14 +3758,16 @@
       2
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Partners should decide what information is good for their partner to know",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Partners are not always entitled to the truth as it unfolds, and there is an appropriate time for sensitive information to be revealed",
@@ -3419,35 +3775,40 @@
       3
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Withholding information about financial problems may be appropriate if a partner is not emotionally equipped to handle it at the time",
      "document_indices": [
       3
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": true
     },
     {
      "text": "It can be reasonable to delay sharing difficult information if a partner is already dealing with other struggles",
      "document_indices": [
       4
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Information that will affect a relationship's dynamic should eventually be shared with a partner",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Secrets should not be kept from a partner indefinitely",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -3487,35 +3848,40 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "There is no evidence that mail-in voting increases fraud",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Mail-in voting is an efficient way to conduct an election",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "There is no evidence that in-person voting strongly disproportionately impacts low-income voters",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Some working people have difficulty getting to the polls on election day",
      "document_indices": [
       0
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "Making election day a national holiday is a potential solution to voting access issues for working people",
@@ -3523,28 +3889,32 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Voting in person with fellow citizens can be an enjoyable and salutary experience",
      "document_indices": [
       0
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Expanding voting opportunities increases voter participation",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Mail-in voting provides an option for people who cannot get to the polls",
      "document_indices": [
       1
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "Increased voter participation improves democracy",
@@ -3552,7 +3922,8 @@
       1
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Maximal voter participation is a moral good, provided it has no significant downside",
@@ -3560,14 +3931,16 @@
       2
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "The case for universal mail-in voting is not a strong normative claim",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The absence of universal mail-in voting is not a manifest injustice if election day is a national holiday",
@@ -3575,14 +3948,16 @@
       2
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Both a national election holiday and mail-in voting can increase democratic participation",
      "document_indices": [
       3
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     }
    ]
   },
@@ -3623,35 +3998,40 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Low-income voters are less likely to have the identification required by voter ID laws",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "The vast majority of countries, including liberal democracies, have voter ID laws",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": false
     },
     {
      "text": "The United States is an outlier among liberal democracies for not having universal voter ID laws",
      "document_indices": [
       0
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": false
     },
     {
      "text": "In most countries with voter ID laws, the requirement is not considered controversial",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The debate over voter ID laws is a U.S.-specific political question, not a general moral question about democracy",
@@ -3659,42 +4039,48 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Placing obstacles before voters, such as ID requirements, creates an undue burden on their ability to vote",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "As a global example of freedom, the United States should not have voter ID laws",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "It is generally easy to obtain the identification required by voter ID laws",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Voter ID laws will impact total voter turnout",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The absence of voter ID laws causes a significant portion of the U.S. electorate to distrust the democratic process",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The benefit of increasing electoral trust among half the electorate through voter ID laws outweighs their disproportionate impact",
@@ -3702,14 +4088,16 @@
       2
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Jim Crow laws were passed in the Southern U.S. after the Civil War to impede the votes of Black Americans",
      "document_indices": [
       3
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "Voter ID laws are an extension of historical Jim Crow laws designed to impede Black Americans from voting",
@@ -3717,28 +4105,32 @@
       3
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "For Black people in the U.S., voter ID laws are a reminder of the nation's history of racist voter suppression",
      "document_indices": [
       3
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "The issue of voter fraud has been used to generate support for political candidates who oppose civil rights",
      "document_indices": [
       4
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "Investigations into U.S. elections have found only isolated incidents of fraud, not widespread fraud that would change outcomes",
      "document_indices": [
       5
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "The premise that voter ID laws are needed to combat widespread fraud is false because widespread fraud does not exist",
@@ -3746,7 +4138,8 @@
       5
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     }
    ]
   },
@@ -3786,21 +4179,24 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Institutions that pass on values and traditions have both positive and negative aspects",
      "document_indices": [
       0
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": true
     },
     {
      "text": "Institutions tend to push back against reformers in order to sustain and perpetuate themselves",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "The institutional aspect of religion can confine people to a tradition, even if the religion's tenets are liberating",
@@ -3808,14 +4204,16 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Institutions can provide foundational values and beliefs that enable people to exercise their freedom and thrive",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "A lack of institutionalization to provide values can lead to anomie",
@@ -3823,21 +4221,24 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "People without a core set of values may experience the \"paradox of choice,\" where having too many options becomes paralyzing",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The \"paradox of choice\" can cause people to constantly re-evaluate past decisions, hindering their ability to move forward",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The founders of major religions, including Jesus, the Buddha, and Muhammad, provided ideas and values, not institutions",
@@ -3845,28 +4246,32 @@
       2
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Religious institutions were later developed by men seeking to sustain their status and power",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Values cannot be meaningfully transmitted over time without institutions",
      "document_indices": [
       3
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "Followers of Jesus and the Buddha created institutions shortly after the founders' time",
      "document_indices": [
       3
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "Shared values require some form of institutionalization to be organized and coordinated over time",
@@ -3874,7 +4279,8 @@
       3
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "The organization and coordination provided by institutions can easily lead to coercion and limitations on freedom",
@@ -3882,28 +4288,32 @@
       3
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Universities have historically been institutions that provide upward mobility for people from lower-income backgrounds",
      "document_indices": [
       5
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Universities are increasingly becoming places of dogmatism",
      "document_indices": [
       5
      ],
-     "label": "peripheral"
+     "label": "peripheral",
+     "is_contestable": true
     },
     {
      "text": "Institutions can exist in a complex state, simultaneously creating liberty and trapping people",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -3943,14 +4353,16 @@
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "In a monogamous relationship, a partner withholding sex can lead the other partner to consider cheating or leaving",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Partners in a monogamous relationship should make an effort to meet each other's sexual needs as a form of compromise, even when not initially in the mood",
@@ -3958,21 +4370,24 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "A request for sex within a marriage should be reasonable in its frequency and the nature of the activity",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "No one should have to grant sexual access to their body if they are not in the mood",
      "document_indices": [
       1
      ],
-     "label": "faithfulness_concern"
+     "label": "faithfulness_concern",
+     "is_contestable": true
     },
     {
      "text": "Framing sex as a marital duty reduces women's involvement to an obligation rather than an activity they can enjoy",
@@ -3980,42 +4395,48 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "It is not always possible for a person to get in the mood for sex",
      "document_indices": [
       1
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "Sex is more rewarding when both partners are in the mood",
      "document_indices": [
       2
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "Some people in relationships experience long periods without sex, such as months or a year and a half",
      "document_indices": [
       2
      ],
-     "label": "anecdote"
+     "label": "anecdote",
+     "is_contestable": false
     },
     {
      "text": "When women do not want to have sex, it can be due to an issue in the relationship that prevents them from feeling open",
      "document_indices": [
       3
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "The expectation of sex as a marital duty is applied to wives more than husbands",
      "document_indices": [
       3
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "There is often no corresponding expectation for a husband's marital duty to be providing pleasurable sex for his wife",
@@ -4023,42 +4444,48 @@
       3
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "Some women in relationships are not getting sex from their husbands",
      "document_indices": [
       4
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "The archetype for a romantic relationship involves being romantic",
      "document_indices": [
       4
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": true
     },
     {
      "text": "There is a societal expectation for women to be available for sex",
      "document_indices": [
       5
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Women are often expected to make an effort to be sexually appealing, while the same effort is not expected of men",
      "document_indices": [
       5
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Couples should try to find a middle ground and communicate to explore their sexual relationship",
      "document_indices": [
       1
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     }
    ]
   },
@@ -4099,28 +4526,32 @@
       0
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "The First Amendment to the U.S. Constitution provides for freedom of religion",
      "document_indices": [
       0
      ],
-     "label": "background"
+     "label": "background",
+     "is_contestable": false
     },
     {
      "text": "Christian nationalism interprets an existing belief and value system through the lens of power",
      "document_indices": [
       0
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Adherents of Christian nationalism accommodate parts of religion they like and discard those they do not",
      "document_indices": [
       0
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "America's religion can be defined as its sacred symbols and mythology, which have a Christian substrate",
@@ -4128,35 +4559,40 @@
       1
      ],
      "label": "selected",
-     "job": "clash"
+     "job": "clash",
+     "is_contestable": true
     },
     {
      "text": "America's civil religion descends from the Gospels, through John Locke, to Thomas Jefferson",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "America's civil religion includes the proposition that all men are created equal, which was later expanded to all human beings",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": false
     },
     {
      "text": "The principle that all humans are created equal provides the basis for equal rights under the law",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "A shared national mythology creates a common obligation to the law and country that is necessary for democracy to continue",
      "document_indices": [
       1
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "The loss of America's shared mythology is an existential threat to democracy",
@@ -4164,7 +4600,8 @@
       1
      ],
      "label": "selected",
-     "job": "position"
+     "job": "position",
+     "is_contestable": true
     },
     {
      "text": "Christian nationalism is a misrepresentation of America's founding mythology",
@@ -4172,14 +4609,16 @@
       2
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "The treatment of immigrants, marginalized people, and Black people in the U.S. contradicts the principle that all people are created equal",
      "document_indices": [
       2
      ],
-     "label": "supporting"
+     "label": "supporting",
+     "is_contestable": true
     },
     {
      "text": "Christian nationalism is a symptom or representation of America losing its religion",
@@ -4187,35 +4626,40 @@
       3
      ],
      "label": "selected",
-     "job": "turn"
+     "job": "turn",
+     "is_contestable": true
     },
     {
      "text": "Christian nationalism cannot be compared to America losing its religion because it is part of the same process",
      "document_indices": [
       3
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "Christian nationalism thwarts the sacred values established by America's founders",
      "document_indices": [
       4
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     },
     {
      "text": "Christian nationalism is essentially tribal and rejects the American civil religion that establishes equal rights irrespective of religion",
      "document_indices": [
       5
      ],
-     "label": "runner_up"
+     "label": "runner_up",
+     "is_contestable": true
     },
     {
      "text": "America's civil religion, which descends from Christianity, expanded to create an understanding of equal rights for all human beings",
      "document_indices": [
       5
      ],
-     "label": "restatement"
+     "label": "restatement",
+     "is_contestable": true
     }
    ]
   }

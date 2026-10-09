@@ -9,6 +9,10 @@ Runs the task's own code path (same questions, same content, same score) over ea
 debate, then reports how well the score separates the claims a reader selected as highlights
 from the ones they left out. The labels are one reader's and preliminary: read the
 disagreements before treating them as errors.
+
+The three axes (relevance, quality, controversy) have no labels of their own; they are checked
+against what the set does carry: relevance against the `peripheral` and `background` labels,
+quality against `faithfulness_concern`, controversy against the extractor's `is_contestable`.
 """
 
 import argparse
@@ -26,6 +30,7 @@ from src.api.schemas.claims_score_highlights_schema import ClaimsScoreHighlights
 from src.config.settings import settings  # noqa: E402
 from src.decisions import get_decision_model, provider_names  # noqa: E402
 from src.pipeline.claims_score_highlights_core import (  # noqa: E402
+    AXES,
     DECISIONS,
     assemble_result,
     attribution,
@@ -75,13 +80,11 @@ def reference(row: dict) -> str:
 
 
 def table(debate: dict, rows: list[dict], number: int) -> str:
-    """One debate as Markdown: claims verbatim in API order, each decision asked, the score, and
-    the reader's reference. `rows` are this debate's scored rows in the same order. When the score
-    is the only decision, one column stands for both."""
+    """One debate as Markdown: claims verbatim in API order, the score, each axis the run
+    reported, and the reader's reference. `rows` are this debate's scored rows in the same order."""
     inp = task_input(debate)
-    decisions = [d for d in DECISIONS if any(d in r["decisions"] for r in rows)]
-    show_decisions = len(decisions) > 1
-    header = ["#", "Speaker", "Claim", *(d.title() for d in decisions if show_decisions), "Score", "Reference"]
+    axes = [a for a in AXES if any(a in r["decisions"] for r in rows)]
+    header = ["#", "Speaker", "Claim", "Score", *(a.title() for a in axes), "Reference"]
     lines = [
         f"**{number}. {debate['title']}** — {debate['context']}",
         "",
@@ -92,12 +95,46 @@ def table(debate: dict, rows: list[dict], number: int) -> str:
         who = attribution(claim, inp.documents)
         text = row["text"].replace("|", "\\|")
         if row["score"] is None:
-            cells = ["—"] * (len(decisions) * show_decisions + 1)
+            cells = ["—"] * (len(axes) + 1)
         else:
-            cells = [f"{row['decisions'][d]:.2f}" for d in decisions if show_decisions]
-            cells.append(f"**{row['score']:.2f}**")
+            cells = [f"**{row['score']:.2f}**", *(f"{row['decisions'][a]:.2f}" for a in axes)]
         lines.append(f"| {row['index'] + 1} | {who} | {text} | " + " | ".join(cells) + f" | {reference(row)} |")
     return "\n".join(lines)
+
+
+def quantiles(values: list[float]) -> str:
+    v = sorted(values)
+    pick = lambda p: v[int(p * (len(v) - 1))]  # noqa: E731
+    return f"p10 {pick(0.1):.2f}  p25 {pick(0.25):.2f}  median {pick(0.5):.2f}  p75 {pick(0.75):.2f}  p90 {pick(0.9):.2f}"
+
+
+def axis_report(rows: list[dict]) -> None:
+    """The axes against the references the set carries. Each is a number from 0 to 1 — the
+    position on a four-level scale — so the checks are rankings, not thresholds."""
+    axes = [a for a in AXES if all(a in r["decisions"] for r in rows)]
+    if not axes:
+        return
+    of = lambda axis, group: [r["decisions"][axis] for r in group]  # noqa: E731
+    labels = sorted({r["label"] for r in rows})
+    print("\naxis           distribution                                            " + "".join(f"{label[:11]:>12}" for label in labels))
+    for axis in axes:
+        means = "".join(f"{sum(of(axis, g)) / len(g):>12.2f}" for label in labels if (g := [r for r in rows if r["label"] == label]))
+        print(f"{axis:<14} {quantiles(of(axis, rows))}  {means}")
+    print("\naxis checks (AUC: probability the first group outranks the second)")
+    rest = lambda *labels: [r for r in rows if r["label"] not in labels]  # noqa: E731
+    only = lambda label: [r for r in rows if r["label"] == label]  # noqa: E731
+    if "relevance" in axes:
+        print(
+            f"  relevance   others vs peripheral {auc(of('relevance', rest('peripheral')), of('relevance', only('peripheral'))):.3f}"
+            f"   others vs background {auc(of('relevance', rest('background')), of('relevance', only('background'))):.3f}"
+        )
+    if "quality" in axes:
+        print(f"  quality     others vs faithfulness concern {auc(of('quality', rest('faithfulness_concern')), of('quality', only('faithfulness_concern'))):.3f}")
+    if "controversy" in axes:
+        flagged = [r for r in rows if r.get("is_contestable") is True]
+        unflagged = [r for r in rows if r.get("is_contestable") is False]
+        if flagged and unflagged:
+            print(f"  controversy is_contestable vs not {auc(of('controversy', flagged), of('controversy', unflagged)):.3f}  (n = {len(flagged)} / {len(unflagged)})")
 
 
 async def main() -> int:
@@ -139,7 +176,13 @@ async def main() -> int:
         result = assemble_result(inp, await decide_claims(inp, decider, args.model), args.provider, args.model)
         scored = []
         for gold, claim in zip(debate["claims"], result.claims):
-            row = {"debate": number, "label": gold["label"], "gold_job": gold.get("job"), **claim.model_dump()}
+            row = {
+                "debate": number,
+                "label": gold["label"],
+                "gold_job": gold.get("job"),
+                "is_contestable": gold.get("is_contestable"),
+                **claim.model_dump(),
+            }
             rows.append(row)
             if claim.score is not None:
                 scored.append(row)
@@ -191,6 +234,7 @@ async def main() -> int:
         group = [r for r in selected if r["gold_job"] == gold]
         if group:
             print(f"  reader's {gold:<9} (n={len(group):>2}): mean score {sum(r['score'] for r in group) / len(group):.2f}")
+    axis_report(scored)
 
     if args.out:
         args.out.write_text(json.dumps(rows, indent=1, ensure_ascii=False))

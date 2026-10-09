@@ -11,9 +11,11 @@ from src.api.schemas.claims_score_highlights_schema import (
     HighlightDocument,
 )
 from src.config.overrides import activate
-from src.decisions import Choice, ChoiceAnswer, DecisionError, YesNo, YesNoAnswer, get_decision_model
+from src.decisions import Choice, DecisionError, Scale, ScaleAnswer, YesNo, YesNoAnswer, get_decision_model
 from src.decisions import perplexity as pplx
 from src.pipeline.claims_score_highlights_core import (
+    AXES,
+    AXIS_LEVELS,
     DECISIONS,
     assemble_result,
     build_content,
@@ -41,28 +43,50 @@ def _input(**overrides) -> ClaimsScoreHighlightsInput:
     return ClaimsScoreHighlightsInput(**{**base, **overrides})
 
 
+def _scale(score: float) -> ScaleAnswer:
+    """A four-level answer at `score`: all the mass on the lowest level for 0, the highest for 1."""
+    return ScaleAnswer(score=score, probabilities=[1 - score, 0.0, 0.0, score])
+
+
 def _answers(**decisions):
-    """One YesNoAnswer per decision; an unnamed one is a confident no."""
-    return {decision: YesNoAnswer(probability=decisions.get(decision, 0.0)) for decision in DECISIONS}
+    """One answer per decision: yes/no for `essential`, a scale for each axis; an unnamed one is
+    a confident no / the lowest level."""
+    answers = {"essential": YesNoAnswer(probability=decisions.get("essential", 0.0))}
+    answers.update({axis: _scale(decisions.get(axis, 0.0)) for axis in AXES})
+    return answers
 
 
 # ── The rubric as questions ──────────────────────────────────────────────────
 
 
-def test_question_is_the_one_counterfactual_yes_no_decision():
+def test_questions_are_the_score_decision_and_one_scale_per_axis():
     questions = build_questions("debate")
-    assert list(questions) == list(DECISIONS) == ["essential"]
-    question = questions["essential"]
-    assert isinstance(question, YesNo) and question.yes and question.no
-    assert "removed from the list of extracted claims" in question.instructions
-    assert "answer yes only when the loss is major" in question.instructions
-    assert "no other extracted claim carries it" in question.yes
-    assert "another extracted claim carries the same point" in question.no
+    assert list(questions) == list(DECISIONS) == ["essential", "relevance", "quality", "controversy"]
+    essential = questions["essential"]
+    assert isinstance(essential, YesNo) and essential.yes and essential.no
+    assert "removed from the list of extracted claims" in essential.instructions
+    assert "answer yes only when the loss is major" in essential.instructions
+    assert "no other extracted claim carries it" in essential.yes
+    assert "another extracted claim carries the same point" in essential.no
+    # Each axis is a four-level scale, lowest level first.
+    for axis in AXES:
+        assert isinstance(questions[axis], Scale) and len(questions[axis].levels) == len(AXIS_LEVELS[axis]) == 4
+    relevance, quality, controversy = (questions[axis] for axis in AXES)
+    assert "not about the main claim's subject" in relevance.levels[0] and "sees at once" in relevance.levels[-1]
+    assert quality.levels[0].startswith("Misrepresents") and quality.levels[-1].startswith("Nothing to fix")
+    assert "look for a flaw" in quality.instructions and "lower level is the usual answer" in quality.instructions
+    assert "nobody would dispute" in controversy.levels[0] and "Reasonable people split" in controversy.levels[-1]
 
 
 def test_rubric_text_is_overridable_per_run():
-    with activate(prompt_overrides={"claims_score_highlights.debate.essential.yes": "A changed bar."}) as scope:
-        assert build_questions("debate")["essential"].yes == "A changed bar."
+    overrides = {
+        "claims_score_highlights.debate.essential.yes": "A changed bar.",
+        "claims_score_highlights.debate.quality.clean": "A changed top level.",
+    }
+    with activate(prompt_overrides=overrides) as scope:
+        questions = build_questions("debate")
+        assert questions["essential"].yes == "A changed bar."
+        assert questions["quality"].levels[-1] == "A changed top level."
     assert scope.unused == set()
 
 
@@ -70,6 +94,12 @@ def test_yes_no_criteria_come_as_a_pair():
     with pytest.raises(ValueError, match="pair"):
         YesNo(instructions="?", yes="only one side")
     assert YesNo(instructions="?").yes is None
+
+
+def test_a_scale_needs_two_levels():
+    with pytest.raises(ValueError, match="two levels"):
+        Scale(instructions="?", levels=["only one"])
+    assert len(Scale(instructions="?", levels=["low", "high"]).levels) == 2
 
 
 # ── What the model is shown ──────────────────────────────────────────────────
@@ -110,19 +140,28 @@ def test_score_is_the_essential_probability():
     assert highlight_score({"essential": 0.5, "other": 1.0}) == pytest.approx(0.5)
 
 
-def test_score_claim_rejects_an_answer_set_missing_the_decision():
+def test_score_claim_rejects_an_answer_set_missing_or_mistyping_a_decision():
     from src.pipeline.claims_score_highlights_core import score_claim
 
     with pytest.raises(DecisionError, match="do not match"):
         score_claim(0, HighlightClaim(text="x"), {"other": YesNoAnswer(1.0)})
+    without_an_axis = {name: answer for name, answer in _answers().items() if name != "quality"}
+    with pytest.raises(DecisionError, match="do not match"):
+        score_claim(0, HighlightClaim(text="x"), without_an_axis)
+    # An axis answered as a yes/no is the wrong shape, however plausible the number.
+    with pytest.raises(DecisionError, match="do not match"):
+        score_claim(0, HighlightClaim(text="x"), {**_answers(), "quality": YesNoAnswer(0.9)})
 
 
 def test_assemble_keeps_every_claim_in_order_and_refuses_an_incomplete_set():
     inp = _input()
-    out = assemble_result(inp, [_answers(essential=0.62), _answers(essential=1.0), _answers()], "fake", "fake-model")
+    answers = [_answers(essential=0.62, relevance=0.75, controversy=0.5), _answers(essential=1.0), _answers()]
+    out = assemble_result(inp, answers, "fake", "fake-model")
     assert [c.index for c in out.claims] == [0, 1, 2]
     assert out.claims[0].id == "c0" and out.claims[0].score == pytest.approx(0.62)
-    assert out.claims[0].decisions == {"essential": 0.62}
+    # The axes ride beside the score, in decision order, and never move it.
+    assert list(out.claims[0].decisions) == list(DECISIONS)
+    assert out.claims[0].decisions == {"essential": 0.62, "relevance": 0.75, "quality": 0.0, "controversy": 0.5}
     assert out.claims[1].score == 1.0 and out.claims[2].score == 0.0
     assert out.claims_scored == 3 and out.provider == "fake" and out.model_used == "fake-model"
     # Fewer answer sets than claims is a broken contract, not two unscored claims.
@@ -145,9 +184,18 @@ def test_perplexity_wire_names_yes_no_noul_with_true_false_criteria():
         "instructions": "Team?",
         "criteria": {"billing": "Charges", "other": None},
     }
+    # A scale is a `score` question: the level descriptions as an ordered list, lowest first.
+    assert pplx.to_wire(SEVERITY) == {
+        "type": "score",
+        "instructions": "Severity?",
+        "criteria": ["Cosmetic", "Inconvenient", "Product unusable"],
+    }
+    with pytest.raises(DecisionError, match="at most 10 levels"):
+        pplx.to_wire(Scale(instructions="?", levels=[str(i) for i in range(11)]))
 
 
-# The response from the Decisions API quickstart, as documented on 2026-10-02.
+# The response from the Decisions API quickstart, as documented on 2026-10-02 (noul, choice)
+# and the API reference on 2026-10-08 (score).
 DOCS_ANSWERS = {
     "defect": {"type": "noul", "noul": 0.9424522889347015},
     "sentiment": {
@@ -156,14 +204,27 @@ DOCS_ANSWERS = {
         "confidence": 0.9255246944002182,
         "probabilities": {"positive": 0.020649883775315993, "mixed": 0.9503497962668123, "negative": 0.02900031995787183},
     },
+    "severity": {
+        "type": "score",
+        "score": 1.7838686319784252,
+        "confidence": 0.7838686319784252,
+        "legend": {"0": "Cosmetic", "1": "Inconvenient", "2": "Product unusable"},
+        "probabilities": {"0": 0.008423954913615923, "1": 0.199283458194343, "2": 0.7922925868920411},
+    },
 }
 SENTIMENT = Choice(instructions="Sentiment?", options={"positive": None, "mixed": None, "negative": None})
+SEVERITY = Scale(instructions="Severity?", levels=["Cosmetic", "Inconvenient", "Product unusable"])
 
 
 def test_perplexity_answers_parse_into_typed_answers():
     assert pplx.from_wire("defect", YesNo(instructions="Defect?"), DOCS_ANSWERS) == YesNoAnswer(0.9424522889347015)
     sentiment = pplx.from_wire("sentiment", SENTIMENT, DOCS_ANSWERS)
     assert sentiment.choice == "mixed" and list(sentiment.probabilities) == ["positive", "mixed", "negative"]
+    severity = pplx.from_wire("severity", SEVERITY, DOCS_ANSWERS)
+    assert isinstance(severity, ScaleAnswer) and len(severity.probabilities) == 3
+    # The position is the documented `score` (a weighted level index) scaled to 0..1.
+    assert severity.score == pytest.approx(1.7838686319784252 / 2)
+    assert severity.probabilities[2] == pytest.approx(0.792, abs=1e-3)
 
 
 def test_perplexity_rejects_missing_or_malformed_answers():
@@ -177,6 +238,12 @@ def test_perplexity_rejects_missing_or_malformed_answers():
     narrower = Choice(instructions="?", options={"positive": None, "negative": None})
     with pytest.raises(DecisionError, match="unknown option"):
         pplx.from_wire("sentiment", narrower, DOCS_ANSWERS)
+    # A scale with more levels than the answer has probabilities for is a broken contract.
+    taller = Scale(instructions="?", levels=["a", "b", "c", "d"])
+    with pytest.raises(DecisionError, match="probability per level"):
+        pplx.from_wire("severity", taller, DOCS_ANSWERS)
+    with pytest.raises(DecisionError, match="probability per level"):
+        pplx.from_wire("severity", SEVERITY, {"severity": {"type": "score", "score": 1.5}})
 
 
 class _Response:
@@ -339,7 +406,8 @@ async def test_task_scores_each_claim_with_the_configured_model(monkeypatch):
     assert [c.score for c in result.claims] == [0.5, 0.5, 0.5]
     assert result.claims_scored == 3 and result.provider == "fake" and result.model_used == "other-model"
     assert len(fake.seen) == 3
-    assert all(q == ["essential"] and m == "other-model" for _, q, m in fake.seen)
+    # Every claim is asked the score decision and the three axes in one request.
+    assert all(q == list(DECISIONS) and m == "other-model" for _, q, m in fake.seen)
 
 
 @pytest.mark.asyncio
@@ -389,7 +457,19 @@ def test_every_media_type_has_a_registered_rubric_and_nothing_else_is_registered
 
     media_types = set(get_args(MediaType))
     for media_type in media_types:
-        assert list(build_questions(media_type)) == ["essential"], media_type
+        assert list(build_questions(media_type)) == list(DECISIONS), media_type
+        # The keys under a media type are exactly the score decision with its two criteria and
+        # each axis with one text per level — nothing stale, nothing missing.
+        expected = {f"{media_type}.essential", f"{media_type}.essential.yes", f"{media_type}.essential.no"}
+        for axis, levels in AXIS_LEVELS.items():
+            expected.add(f"{media_type}.{axis}")
+            expected.update(f"{media_type}.{axis}.{level}" for level in levels)
+        registered_under = {
+            key.removeprefix("claims_score_highlights.")
+            for key in PROMPTS
+            if key.startswith(f"claims_score_highlights.{media_type}.")
+        }
+        assert registered_under == expected, media_type
     registered = {key.split(".")[1] for key in PROMPTS if key.startswith("claims_score_highlights.")}
     assert registered == media_types
 
