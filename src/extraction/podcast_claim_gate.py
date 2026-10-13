@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import re
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Callable, Dict, List, Literal, Optional, Tuple
 
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -120,6 +120,9 @@ class GateReport(BaseModel):
     withheld: int = 0
     rewrites_rejected: int = 0
     errors: int = 0  # detect batches or repair calls that failed (fail-open)
+    # Claims that survived the gate but left with a topic the 3-claims-per-topic
+    # filter dropped afterwards (set by finalize, not by the gate).
+    dropped_by_topic_filter: int = 0
     withheld_claims: List[WithheldClaim] = Field(default_factory=list)
     detect_model: str = ""
     repair_model: str = ""
@@ -136,17 +139,28 @@ _TIME_WORDS = set(
     "monday tuesday wednesday thursday friday saturday sunday january february march april may june july "
     "august september october november december today yesterday tomorrow".split()
 )
-_CAP_RE = re.compile(r"\b[A-Z][\w'’-]*")
+_CAP_RE = re.compile(r"\b[A-Z][\w'-]*")
 _NUM_RE = re.compile(r"\d[\d,.%]*")
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _norm(text: str) -> str:
+    """Straighten curly apostrophes so "Trump’s" and "Trump's" compare equal."""
+    return text.replace("\u2019", "'").replace("\u2018", "'")
+
+
+def _base(token: str) -> str:
+    """A capitalised token without its possessive and trailing punctuation: "Trump's," -> "Trump"."""
+    return re.sub(r"'s$", "", token.strip(".,;:'\"")).strip(".,;:'\"")
 
 
 def _content_words(text: str) -> set:
-    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in _STOP and len(w) > 2}
+    return {w for w in _WORD_RE.findall(text.lower()) if w not in _STOP and len(w) > 2}
 
 
 def _cap_tokens(text: str) -> List[str]:
-    # The sentence-initial word is skipped: it is capitalised whatever it is.
-    return [w.strip(".,;:'\"") for w in _CAP_RE.findall(text)][1:]
+    """Every capitalised token, possessive stripped ("Trump's" -> "Trump"), sentence-initial included."""
+    return [b for b in (_base(w) for w in _CAP_RE.findall(_norm(text))) if b]
 
 
 def _num_tokens(text: str) -> List[str]:
@@ -157,56 +171,61 @@ def _word_count(text: str) -> int:
     return len(text.split())
 
 
-def material_names(material: str) -> set:
-    """Lower-cased capitalised tokens of the transcript + metadata (speaker names etc.)."""
-    return {w.lower() for w in re.findall(r"\b[A-Z][\w'’-]+", material)}
+def material_words(material: str) -> set:
+    """Lower-cased word set of the transcript + metadata: the only identifiers a rewrite may add."""
+    return set(_WORD_RE.findall(_norm(material).lower()))
 
 
 def accept_rewrite(
     original: str,
     rewritten: str,
     issue: str,
-    material_lower: str,
-    names: set,
+    words: set,
 ) -> Tuple[bool, str]:
     """Decide whether a rewrite may replace the original.
 
     Ported from news-worker's acceptRepair: the rewrite must keep the fact
     (content-word overlap), lose no capitalised name or number, stay inside the
-    reading budget, and every name, year or figure it ADDS must occur in the
-    material. Two issue-specific allowances: an attribution repair may drop the
-    speaker's name, a relative-time repair may drop a weekday or month word.
+    reading budget, and every name, year or figure it ADDS must be a word of
+    the material (`material_words`). Comparisons ignore possessives and curly
+    apostrophes, so "Trump's deal" -> "Trump announced the deal" keeps Trump.
+    Two issue-specific allowances: an attribution repair may drop a speaker
+    named in the material, a relative-time repair may drop a weekday or month.
     """
-    text = (rewritten or "").strip()
-    if not text or text == original:
+    original_n, text = _norm(original), _norm(rewritten or "").strip()
+    if not text or text == original_n:
         return False, "unchanged"
-    before, after = _content_words(original), _content_words(text)
+    before, after = _content_words(original_n), _content_words(text)
     if before and len(before & after) / len(before) < 0.4:
         return False, "low overlap"
-    lost_caps = [w for w in _cap_tokens(original) if w and w not in text]
+    orig_caps, new_caps = _cap_tokens(original_n), _cap_tokens(text)
+    new_caps_lower = {w.lower() for w in new_caps}
+    lost_caps = [w for w in orig_caps if w.lower() not in new_caps_lower]
     if issue == "attribution_frame":
-        lost_caps = [w for w in lost_caps if w.lower() not in names]
+        lost_caps = [w for w in lost_caps if w.lower() not in words]
     if issue == "relative_time":
         lost_caps = [w for w in lost_caps if w.lower() not in _TIME_WORDS]
-    lost_nums = [x for x in _num_tokens(original) if x not in text]
+    # Sentence-initial common words ("The", "In") are capitalised by position;
+    # losing one is not losing a name.
+    lost_caps = [w for w in lost_caps if w.lower() not in _STOP]
+    lost_nums = [x for x in _num_tokens(original_n) if x not in text]
     if lost_caps or lost_nums:
         return False, "lost " + ", ".join((lost_caps + lost_nums)[:3])
-    added = _word_count(text) - _word_count(original)
+    added = _word_count(text) - _word_count(original_n)
     if added > MAX_ADDED_WORDS:
         return False, f"adds {added} words, at most {MAX_ADDED_WORDS}"
-    if _word_count(text) > MAX_CLAIM_WORDS:
-        return False, f"{_word_count(text)} words, at most {MAX_CLAIM_WORDS}"
-    had_caps = {w.lower() for w in _cap_tokens(original)}
-    had_nums = set(_num_tokens(original))
+    limit = max(MAX_CLAIM_WORDS, _word_count(original_n) + MAX_ADDED_WORDS)
+    if _word_count(text) > limit:
+        return False, f"{_word_count(text)} words, at most {limit}"
+    had_caps = {w.lower() for w in orig_caps}
+    had_nums = set(_num_tokens(original_n))
     new_names = [
-        w
-        for w in _cap_tokens(text)
-        if w
-        and w.lower() not in had_caps
-        and w.lower() not in material_lower
-        and w.lower().rstrip("'s’") not in material_lower
+        w for w in new_caps if w.lower() not in had_caps and w.lower() not in _STOP and w.lower() not in words
     ]
-    new_nums = [x for x in _num_tokens(text) if x not in had_nums and x not in material_lower]
+    new_nums = [
+        x for x in _num_tokens(text)
+        if x not in had_nums and not all(part in words for part in _WORD_RE.findall(x.lower()))
+    ]
     if new_names or new_nums:
         return False, "not in material: " + ", ".join((new_names + new_nums)[:3])
     return True, ""
@@ -218,9 +237,12 @@ def accept_rewrite(
 class PodcastClaimGate:
     """Detect -> repair -> accept, over one episode's claims_with_topics map."""
 
-    def __init__(self, extractor: PremiumClaimExtractor):
+    def __init__(self, extractor: PremiumClaimExtractor, on_call: Optional[Callable[[], None]] = None):
         # Shares the extractor's Gemini client, timeout and app-level retries.
+        # `on_call` runs before every model request (the task passes the spend
+        # guard); if it raises, that request is skipped and the gate fails open.
         self._extractor = extractor
+        self._on_call = on_call or (lambda: None)
 
     @property
     def detect_model(self) -> str:
@@ -234,21 +256,41 @@ class PodcastClaimGate:
     def temperature(self) -> float:
         return llm.get("gemini_gate_temperature")
 
+    @staticmethod
+    def _by_index(indices_items: List[Tuple[int, object]], expected: set, what: str) -> Dict[int, object]:
+        """Map model output by index; repair a 1-based reply and warn on anything else off."""
+        by = {i: v for i, v in indices_items}
+        if set(by) == expected:
+            return by
+        if set(by) == {i + 1 for i in expected}:
+            logger.warning(f"claim gate {what}: indices came back 1-based, shifting")
+            return {i - 1: v for i, v in by.items()}
+        logger.warning(
+            f"claim gate {what}: expected indices {sorted(expected)[:5]}... got {sorted(by)[:5]}... "
+            f"(missing {len(expected - set(by))}, unexpected {len(set(by) - expected)})"
+        )
+        return by
+
     async def _detect_batch(self, batch: List[str], offset: int) -> List[Optional[_DetectVerdict]]:
         prompt = prompts.get("podcast_gate.detect").format(
             claims="\n".join(f"{i}. {text}" for i, text in enumerate(batch))
         )
+        self._on_call()
         raw = await self._extractor._call_gemini(
             prompt=prompt,
             config=types.GenerateContentConfig(
                 temperature=self.temperature,
                 response_mime_type="application/json",
                 response_schema=_DetectResponse,
+                # Recall collapses without thinking (7.4% vs 3.7% residual);
+                # pin dynamic thinking so a model override cannot turn it off.
+                thinking_config=types.ThinkingConfig(thinking_budget=-1),
             ),
             step_name="claim gate detect",
             model=self.detect_model,
         )
-        by_index = {v.index: v for v in _DetectResponse.model_validate_json(raw).verdicts}
+        parsed = _DetectResponse.model_validate_json(raw).verdicts
+        by_index = self._by_index([(v.index, v) for v in parsed], set(range(len(batch))), "detect")
         out: List[Optional[_DetectVerdict]] = []
         for i in range(len(batch)):
             v = by_index.get(i)
@@ -290,16 +332,17 @@ class PodcastClaimGate:
         meta: GateEpisodeMeta,
     ) -> Dict[int, _RepairDecision]:
         """One grounded call for all flagged claims of the episode; {} when it failed."""
-        prompt = prompts.get("podcast_gate.repair").format(
-            max_added_words=MAX_ADDED_WORDS,
-            max_claim_words=MAX_CLAIM_WORDS,
-            metadata=meta.render(),
-            claims="\n".join(
-                f"{i}. {text}\n   verifier ({v.issue}): {v.rationale}" for i, text, v in flagged
-            ),
-            transcript=transcript[:TRANSCRIPT_CHAR_BUDGET],
-        )
         try:
+            prompt = prompts.get("podcast_gate.repair").format(
+                max_added_words=MAX_ADDED_WORDS,
+                max_claim_words=MAX_CLAIM_WORDS,
+                metadata=meta.render(),
+                claims="\n".join(
+                    f"{i}. {text}\n   verifier ({v.issue}): {v.rationale}" for i, text, v in flagged
+                ),
+                transcript=transcript[:TRANSCRIPT_CHAR_BUDGET],
+            )
+            self._on_call()
             raw = await self._extractor._call_gemini(
                 prompt=prompt,
                 config=types.GenerateContentConfig(
@@ -310,7 +353,8 @@ class PodcastClaimGate:
                 step_name="claim gate repair",
                 model=self.repair_model,
             )
-            return {d.index: d for d in _RepairResponse.model_validate_json(raw).decisions}
+            parsed = _RepairResponse.model_validate_json(raw).decisions
+            return self._by_index([(d.index, d) for d in parsed], {i for i, _, _ in flagged}, "repair")
         except Exception as e:  # fail-open: flagged claims stay as extracted
             logger.warning(f"claim gate repair failed, keeping flagged claims: {type(e).__name__}: {e}")
             return {}
@@ -340,8 +384,7 @@ class PodcastClaimGate:
             decisions = await self.repair(flagged, transcript, meta)
             if not decisions:
                 report.errors += 1
-        material_lower = (meta.render() + "\n" + transcript).lower()
-        names = material_names(meta.render() + "\n" + transcript)
+        words = material_words(meta.render() + "\n" + transcript)
 
         out: Dict[str, List[str]] = {t: [] for t in claims_with_topics}
         flagged_idx = {i for i, _, _ in flagged}
@@ -359,7 +402,7 @@ class PodcastClaimGate:
                     WithheldClaim(text=text, topic=topic, issue=d.issue, reason=d.reason)
                 )
             else:
-                ok, why = accept_rewrite(text, d.text, d.issue, material_lower, names)
+                ok, why = accept_rewrite(text, d.text, d.issue, words)
                 if ok:
                     report.repaired += 1
                     out[topic].append(d.text.strip())

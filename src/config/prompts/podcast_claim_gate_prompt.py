@@ -25,7 +25,7 @@ GATE_DETECT_PROMPT = """You are a strict editorial verifier. Each claim below wa
 3. impersonal_frame: carried by an unnamed source or passive frame ("is considered", "is described as", "reportedly", "reporting indicates", "was found to", "the host said").
 4. attribution_frame: "X says/notes/argues that Y" where X is a host, pundit or guest and Y is a checkable statement about the world. Not when Y is X's own opinion, prediction, recollection or experience, nor when the utterance itself is the fact of record.
 5. conversational_order: "later in the episode", "as mentioned", "in response".
-Return JSON only: {{"verdicts":[{{"index":<n>,"fires":true|false,"issue":"<tag or none>","rationale":"<under 20 words>"}}]}} with one entry per claim.
+Return JSON only: {{"verdicts":[{{"index":<n>,"fires":true|false,"issue":"<tag or none>","rationale":"<under 20 words>"}}]}} with one entry per claim; "index" is the number printed before the claim (the first claim is 0).
 
 CLAIMS
 {claims}"""
@@ -46,7 +46,7 @@ Tags (judge the claim's wording as a stranger would, NOT with your knowledge of 
 
 Rewrite rules: change only the failing phrase; keep every other word; never drop a name, date or number the claim carries; use ONLY identifiers that appear in the METADATA or TRANSCRIPT; for relative time use the stated date, or "as of <Month Year>" from the AIR DATE only for present conditions; add at most {max_added_words} words, at most {max_claim_words} words in total; never invent.
 
-Return JSON only: {{"decisions":[{{"index":<n>,"action":"keep"|"rewrite"|"withhold","issue":"context_dependent"|"relative_time"|"impersonal_frame"|"attribution_frame"|"conversational_order"|"none","text":"<rewritten claim, or empty>","reason":"<under 15 words>"}}]}} with one entry per claim, in order.
+Return JSON only: {{"decisions":[{{"index":<n>,"action":"keep"|"rewrite"|"withhold","issue":"context_dependent"|"relative_time"|"impersonal_frame"|"attribution_frame"|"conversational_order"|"none","text":"<rewritten claim, or empty>","reason":"<under 15 words>"}}]}} with one entry per claim, in order; "index" is the number printed before the claim.
 
 METADATA
 {metadata}

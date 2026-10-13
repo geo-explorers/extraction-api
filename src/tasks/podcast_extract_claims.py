@@ -15,6 +15,7 @@ persistence are the caller's responsibility (the payload carries the transcript;
 pg-migrations persists the result).
 """
 
+import asyncio
 from datetime import timedelta
 from functools import lru_cache
 
@@ -41,8 +42,14 @@ logger = get_logger(__name__)
 # Transcripts up to ~1M chars (~1MB); 8MB leaves headroom for JSON overhead.
 PODCAST_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
 _GEMINI = [RateLimit(static_key="gemini_global", units=1)]
-_GEMINI_GATE = [RateLimit(static_key="gemini_global", units=2)]
 _STEP_TIMEOUT = timedelta(minutes=5)
+# The gate makes ceil(claims/10) detect requests (up to 8 concurrently) plus one
+# repair request; reserve what can run at once. Its own budget is generous and
+# enforced inside the step (GATE_BUDGET), so Hatchet's timeout never fires
+# first and the step never fails: on timeout or error claims pass through.
+_GEMINI_GATE = [RateLimit(static_key="gemini_global", units=9)]
+_GATE_STEP_TIMEOUT = timedelta(minutes=10)
+GATE_BUDGET_SECONDS = 8 * 60
 
 
 # ── Contracts ──────────────────────────────────────────────────────────────
@@ -97,7 +104,16 @@ def _extractor() -> PremiumClaimExtractor:
 
 @lru_cache(maxsize=1)
 def _gate() -> PodcastClaimGate:
-    return PodcastClaimGate(_extractor())
+    return PodcastClaimGate(_extractor(), on_call=lambda: spend_guard.check_and_record("gemini"))
+
+
+def _gated_claims(ctx: Context) -> dict:
+    """The gate's claim map; falls back to the raw claims for a run that was
+    created before the gate step existed (in flight across the deploy)."""
+    try:
+        return ctx.task_output(gate)
+    except Exception:
+        return {"claims_with_topics": ctx.task_output(claims)["claims_with_topics"], "gate": None}
 
 
 @lru_cache(maxsize=1)
@@ -149,17 +165,20 @@ async def claims(input: PodcastExtractInput, ctx: Context) -> dict:
 
 
 @podcast_workflow.task(
-    parents=[claims], rate_limits=_GEMINI_GATE, execution_timeout=_STEP_TIMEOUT,
-    retries=3, backoff_factor=2.0,
+    parents=[claims], rate_limits=_GEMINI_GATE, execution_timeout=_GATE_STEP_TIMEOUT,
+    retries=1, backoff_factor=2.0,
 )
 @with_overrides(label="podcast.extract_claims:gate")
 async def gate(input: PodcastExtractInput, ctx: Context) -> dict:
-    """Remove or rewrite context-dependent claims; pass-through when disabled."""
+    """Remove or rewrite context-dependent claims. Never fails the run: when
+    disabled, out of budget or erroring, the claims pass through unchanged and
+    the report says so."""
     cwt = ctx.task_output(claims)["claims_with_topics"]
-    if not settings.podcast_gate_enabled or not cwt:
-        return {"claims_with_topics": cwt, "gate": None}
-    spend_guard.check_and_record("gemini")  # detect batches
-    spend_guard.check_and_record("gemini")  # repair call
+    n = sum(len(v) for v in cwt.values())
+    if not settings.podcast_gate_enabled:
+        return {"claims_with_topics": cwt, "gate": GateReport(enabled=False, claims_in=n).model_dump()}
+    if not cwt:
+        return {"claims_with_topics": cwt, "gate": GateReport(claims_in=0).model_dump()}
     meta = GateEpisodeMeta(
         podcast_name=input.podcast_name,
         title=input.title,
@@ -167,7 +186,16 @@ async def gate(input: PodcastExtractInput, ctx: Context) -> dict:
         air_date=input.air_date,
         people=input.credits,
     )
-    gated, report = await _gate().apply(cwt, _full_text(input), meta)
+    try:
+        gated, report = await asyncio.wait_for(
+            _gate().apply(cwt, _full_text(input), meta), timeout=GATE_BUDGET_SECONDS
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"claim gate: episode {input.episode_id} exceeded {GATE_BUDGET_SECONDS}s, passing claims through")
+        return {"claims_with_topics": cwt, "gate": GateReport(claims_in=n, errors=1).model_dump()}
+    except Exception as e:
+        logger.warning(f"claim gate: episode {input.episode_id} failed, passing claims through: {type(e).__name__}: {e}")
+        return {"claims_with_topics": cwt, "gate": GateReport(claims_in=n, errors=1).model_dump()}
     return {"claims_with_topics": gated, "gate": report.model_dump()}
 
 
@@ -178,7 +206,7 @@ async def gate(input: PodcastExtractInput, ctx: Context) -> dict:
 @with_overrides(label="podcast.extract_claims:takeaways")
 async def takeaways(input: PodcastExtractInput, ctx: Context) -> dict:
     topic_list = ctx.task_output(topics)["topics"]
-    cwt = ctx.task_output(gate)["claims_with_topics"]
+    cwt = _gated_claims(ctx)["claims_with_topics"]
     _, filtered, claim_topics, _ = build_claim_topics(topic_list, cwt, input.episode_id)
     if not claim_topics:
         return {"key_takeaways": []}
@@ -193,7 +221,7 @@ async def takeaways(input: PodcastExtractInput, ctx: Context) -> dict:
 @with_overrides(label="podcast.extract_claims:finalize")
 async def finalize(input: PodcastExtractInput, ctx: Context) -> PodcastExtractResult:
     topic_list = ctx.task_output(topics)["topics"]
-    gate_out = ctx.task_output(gate)
+    gate_out = _gated_claims(ctx)
     cwt = gate_out["claims_with_topics"]
     kt = ctx.task_output(takeaways)["key_takeaways"]
 
@@ -224,5 +252,17 @@ async def finalize(input: PodcastExtractInput, ctx: Context) -> PodcastExtractRe
         topic_of_discussion=ordered_topics,
         claims_extracted=claims_extracted,
         model_used=_extractor().model_name,
-        gate=GateReport(**gate_out["gate"]) if gate_out.get("gate") else None,
+        gate=_gate_report(gate_out, claims_extracted),
     )
+
+
+def _gate_report(gate_out: dict, claims_extracted: int) -> GateReport | None:
+    """The gate's report plus what the topic filter removed after it, so the
+    caller's counts add up: claims_in - withheld - dropped_by_topic_filter =
+    claims_extracted."""
+    if not gate_out.get("gate"):
+        return None
+    report = GateReport(**gate_out["gate"])
+    survived = sum(len(v) for v in gate_out["claims_with_topics"].values())
+    report.dropped_by_topic_filter = max(0, survived - claims_extracted)
+    return report
