@@ -224,20 +224,19 @@ def test_apply_drops_emptied_topics_and_handles_empty_input(monkeypatch):
     decisions = {i: _RepairDecision(index=i, action="withhold", issue="impersonal_frame", reason="opinion") for i in (0, 1)}
     gate, _ = _gate_with(monkeypatch, verdicts, decisions)
     out, report = asyncio.run(gate.apply(CWT, TRANSCRIPT, META))
-    assert list(out) == ["Markets"] and report.withheld == 2 and report.floor_applied is False
+    assert list(out) == ["Markets"] and report.withheld == 2
     out, report = asyncio.run(gate.apply({}, TRANSCRIPT, META))
     assert out == {} and report.claims_in == 0
 
 
-def test_apply_never_empties_an_episode(monkeypatch):
-    # Every claim flagged and withheld: the originals are kept instead and the report says so.
+def test_apply_withholds_strictly_even_when_nothing_is_left(monkeypatch):
+    # Every claim flagged and withheld: the episode publishes nothing; the report carries all five.
     verdicts = {i: _DetectVerdict(index=i, fires=True, issue="context_dependent") for i in range(5)}
     decisions = {i: _RepairDecision(index=i, action="withhold", issue="context_dependent", reason="unfixable") for i in range(5)}
     gate, _ = _gate_with(monkeypatch, verdicts, decisions)
     out, report = asyncio.run(gate.apply(CWT, TRANSCRIPT, META))
-    assert out == CWT
-    assert report.floor_applied is True and report.withheld == 0 and report.kept_flagged == 5
-    assert report.withheld_claims == [] and report.flagged == 5
+    assert out == {}
+    assert report.withheld == 5 and report.kept_flagged == 0 and len(report.withheld_claims) == 5
 
 
 # ── DAG step ────────────────────────────────────────────────────────────────
