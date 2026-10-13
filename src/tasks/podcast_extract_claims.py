@@ -4,8 +4,10 @@ Five tasks — topics -> claims -> gate -> takeaways -> finalize — so a redepl
 or crash mid-pipeline resumes at the failed step instead of re-running completed
 Gemini calls. topics/claims/takeaways each consume one `gemini_global`
 rate-limit unit; the gate (a batched flash detector plus one pro repair call)
-consumes two. The gate removes or rewrites context-dependent claims before
-takeaways are drawn, so takeaways never restate a withheld claim. `finalize` returns key takeaways already
+consumes nine (its requests run concurrently). The thin-topic filter runs on
+extraction output just before the gate; the gate then removes or rewrites
+context-dependent claims before takeaways are drawn, so takeaways never
+restate a withheld claim and a withheld claim never costs its topic. `finalize` returns key takeaways already
 resolved to their claim_order, so the caller never re-runs the fragile string
 match.
 
@@ -30,6 +32,7 @@ from src.extraction.premium_claim_extractor import PremiumClaimExtractor
 from src.extraction.podcast_claim_gate import GateEpisodeMeta, GateReport, PodcastClaimGate
 from src.config.settings import settings
 from src.pipeline.premium_extraction_core import (
+    MIN_CLAIMS_PER_TOPIC,
     build_claim_topics,
     format_topics_with_claims,
     link_takeaways_to_claims,
@@ -107,13 +110,22 @@ def _gate() -> PodcastClaimGate:
     return PodcastClaimGate(_extractor(), on_call=lambda: spend_guard.check_and_record("gemini"))
 
 
-def _gated_claims(ctx: Context) -> dict:
-    """The gate's claim map; falls back to the raw claims for a run that was
-    created before the gate step existed (in flight across the deploy)."""
+def _thin_filter(cwt: dict) -> tuple[dict, int]:
+    """Drop topics under MIN_CLAIMS_PER_TOPIC; return the map and how many claims went."""
+    _, filtered, _, kept = build_claim_topics(list(cwt), cwt, 0)
+    return filtered, sum(len(v) for v in cwt.values()) - kept
+
+
+def _gated_claims(ctx: Context) -> tuple[dict, int]:
+    """(gate output, min_claims for the steps after it). The gate step already
+    applied the thin-topic filter, so later steps pass 1. A run created before
+    the gate step existed (in flight across the deploy) falls back to the raw
+    claims with the usual threshold."""
     try:
-        return ctx.task_output(gate)
+        return ctx.task_output(gate), 1
     except Exception:
-        return {"claims_with_topics": ctx.task_output(claims)["claims_with_topics"], "gate": None}
+        raw = ctx.task_output(claims)["claims_with_topics"]
+        return {"claims_with_topics": raw, "gate": None}, MIN_CLAIMS_PER_TOPIC
 
 
 @lru_cache(maxsize=1)
@@ -173,12 +185,15 @@ async def gate(input: PodcastExtractInput, ctx: Context) -> dict:
     """Remove or rewrite context-dependent claims. Never fails the run: when
     disabled, out of budget or erroring, the claims pass through unchanged and
     the report says so."""
-    cwt = ctx.task_output(claims)["claims_with_topics"]
+    # Thin topics are dropped here, on extraction output, so a withheld claim
+    # can never drag its topic's remaining claims out after the gate.
+    cwt, dropped = _thin_filter(ctx.task_output(claims)["claims_with_topics"])
     n = sum(len(v) for v in cwt.values())
     if not settings.podcast_gate_enabled:
-        return {"claims_with_topics": cwt, "gate": GateReport(enabled=False, claims_in=n).model_dump()}
+        report = GateReport(enabled=False, claims_in=n, dropped_by_topic_filter=dropped)
+        return {"claims_with_topics": cwt, "gate": report.model_dump()}
     if not cwt:
-        return {"claims_with_topics": cwt, "gate": GateReport(claims_in=0).model_dump()}
+        return {"claims_with_topics": cwt, "gate": GateReport(claims_in=0, dropped_by_topic_filter=dropped).model_dump()}
     meta = GateEpisodeMeta(
         podcast_name=input.podcast_name,
         title=input.title,
@@ -192,10 +207,13 @@ async def gate(input: PodcastExtractInput, ctx: Context) -> dict:
         )
     except asyncio.TimeoutError:
         logger.warning(f"claim gate: episode {input.episode_id} exceeded {GATE_BUDGET_SECONDS}s, passing claims through")
-        return {"claims_with_topics": cwt, "gate": GateReport(claims_in=n, errors=1).model_dump()}
+        report = GateReport(claims_in=n, errors=1, dropped_by_topic_filter=dropped)
+        return {"claims_with_topics": cwt, "gate": report.model_dump()}
     except Exception as e:
         logger.warning(f"claim gate: episode {input.episode_id} failed, passing claims through: {type(e).__name__}: {e}")
-        return {"claims_with_topics": cwt, "gate": GateReport(claims_in=n, errors=1).model_dump()}
+        report = GateReport(claims_in=n, errors=1, dropped_by_topic_filter=dropped)
+        return {"claims_with_topics": cwt, "gate": report.model_dump()}
+    report.dropped_by_topic_filter = dropped
     return {"claims_with_topics": gated, "gate": report.model_dump()}
 
 
@@ -206,8 +224,9 @@ async def gate(input: PodcastExtractInput, ctx: Context) -> dict:
 @with_overrides(label="podcast.extract_claims:takeaways")
 async def takeaways(input: PodcastExtractInput, ctx: Context) -> dict:
     topic_list = ctx.task_output(topics)["topics"]
-    cwt = _gated_claims(ctx)["claims_with_topics"]
-    _, filtered, claim_topics, _ = build_claim_topics(topic_list, cwt, input.episode_id)
+    gate_out, min_claims = _gated_claims(ctx)
+    cwt = gate_out["claims_with_topics"]
+    _, filtered, claim_topics, _ = build_claim_topics(topic_list, cwt, input.episode_id, min_claims)
     if not claim_topics:
         return {"key_takeaways": []}
     spend_guard.check_and_record("gemini")
@@ -221,12 +240,12 @@ async def takeaways(input: PodcastExtractInput, ctx: Context) -> dict:
 @with_overrides(label="podcast.extract_claims:finalize")
 async def finalize(input: PodcastExtractInput, ctx: Context) -> PodcastExtractResult:
     topic_list = ctx.task_output(topics)["topics"]
-    gate_out = _gated_claims(ctx)
+    gate_out, min_claims = _gated_claims(ctx)
     cwt = gate_out["claims_with_topics"]
     kt = ctx.task_output(takeaways)["key_takeaways"]
 
     ordered_topics, _, claim_topics, claims_extracted = build_claim_topics(
-        topic_list, cwt, input.episode_id
+        topic_list, cwt, input.episode_id, min_claims
     )
     takeaway_links = link_takeaways_to_claims(kt, claim_topics)
 
@@ -252,17 +271,5 @@ async def finalize(input: PodcastExtractInput, ctx: Context) -> PodcastExtractRe
         topic_of_discussion=ordered_topics,
         claims_extracted=claims_extracted,
         model_used=_extractor().model_name,
-        gate=_gate_report(gate_out, claims_extracted),
+        gate=GateReport(**gate_out["gate"]) if gate_out.get("gate") else None,
     )
-
-
-def _gate_report(gate_out: dict, claims_extracted: int) -> GateReport | None:
-    """The gate's report plus what the topic filter removed after it, so the
-    caller's counts add up: claims_in - withheld - dropped_by_topic_filter =
-    claims_extracted."""
-    if not gate_out.get("gate"):
-        return None
-    report = GateReport(**gate_out["gate"])
-    survived = sum(len(v) for v in gate_out["claims_with_topics"].values())
-    report.dropped_by_topic_filter = max(0, survived - claims_extracted)
-    return report

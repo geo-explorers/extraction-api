@@ -224,12 +224,26 @@ def test_apply_drops_emptied_topics_and_handles_empty_input(monkeypatch):
     decisions = {i: _RepairDecision(index=i, action="withhold", issue="impersonal_frame", reason="opinion") for i in (0, 1)}
     gate, _ = _gate_with(monkeypatch, verdicts, decisions)
     out, report = asyncio.run(gate.apply(CWT, TRANSCRIPT, META))
-    assert list(out) == ["Markets"] and report.withheld == 2
+    assert list(out) == ["Markets"] and report.withheld == 2 and report.floor_applied is False
     out, report = asyncio.run(gate.apply({}, TRANSCRIPT, META))
     assert out == {} and report.claims_in == 0
 
 
+def test_apply_never_empties_an_episode(monkeypatch):
+    # Every claim flagged and withheld: the originals are kept instead and the report says so.
+    verdicts = {i: _DetectVerdict(index=i, fires=True, issue="context_dependent") for i in range(5)}
+    decisions = {i: _RepairDecision(index=i, action="withhold", issue="context_dependent", reason="unfixable") for i in range(5)}
+    gate, _ = _gate_with(monkeypatch, verdicts, decisions)
+    out, report = asyncio.run(gate.apply(CWT, TRANSCRIPT, META))
+    assert out == CWT
+    assert report.floor_applied is True and report.withheld == 0 and report.kept_flagged == 5
+    assert report.withheld_claims == [] and report.flagged == 5
+
+
 # ── DAG step ────────────────────────────────────────────────────────────────
+
+# Every topic has >= 3 claims so the step's thin-topic filter keeps the map intact.
+CWT_FULL = {"Diesel": CWT["Diesel"] + ["Diesel prices rose in 2026."], "Markets": CWT["Markets"]}
 
 
 def test_gate_step_passes_through_when_disabled_and_runs_when_enabled(monkeypatch):
@@ -242,14 +256,14 @@ def test_gate_step_passes_through_when_disabled_and_runs_when_enabled(monkeypatc
 
     class Ctx:
         def task_output(self, task):
-            return {pod.claims: {"claims_with_topics": CWT}}[task]
+            return {pod.claims: {"claims_with_topics": CWT_FULL}}[task]
 
     spend = {"n": 0}
     monkeypatch.setattr(pod.spend_guard, "check_and_record", lambda provider: spend.__setitem__("n", spend["n"] + 1))
 
     monkeypatch.setattr(pod.settings, "podcast_gate_enabled", False)
     out = asyncio.run(pod.gate.fn(inp, Ctx()))
-    assert out["claims_with_topics"] == CWT and out["gate"]["enabled"] is False and spend["n"] == 0
+    assert out["claims_with_topics"] == CWT_FULL and out["gate"]["enabled"] is False and spend["n"] == 0
 
     seen = {}
 
@@ -262,7 +276,7 @@ def test_gate_step_passes_through_when_disabled_and_runs_when_enabled(monkeypatc
     monkeypatch.setattr(pod.settings, "podcast_gate_enabled", True)
     monkeypatch.setattr(pod, "_gate", lambda: FakeGate())
     out = asyncio.run(pod.gate.fn(inp, Ctx()))
-    assert out["claims_with_topics"] == {"Diesel": CWT["Diesel"]}
+    assert out["claims_with_topics"] == {"Diesel": CWT_FULL["Diesel"]}
     assert out["gate"]["withheld"] == 1 and spend["n"] == 0  # spend is recorded per model call inside the gate
     assert seen["meta"].air_date == "2026-10-13" and seen["meta"].people == ["A (host)"] and seen["meta"].podcast_name == "P"
     assert "hello" in seen["transcript"]
@@ -326,7 +340,7 @@ def test_gate_step_passes_through_on_timeout_and_error(monkeypatch):
 
     class Ctx:
         def task_output(self, task):
-            return {pod.claims: {"claims_with_topics": CWT}}[task]
+            return {pod.claims: {"claims_with_topics": CWT_FULL}}[task]
 
     monkeypatch.setattr(pod.settings, "podcast_gate_enabled", True)
     monkeypatch.setattr(pod, "GATE_BUDGET_SECONDS", 0.01)
@@ -338,7 +352,7 @@ def test_gate_step_passes_through_on_timeout_and_error(monkeypatch):
 
     monkeypatch.setattr(pod, "_gate", lambda: Slow())
     out = asyncio.run(pod.gate.fn(inp, Ctx()))
-    assert out["claims_with_topics"] == CWT and out["gate"]["errors"] == 1 and out["gate"]["claims_in"] == 5
+    assert out["claims_with_topics"] == CWT_FULL and out["gate"]["errors"] == 1 and out["gate"]["claims_in"] == 6
 
     class Broken:
         async def apply(self, cwt, transcript, meta):
@@ -347,18 +361,46 @@ def test_gate_step_passes_through_on_timeout_and_error(monkeypatch):
     monkeypatch.setattr(pod, "GATE_BUDGET_SECONDS", 5)
     monkeypatch.setattr(pod, "_gate", lambda: Broken())
     out = asyncio.run(pod.gate.fn(inp, Ctx()))
-    assert out["claims_with_topics"] == CWT and out["gate"]["errors"] == 1
+    assert out["claims_with_topics"] == CWT_FULL and out["gate"]["errors"] == 1
 
     monkeypatch.setattr(pod.settings, "podcast_gate_enabled", False)
     out = asyncio.run(pod.gate.fn(inp, Ctx()))
-    assert out["gate"]["enabled"] is False and out["gate"]["claims_in"] == 5
+    assert out["gate"]["enabled"] is False and out["gate"]["claims_in"] == 6
 
 
-def test_finalize_reads_gate_output_and_counts_topic_filter_loss(monkeypatch):
+def test_gate_step_applies_the_thin_topic_filter_before_gating(monkeypatch):
+    import src.tasks.podcast_extract_claims as pod
+
+    inp = pod.PodcastExtractInput(episode_id=1, title="t", transcript="Speaker A (0s):\nhello", transcript_format="assembly")
+    raw = {"Diesel": ["a", "b", "c"], "Thin": ["x", "y"]}
+
+    class Ctx:
+        def task_output(self, task):
+            return {pod.claims: {"claims_with_topics": raw}}[task]
+
+    seen = {}
+
+    class FakeGate:
+        async def apply(self, cwt, transcript, meta):
+            seen["cwt"] = cwt
+            return cwt, GateReport(claims_in=sum(len(v) for v in cwt.values()))
+
+    monkeypatch.setattr(pod.settings, "podcast_gate_enabled", True)
+    monkeypatch.setattr(pod, "_gate", lambda: FakeGate())
+    out = asyncio.run(pod.gate.fn(inp, Ctx()))
+    assert seen["cwt"] == {"Diesel": ["a", "b", "c"]}
+    assert out["gate"]["dropped_by_topic_filter"] == 2 and out["gate"]["claims_in"] == 3
+
+    monkeypatch.setattr(pod.settings, "podcast_gate_enabled", False)
+    out = asyncio.run(pod.gate.fn(inp, Ctx()))
+    assert out["claims_with_topics"] == {"Diesel": ["a", "b", "c"]} and out["gate"]["dropped_by_topic_filter"] == 2
+
+
+def test_finalize_keeps_thin_topics_after_the_gate(monkeypatch):
     import src.tasks.podcast_extract_claims as pod
 
     inp = pod.PodcastExtractInput(episode_id=1, title="t", transcript="x", transcript_format="podscribe")
-    # Gate withheld one claim of a 3-claim topic: the other two fall to the topic filter.
+    # Gate withheld one claim of a 3-claim topic: the other two must survive.
     gated = {"Diesel": ["a", "b", "c"], "Markets": ["d", "e"]}
     report = GateReport(claims_in=6, flagged=1, withheld=1).model_dump()
 
@@ -372,8 +414,8 @@ def test_finalize_reads_gate_output_and_counts_topic_filter_loss(monkeypatch):
 
     monkeypatch.setattr(pod, "_extractor", lambda: type("E", (), {"model_name": "m"})())
     out = asyncio.run(pod.finalize.fn(inp, Ctx()))
-    assert [c.claim_text for c in out.claims] == ["a", "b", "c"]
-    assert out.gate.withheld == 1 and out.gate.dropped_by_topic_filter == 2
+    assert [c.claim_text for c in out.claims] == ["a", "b", "c", "d", "e"]
+    assert out.gate.withheld == 1 and out.claims_extracted == 5
     assert out.key_takeaways[0].claim_order == 1
 
     class OldRun:  # created before the gate step existed: no gate output
@@ -384,3 +426,11 @@ def test_finalize_reads_gate_output_and_counts_topic_filter_loss(monkeypatch):
 
     out = asyncio.run(pod.finalize.fn(inp, OldRun()))
     assert len(out.claims) == 3 and out.gate is None
+
+
+def test_build_claim_topics_min_claims_parameter():
+    from src.pipeline.premium_extraction_core import build_claim_topics
+
+    cwt = {"A": ["1", "2", "3"], "B": ["4"]}
+    assert list(build_claim_topics(["A", "B"], cwt, 1)[1]) == ["A"]
+    assert list(build_claim_topics(["A", "B"], cwt, 1, min_claims=1)[1]) == ["A", "B"]

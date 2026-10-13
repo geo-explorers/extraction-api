@@ -120,9 +120,12 @@ class GateReport(BaseModel):
     withheld: int = 0
     rewrites_rejected: int = 0
     errors: int = 0  # detect batches or repair calls that failed (fail-open)
-    # Claims that survived the gate but left with a topic the 3-claims-per-topic
-    # filter dropped afterwards (set by finalize, not by the gate).
+    # Claims the thin-topic filter removed BEFORE the gate (set by the DAG step):
+    # extraction output = claims_in + dropped_by_topic_filter.
     dropped_by_topic_filter: int = 0
+    # True when withholding would have emptied the episode, so the flagged
+    # originals were kept instead: the gate never creates a zero-claim episode.
+    floor_applied: bool = False
     withheld_claims: List[WithheldClaim] = Field(default_factory=list)
     detect_model: str = ""
     repair_model: str = ""
@@ -411,6 +414,20 @@ class PodcastClaimGate:
                     report.kept_flagged += 1
                     out[topic].append(text)
                     logger.info(f"claim gate rejected rewrite ({why}): {text[:80]!r}")
+        if not any(out.values()) and report.withheld:
+            # Withholding everything would leave the episode with no claims, which
+            # the ETL would re-select and re-extract every run. Keep the originals.
+            logger.warning(
+                f"claim gate: all {report.withheld} remaining claims would be withheld; keeping them as extracted"
+            )
+            out = {t: [] for t in claims_with_topics}
+            for topic, text in items:
+                out[topic].append(text)
+            report.kept_flagged += report.withheld
+            report.repaired = 0
+            report.withheld = 0
+            report.withheld_claims = []
+            report.floor_applied = True
         out = {t: cs for t, cs in out.items() if cs}
         logger.info(
             f"claim gate: {report.claims_in} in, {report.flagged} flagged, {report.repaired} repaired, "
