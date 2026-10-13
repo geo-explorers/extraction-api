@@ -84,6 +84,8 @@ def test_registry_covers_every_task_family():
         "claims_judge_equivalence.rubric",
         "claims_score_highlights.debate.essential",
         "podcast_extract.claims",
+        "podcast_gate.detect",
+        "podcast_gate.repair",
         "guest_extraction",
         "host_extraction",
         "keyword_extraction",

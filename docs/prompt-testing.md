@@ -90,6 +90,8 @@ others. Prompts marked plain text have no slots and may contain any braces.
 | `podcast_extract.topics` | `podcast.extract_claims` | `{title}`, `{description}`, `{transcript}` | [`src/config/prompts/topics_of_discussion_extraction_prompt.py`](../src/config/prompts/topics_of_discussion_extraction_prompt.py) |
 | `podcast_extract.claims` | `podcast.extract_claims` | `{topics_of_discussion}`, `{transcript}` | [`src/config/prompts/claim_extraction_prompt.py`](../src/config/prompts/claim_extraction_prompt.py) |
 | `podcast_extract.takeaways` | `podcast.extract_claims` | `{topics_with_claims}` | [`src/config/prompts/key_takeaways_prompt.py`](../src/config/prompts/key_takeaways_prompt.py) |
+| `podcast_gate.detect` | `podcast.extract_claims` (gate step) | `{claims}` | [`src/config/prompts/podcast_claim_gate_prompt.py`](../src/config/prompts/podcast_claim_gate_prompt.py) |
+| `podcast_gate.repair` | `podcast.extract_claims` (gate step) | `{max_added_words}`, `{max_claim_words}`, `{metadata}`, `{claims}`, `{transcript}` | [`src/config/prompts/podcast_claim_gate_prompt.py`](../src/config/prompts/podcast_claim_gate_prompt.py) |
 | `keyword_extraction` | `keyword.extract` | `{episode}`, `{topics_list}`, `{min_keywords}`, `{max_keywords}`, `{min_topics}`, `{max_topics}` | [`src/config/prompts/keyword_extraction_prompt.py`](../src/config/prompts/keyword_extraction_prompt.py) |
 | `media_keyword_extraction` | `POST /extract/media/keywords` | `{media_type}`, `{media}`, `{topics_list}`, `{min_keywords}`, `{max_keywords}`, `{min_topics}`, `{max_topics}` | [`src/config/prompts/media_keyword_extraction_prompt.py`](../src/config/prompts/media_keyword_extraction_prompt.py) |
 | `claim_keyword_extraction` | `POST /extract/claim-keywords` | `{title}`, `{description}`, `{claims}`, `{topics_list}`, `{min_keywords}`, `{max_keywords}`, `{min_topics}`, `{max_topics}` | [`src/config/prompts/claim_keyword_extraction_prompt.py`](../src/config/prompts/claim_keyword_extraction_prompt.py) |
@@ -493,7 +495,9 @@ current defaults. Delete the prompt keys you are not overriding. For `POST /task
   "prompt_overrides": {
     "podcast_extract.topics": "",
     "podcast_extract.claims": "",
-    "podcast_extract.takeaways": ""
+    "podcast_extract.takeaways": "",
+    "podcast_gate.detect": "",
+    "podcast_gate.repair": ""
   },
   "llm_overrides": {
     "gemini_premium_model": "gemini-2.5-pro",

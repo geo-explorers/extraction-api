@@ -37,6 +37,7 @@ from src.config.prompts import news_debate_completion_prompt as _debate_completi
 from src.config.prompts import news_debate_semantic_review_prompt as _debate_review
 from src.config.prompts import news_topics_entities_prompt as _topics_entities
 from src.config.prompts import news_topics_extract_prompt as _topics_extract
+from src.config.prompts import podcast_claim_gate_prompt as _podcast_gate
 from src.config.prompts import space_assignment_prompt as _spaces
 from src.config.prompts import topics_of_discussion_extraction_prompt as _podcast_topics
 from src.config.prompts.claims_extract import core as _ce_core
@@ -96,6 +97,8 @@ def _register(key: str, text: str, *, formatted: bool, module: ModuleType) -> No
 _register("podcast_extract.topics", _podcast_topics.TOPICS_OF_DISCUSSION_PROMPT, formatted=True, module=_podcast_topics)
 _register("podcast_extract.claims", _podcast_claims.CLAIM_EXTRACTION_PROMPT, formatted=True, module=_podcast_claims)
 _register("podcast_extract.takeaways", _podcast_takeaways.KEY_TAKEAWAYS_PROMPT, formatted=True, module=_podcast_takeaways)
+_register("podcast_gate.detect", _podcast_gate.GATE_DETECT_PROMPT, formatted=True, module=_podcast_gate)
+_register("podcast_gate.repair", _podcast_gate.GATE_REPAIR_PROMPT, formatted=True, module=_podcast_gate)
 _register("keyword_extraction", _keywords.KEYWORD_EXTRACTION_PROMPT, formatted=True, module=_keywords)
 _register("media_keyword_extraction", _media_keywords.MEDIA_KEYWORD_EXTRACTION_PROMPT, formatted=True, module=_media_keywords)
 _register("claim_keyword_extraction", _claim_keywords.CLAIM_KEYWORD_EXTRACTION_PROMPT, formatted=True, module=_claim_keywords)
