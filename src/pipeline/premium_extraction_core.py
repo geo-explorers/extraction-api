@@ -52,17 +52,20 @@ def build_claim_topics(
     topics: List[str],
     claims_with_topics: dict[str, list[str]],
     episode_id: int,
+    min_claims: int = MIN_CLAIMS_PER_TOPIC,
 ) -> tuple[List[str], dict[str, list[str]], List[ClaimWithTopic], int]:
     """Filter sparse topics and assign sequential claim_order.
 
     Pure, deterministic — the single source of truth shared by the in-process
     pipeline and the DAG worker. Returns (ordered_topics, filtered_map,
-    claim_topics, claims_extracted).
+    claim_topics, claims_extracted). `min_claims` is the thinness threshold;
+    the DAG applies it once, before the claim gate, and passes 1 afterwards so
+    a withheld claim never drags its topic's remaining claims out with it.
     """
     filtered = {
         topic: claims
         for topic, claims in claims_with_topics.items()
-        if len(claims) >= MIN_CLAIMS_PER_TOPIC
+        if len(claims) >= min_claims
     }
     ordered_topics = [t for t in topics if t in filtered]
 

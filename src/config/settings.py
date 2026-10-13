@@ -146,6 +146,25 @@ class Settings(BaseSettings):
         default=0.2,
         description="Temperature for premium extraction (0 = deterministic)"
     )
+    # Podcast claim gate (podcast.extract_claims, gate step): detector reads
+    # claims alone, repair reads flagged claims with the transcript. Measured
+    # 2026-10-13: 11.1% -> 3.7% context-dependent claims at ~$0.14/episode.
+    podcast_gate_enabled: bool = Field(
+        default=True,
+        description="Run the context-dependence gate after podcast claim extraction; false passes claims through unchanged"
+    )
+    gemini_gate_detect_model: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model that flags context-dependent podcast claims (claims alone, batched)"
+    )
+    gemini_gate_repair_model: str = Field(
+        default="gemini-2.5-pro",
+        description="Gemini model that rewrites or withholds flagged podcast claims against the transcript"
+    )
+    gemini_gate_temperature: float = Field(
+        default=0.0,
+        description="Temperature for both podcast claim gate calls"
+    )
     premium_extraction_max_parallel_episodes: int = Field(
         default=20,
         description="Maximum number of episodes processed in parallel for premium extraction"

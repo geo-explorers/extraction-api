@@ -94,7 +94,13 @@ class PremiumClaimExtractor:
         self._explicit_model = value
 
 
-    async def _call_gemini(self, prompt: str, config: types.GenerateContentConfig, step_name: str) -> str:
+    async def _call_gemini(
+        self,
+        prompt: str,
+        config: types.GenerateContentConfig,
+        step_name: str,
+        model: Optional[str] = None,
+    ) -> str:
         """
         Call Gemini API with application-level retry logic and logging.
 
@@ -102,6 +108,8 @@ class PremiumClaimExtractor:
             prompt: The prompt to send
             config: Gemini generation config
             step_name: Human-readable step name for logging
+            model: Model to call; defaults to this extractor's model_name. The
+                podcast claim gate shares this client with its own models.
 
         Returns:
             Response text from Gemini
@@ -120,7 +128,7 @@ class PremiumClaimExtractor:
                 # non-blocking.
                 response = await asyncio.to_thread(
                     self.client.models.generate_content,
-                    model=self.model_name,
+                    model=model or self.model_name,
                     contents=prompt,
                     config=config,
                 )

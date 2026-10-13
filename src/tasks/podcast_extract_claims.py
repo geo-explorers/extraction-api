@@ -1,9 +1,13 @@
 """Podcast premium claim extraction as a checkpointed Hatchet DAG.
 
-Four tasks — topics -> claims -> takeaways -> finalize — so a redeploy or crash
-mid-pipeline resumes at the failed step instead of re-running completed Gemini
-calls. The three LLM steps each consume one `gemini_global` rate-limit unit
-(matching today's 3 calls/episode). `finalize` returns key takeaways already
+Five tasks — topics -> claims -> gate -> takeaways -> finalize — so a redeploy
+or crash mid-pipeline resumes at the failed step instead of re-running completed
+Gemini calls. topics/claims/takeaways each consume one `gemini_global`
+rate-limit unit; the gate (a batched flash detector plus one pro repair call)
+consumes nine (its requests run concurrently). The thin-topic filter runs on
+extraction output just before the gate; the gate then removes or rewrites
+context-dependent claims before takeaways are drawn, so takeaways never
+restate a withheld claim and a withheld claim never costs its topic. `finalize` returns key takeaways already
 resolved to their claim_order, so the caller never re-runs the fragile string
 match.
 
@@ -13,6 +17,7 @@ persistence are the caller's responsibility (the payload carries the transcript;
 pg-migrations persists the result).
 """
 
+import asyncio
 from datetime import timedelta
 from functools import lru_cache
 
@@ -24,7 +29,10 @@ from src.hatchet_client import hatchet
 from src.tasks.base import with_overrides
 from src.preprocessing.transcript_parser import TranscriptParser
 from src.extraction.premium_claim_extractor import PremiumClaimExtractor
+from src.extraction.podcast_claim_gate import GateEpisodeMeta, GateReport, PodcastClaimGate
+from src.config.settings import settings
 from src.pipeline.premium_extraction_core import (
+    MIN_CLAIMS_PER_TOPIC,
     build_claim_topics,
     format_topics_with_claims,
     link_takeaways_to_claims,
@@ -38,6 +46,13 @@ logger = get_logger(__name__)
 PODCAST_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
 _GEMINI = [RateLimit(static_key="gemini_global", units=1)]
 _STEP_TIMEOUT = timedelta(minutes=5)
+# The gate makes ceil(claims/10) detect requests (up to 8 concurrently) plus one
+# repair request; reserve what can run at once. Its own budget is generous and
+# enforced inside the step (GATE_BUDGET), so Hatchet's timeout never fires
+# first and the step never fails: on timeout or error claims pass through.
+_GEMINI_GATE = [RateLimit(static_key="gemini_global", units=9)]
+_GATE_STEP_TIMEOUT = timedelta(minutes=10)
+GATE_BUDGET_SECONDS = 8 * 60
 
 
 # ── Contracts ──────────────────────────────────────────────────────────────
@@ -49,6 +64,12 @@ class PodcastExtractInput(OverridesMixin):
     description: str = ""
     transcript: str
     transcript_format: str  # "podscribe" | "bankless" | "assembly"
+    # Episode metadata for the claim gate's repair call. Optional so older
+    # callers keep working; without an air date the gate cannot anchor
+    # relative-time claims and withholds or keeps them on the repair's judgment.
+    air_date: str | None = None  # ISO date or datetime
+    podcast_name: str = ""
+    credits: list[str] = Field(default_factory=list)  # "Name (host)", "Name (guest)"
 
 
 class ResultClaim(BaseModel):
@@ -73,6 +94,7 @@ class PodcastExtractResult(BaseModel):
     topic_of_discussion: list[str] = Field(default_factory=list)
     claims_extracted: int = 0
     model_used: str = ""
+    gate: GateReport | None = None  # None when the gate is disabled
 
 
 # ── Lazy singletons (one per worker process; constructed on first run) ───────
@@ -81,6 +103,29 @@ class PodcastExtractResult(BaseModel):
 @lru_cache(maxsize=1)
 def _extractor() -> PremiumClaimExtractor:
     return PremiumClaimExtractor()
+
+
+@lru_cache(maxsize=1)
+def _gate() -> PodcastClaimGate:
+    return PodcastClaimGate(_extractor(), on_call=lambda: spend_guard.check_and_record("gemini"))
+
+
+def _thin_filter(cwt: dict) -> tuple[dict, int]:
+    """Drop topics under MIN_CLAIMS_PER_TOPIC; return the map and how many claims went."""
+    _, filtered, _, kept = build_claim_topics(list(cwt), cwt, 0)
+    return filtered, sum(len(v) for v in cwt.values()) - kept
+
+
+def _gated_claims(ctx: Context) -> tuple[dict, int]:
+    """(gate output, min_claims for the steps after it). The gate step already
+    applied the thin-topic filter, so later steps pass 1. A run created before
+    the gate step existed (in flight across the deploy) falls back to the raw
+    claims with the usual threshold."""
+    try:
+        return ctx.task_output(gate), 1
+    except Exception:
+        raw = ctx.task_output(claims)["claims_with_topics"]
+        return {"claims_with_topics": raw, "gate": None}, MIN_CLAIMS_PER_TOPIC
 
 
 @lru_cache(maxsize=1)
@@ -132,14 +177,56 @@ async def claims(input: PodcastExtractInput, ctx: Context) -> dict:
 
 
 @podcast_workflow.task(
-    parents=[topics, claims], rate_limits=_GEMINI, execution_timeout=_STEP_TIMEOUT,
+    parents=[claims], rate_limits=_GEMINI_GATE, execution_timeout=_GATE_STEP_TIMEOUT,
+    retries=1, backoff_factor=2.0,
+)
+@with_overrides(label="podcast.extract_claims:gate")
+async def gate(input: PodcastExtractInput, ctx: Context) -> dict:
+    """Remove or rewrite context-dependent claims. Never fails the run: when
+    disabled, out of budget or erroring, the claims pass through unchanged and
+    the report says so."""
+    # Thin topics are dropped here, on extraction output, so a withheld claim
+    # can never drag its topic's remaining claims out after the gate.
+    cwt, dropped = _thin_filter(ctx.task_output(claims)["claims_with_topics"])
+    n = sum(len(v) for v in cwt.values())
+    if not settings.podcast_gate_enabled:
+        report = GateReport(enabled=False, claims_in=n, dropped_by_topic_filter=dropped)
+        return {"claims_with_topics": cwt, "gate": report.model_dump()}
+    if not cwt:
+        return {"claims_with_topics": cwt, "gate": GateReport(claims_in=0, dropped_by_topic_filter=dropped).model_dump()}
+    meta = GateEpisodeMeta(
+        podcast_name=input.podcast_name,
+        title=input.title,
+        description=input.description,
+        air_date=input.air_date,
+        people=input.credits,
+    )
+    try:
+        gated, report = await asyncio.wait_for(
+            _gate().apply(cwt, _full_text(input), meta), timeout=GATE_BUDGET_SECONDS
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"claim gate: episode {input.episode_id} exceeded {GATE_BUDGET_SECONDS}s, passing claims through")
+        report = GateReport(claims_in=n, errors=1, dropped_by_topic_filter=dropped)
+        return {"claims_with_topics": cwt, "gate": report.model_dump()}
+    except Exception as e:
+        logger.warning(f"claim gate: episode {input.episode_id} failed, passing claims through: {type(e).__name__}: {e}")
+        report = GateReport(claims_in=n, errors=1, dropped_by_topic_filter=dropped)
+        return {"claims_with_topics": cwt, "gate": report.model_dump()}
+    report.dropped_by_topic_filter = dropped
+    return {"claims_with_topics": gated, "gate": report.model_dump()}
+
+
+@podcast_workflow.task(
+    parents=[topics, gate], rate_limits=_GEMINI, execution_timeout=_STEP_TIMEOUT,
     retries=3, backoff_factor=2.0,
 )
 @with_overrides(label="podcast.extract_claims:takeaways")
 async def takeaways(input: PodcastExtractInput, ctx: Context) -> dict:
     topic_list = ctx.task_output(topics)["topics"]
-    cwt = ctx.task_output(claims)["claims_with_topics"]
-    _, filtered, claim_topics, _ = build_claim_topics(topic_list, cwt, input.episode_id)
+    gate_out, min_claims = _gated_claims(ctx)
+    cwt = gate_out["claims_with_topics"]
+    _, filtered, claim_topics, _ = build_claim_topics(topic_list, cwt, input.episode_id, min_claims)
     if not claim_topics:
         return {"key_takeaways": []}
     spend_guard.check_and_record("gemini")
@@ -149,15 +236,16 @@ async def takeaways(input: PodcastExtractInput, ctx: Context) -> dict:
     return {"key_takeaways": kt}
 
 
-@podcast_workflow.task(parents=[topics, claims, takeaways], execution_timeout=timedelta(minutes=2))
+@podcast_workflow.task(parents=[topics, gate, takeaways], execution_timeout=timedelta(minutes=2))
 @with_overrides(label="podcast.extract_claims:finalize")
 async def finalize(input: PodcastExtractInput, ctx: Context) -> PodcastExtractResult:
     topic_list = ctx.task_output(topics)["topics"]
-    cwt = ctx.task_output(claims)["claims_with_topics"]
+    gate_out, min_claims = _gated_claims(ctx)
+    cwt = gate_out["claims_with_topics"]
     kt = ctx.task_output(takeaways)["key_takeaways"]
 
     ordered_topics, _, claim_topics, claims_extracted = build_claim_topics(
-        topic_list, cwt, input.episode_id
+        topic_list, cwt, input.episode_id, min_claims
     )
     takeaway_links = link_takeaways_to_claims(kt, claim_topics)
 
@@ -183,4 +271,5 @@ async def finalize(input: PodcastExtractInput, ctx: Context) -> PodcastExtractRe
         topic_of_discussion=ordered_topics,
         claims_extracted=claims_extracted,
         model_used=_extractor().model_name,
+        gate=GateReport(**gate_out["gate"]) if gate_out.get("gate") else None,
     )
