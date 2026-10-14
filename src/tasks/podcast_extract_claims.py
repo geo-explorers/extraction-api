@@ -3,7 +3,7 @@
 Five tasks — topics -> claims -> gate -> takeaways -> finalize — so a redeploy
 or crash mid-pipeline resumes at the failed step instead of re-running completed
 Gemini calls. topics/claims/takeaways each consume one `gemini_global`
-rate-limit unit; the gate (a batched flash detector plus one pro repair call)
+rate-limit unit; the gate (a batched detector plus one repair call)
 consumes nine (its requests run concurrently). The thin-topic filter runs on
 extraction output just before the gate; the gate then removes or rewrites
 context-dependent claims before takeaways are drawn, so takeaways never

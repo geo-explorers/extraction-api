@@ -271,6 +271,23 @@ class PodcastClaimGate:
         )
         return by
 
+    def _detect_thinking(self) -> Optional[types.ThinkingConfig]:
+        """Thinking setting for the detector call.
+
+        On the 2.5 family recall collapses without thinking (7.4% vs 3.7%
+        residual), so dynamic thinking is pinned there and a model override
+        cannot turn it off. Gemini 3 models take a thinking level instead of a
+        budget and think by default; pinning an unbounded budget on
+        gemini-3.8-flash made 7 of 34 detect batches exceed the API's own
+        deadline (HTTP 504, fail-open) on 2026-10-14, while the model default
+        detected as well as 2.5-flash. So the pin applies to 2.5 models only
+        (any spelling, including "models/gemini-2.5-flash"); the `-latest`
+        aliases are treated as current-generation and get no pin.
+        """
+        if "gemini-2.5" in self.detect_model:
+            return types.ThinkingConfig(thinking_budget=-1)
+        return None
+
     async def _detect_batch(self, batch: List[str], offset: int) -> List[Optional[_DetectVerdict]]:
         prompt = prompts.get("podcast_gate.detect").format(
             claims="\n".join(f"{i}. {text}" for i, text in enumerate(batch))
@@ -282,9 +299,7 @@ class PodcastClaimGate:
                 temperature=self.temperature,
                 response_mime_type="application/json",
                 response_schema=_DetectResponse,
-                # Recall collapses without thinking (7.4% vs 3.7% residual);
-                # pin dynamic thinking so a model override cannot turn it off.
-                thinking_config=types.ThinkingConfig(thinking_budget=-1),
+                thinking_config=self._detect_thinking(),
             ),
             step_name="claim gate detect",
             model=self.detect_model,
