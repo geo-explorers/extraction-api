@@ -183,6 +183,11 @@ def test_media_layer_selected_by_media_type():
 
     podcast = build_extract_prompt(_input(media_type="podcast"), [])
     assert "ADVERTISEMENT & PROMOTION FILTERING" in podcast
+    # The podcast layer is precision-first: it must state its precedence over
+    # the core's coverage rules and carry the admission test and audit.
+    for section in ("PRECEDENCE FOR PODCASTS", "THE ADMISSION TEST", "PODCAST STRENGTH AUDIT"):
+        assert section in podcast
+        assert section not in debate
 
 
 def test_vendor_transcript_renders_speaker_lines():
