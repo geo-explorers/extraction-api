@@ -6,12 +6,15 @@ with a per-claim judge on 893 production claims after the P5 prompt. A model
 that reads a claim WITH the transcript in view does not notice what a stranger
 misses, so the gate has two calls with different views:
 
-1. DETECT (gemini-2.5-flash, thinking on): claims alone, in batches of ten,
-   no transcript. Flags ~20-25% of claims.
-2. REPAIR (gemini-2.5-pro): one call per episode with the transcript and the
-   episode metadata, flagged claims only. Rewrites minimally, keeps, or
+1. DETECT: claims alone, in batches of ten, no transcript. Flags ~20-25% of
+   claims. (Shipped on gemini-2.5-flash with thinking pinned on.)
+2. REPAIR: one call per episode with the transcript and the episode
+   metadata, flagged claims only. (Shipped on gemini-2.5-pro.) Rewrites minimally, keeps, or
    withholds. Code then re-checks every rewrite (no lost names or numbers,
    word budget, every added identifier present in the transcript).
+
+Since 2026-10-14 both calls run gemini-3.8-flash, the detector at the model's
+default thinking level (see settings.py and PodcastClaimGate._detect_thinking).
 
 Measured on a representative 6-episode subset (333 claims): 11.1% -> 3.7%
 context-dependent, 97% of claims retained, about $0.14 per episode. The

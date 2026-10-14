@@ -500,8 +500,11 @@ current defaults. Delete the prompt keys you are not overriding. For `POST /task
     "podcast_gate.repair": ""
   },
   "llm_overrides": {
-    "gemini_premium_model": "gemini-2.5-pro",
-    "gemini_premium_temperature": 0.2
+    "gemini_premium_model": "gemini-3.8-flash",
+    "gemini_premium_temperature": 0.0,
+    "gemini_gate_detect_model": "gemini-3.8-flash",
+    "gemini_gate_repair_model": "gemini-3.8-flash",
+    "gemini_gate_temperature": 0.0
   }
 }
 ```

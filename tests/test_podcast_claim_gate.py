@@ -433,3 +433,19 @@ def test_build_claim_topics_min_claims_parameter():
     cwt = {"A": ["1", "2", "3"], "B": ["4"]}
     assert list(build_claim_topics(["A", "B"], cwt, 1)[1]) == ["A"]
     assert list(build_claim_topics(["A", "B"], cwt, 1, min_claims=1)[1]) == ["A", "B"]
+
+
+def test_detect_thinking_pinned_only_for_gemini_2_5(monkeypatch):
+    """2.5-era detectors need dynamic thinking pinned (recall collapses without it);
+    Gemini 3 models think by default and an unbounded budget pushes 3.8-flash past
+    the API deadline, so they get no thinking config."""
+    gate = PodcastClaimGate(_FakeExtractor())
+    for model, expect_pin in (
+        ("gemini-2.5-flash", True), ("gemini-2.5-pro", True), ("models/gemini-2.5-flash", True),
+        ("gemini-3.8-flash", False), ("gemini-3.1-pro-preview", False), ("gemini-flash-latest", False),
+    ):
+        monkeypatch.setattr(pcg.llm, "get", lambda name, m=model: {"gemini_gate_detect_model": m, "gemini_gate_repair_model": "pro", "gemini_gate_temperature": 0.0}[name])
+        cfg = gate._detect_thinking()
+        assert (cfg is not None) is expect_pin, model
+        if cfg is not None:
+            assert cfg.thinking_budget == -1
