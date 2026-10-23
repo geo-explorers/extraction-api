@@ -36,7 +36,9 @@ from src.pipeline.claims_score_highlights_core import (  # noqa: E402
     attribution,
     build_content,
     build_questions,
-    decide_claims,
+    decide_debate,
+    moment_requests,
+    repeat_requests,
 )
 
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "claim_highlights_eval.json"
@@ -64,7 +66,11 @@ def dry_run(debates: list[dict]) -> int:
     first = task_input(debates[0])
     content, questions = build_content(first, 0), build_questions("debate")
     print(json.dumps({"content": content, "questions": {k: dataclasses.asdict(q) for k, q in questions.items()}}, indent=1))
-    requests = sum(len(d["claims"]) for d in debates)
+    first_moment = moment_requests(first)[0]
+    print("\nfirst moment request:")
+    print(json.dumps({"content": first_moment[1], "questions": {k: dataclasses.asdict(q) for k, q in first_moment[2].items()}}, indent=1))
+    extra = sum(len(moment_requests(task_input(d))) + len(repeat_requests(task_input(d))) for d in debates)
+    requests = sum(len(d["claims"]) for d in debates) + extra
     chars = sum(
         len(json.dumps(build_content(task_input(d), i))) + len(json.dumps({k: dataclasses.asdict(q) for k, q in questions.items()}))
         for d in debates
@@ -137,6 +143,71 @@ def axis_report(rows: list[dict]) -> None:
             print(f"  controversy is_contestable vs not {auc(of('controversy', flagged), of('controversy', unflagged)):.3f}  (n = {len(flagged)} / {len(unflagged)})")
 
 
+def top_picks(rows: list[dict], key: str, n: int, one_per_group: bool) -> list[dict]:
+    """The n best rows by `key`, best first; with `one_per_group`, a claim is skipped when
+    a better-ranked one of its repeat group is already picked."""
+    picked: list[dict] = []
+    groups: set = set()
+    for row in sorted(rows, key=lambda r: r[key], reverse=True):
+        if one_per_group and row["repeat_group"] in groups:
+            continue
+        groups.add(row["repeat_group"])
+        picked.append(row)
+        if len(picked) == n:
+            break
+    return picked
+
+
+def ranking_report(rows: list[dict], n: int = 6) -> None:
+    """The moment score against the highlight score as pickers of the reader's highlights.
+
+    Precision at n is the share of a debate's top n that the reader selected, averaged over
+    debates. With about four selections a debate the ceiling is below 1 however good the
+    ranking: it is printed. The first pick is good when it is a selected claim (loosely, a
+    selected claim or a runner-up). The opening round is the first two documents, one turn
+    each; the 21 October feedback found the highlight score's #1 there 68% of the time
+    against 41% of claims. The repeat groups are checked against the reader's `restatement`
+    label, the one repeat signal the set carries: it has no pairs, so this is recall of a
+    proxy and says nothing about false joins."""
+    if not rows or not all("moment_score" in r and r.get("repeat_group") is not None for r in rows):
+        return
+    debates: dict[int, list[dict]] = defaultdict(list)
+    for r in rows:
+        debates[r["debate"]].append(r)
+    opening = lambda r: bool(r["document_indices"]) and max(r["document_indices"]) <= 1  # noqa: E731
+    print(f"\nranking: the top {n} of each debate against the reader's selected claims")
+    ceiling = sum(min(n, sum(r["label"] == "selected" for r in g)) / n for g in debates.values()) / len(debates)
+    print(f"  ceiling for precision at {n} (the reader selected fewer than {n} in most debates): {ceiling:.3f}")
+    print(f"  claims in the opening round: {sum(map(opening, rows)) / len(rows):.0%}")
+    for name, key, grouped in (
+        ("highlight score", "score", False),
+        ("moment score", "moment_score", False),
+        ("moment score, one per repeat group", "moment_score", True),
+    ):
+        hits = loose = first = first_loose = first_opening = 0
+        for g in debates.values():
+            top = top_picks(g, key, n, grouped)
+            hits += sum(r["label"] == "selected" for r in top) / n
+            loose += sum(r["label"] in ("selected", "runner_up") for r in top) / n
+            first += top[0]["label"] == "selected"
+            first_loose += top[0]["label"] in ("selected", "runner_up")
+            first_opening += opening(top[0])
+        d = len(debates)
+        print(
+            f"  {name:<36} precision at {n} {hits / d:.3f}  (counting runner-ups {loose / d:.3f})  "
+            f"first pick selected {first / d:.0%} (or runner-up {first_loose / d:.0%})  first pick in opening round {first_opening / d:.0%}"
+        )
+    sizes: dict[tuple[int, int], int] = defaultdict(int)
+    for r in rows:
+        sizes[(r["debate"], r["repeat_group"])] += 1
+    repeated = [r for r in rows if sizes[(r["debate"], r["repeat_group"])] > 1]
+    restatements = [r for r in rows if r["label"] == "restatement"]
+    print(
+        f"  repeat groups: {len(sizes)} groups over {len(rows)} claims; {len(repeated)} claims share a group; "
+        f"{sum(r in repeated for r in restatements)} of {len(restatements)} claims the reader labelled restatement are in one"
+    )
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--debates", type=int, default=None, help="score only the first N debates")
@@ -173,7 +244,7 @@ async def main() -> int:
     for debate in debates:
         number = all_debates.index(debate) + 1
         inp = task_input(debate)
-        result = assemble_result(inp, await decide_claims(inp, decider, args.model), args.provider, args.model)
+        result = assemble_result(inp, await decide_debate(inp, decider, args.model), args.provider, args.model)
         scored = []
         for gold, claim in zip(debate["claims"], result.claims):
             row = {
@@ -181,6 +252,7 @@ async def main() -> int:
                 "label": gold["label"],
                 "gold_job": gold.get("job"),
                 "is_contestable": gold.get("is_contestable"),
+                "document_indices": gold["document_indices"],
                 **claim.model_dump(),
             }
             rows.append(row)
@@ -234,6 +306,7 @@ async def main() -> int:
         if group:
             print(f"  reader's {gold:<9} (n={len(group):>2}): mean score {sum(r['score'] for r in group) / len(group):.2f}")
     axis_report(scored)
+    ranking_report(scored)
 
     if args.out:
         args.out.write_text(json.dumps(rows, indent=1, ensure_ascii=False))

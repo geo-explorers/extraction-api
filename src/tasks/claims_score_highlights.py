@@ -1,8 +1,10 @@
 """claims.score_highlights — which of these extracted claims carry the discussion?
 
 A pure scorer: the discussion and its extracted claims in, a highlight score
-per claim out. One decision-model request per claim, each with the whole
-discussion in view. The model sits behind the DecisionModel interface
+per claim out, with a moment score (how much a viewer would want to watch it)
+and a repeat-group id (which claims make the same point). One decision-model
+request per claim, each with the whole discussion in view, plus three requests
+for the moment question and the repeat pairs, which read the claim list. The model sits behind the DecisionModel interface
 (src/decisions), chosen by CLAIMS_HIGHLIGHTS_PROVIDER, so it can be swapped
 without touching this task. DB-free: results return to the caller.
 
@@ -24,7 +26,7 @@ from src.config.overrides import llm
 from src.config.settings import settings
 from src.decisions import get_decision_model
 from src.infrastructure.logger import get_logger
-from src.pipeline.claims_score_highlights_core import assemble_result, decide_claims
+from src.pipeline.claims_score_highlights_core import assemble_result, decide_debate
 from src.tasks.base import TaskSpec
 
 logger = get_logger(__name__)
@@ -35,8 +37,8 @@ CLAIMS_SCORE_HIGHLIGHTS_MAX_PAYLOAD_BYTES = 1024 * 1024
 async def _handle(input: ClaimsScoreHighlightsInput, ctx: Context) -> ClaimsScoreHighlightsResult:
     decider = get_decision_model(settings.claims_highlights_provider)
     model = llm.get("claims_highlights_model")
-    answers = await decide_claims(input, decider, model)
-    result = assemble_result(input, answers, decider.provider, model)
+    decisions = await decide_debate(input, decider, model)
+    result = assemble_result(input, decisions, decider.provider, model)
     logger.info(f"claims.score_highlights: {result.claims_scored} claims scored ({decider.provider}/{model})")
     return result
 

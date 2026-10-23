@@ -10,6 +10,10 @@ Scoring is deliberately separate from claims.extract: a claim's role can only
 be judged with the whole discussion in view, and claims can be re-scored
 without being re-extracted. The task never drops or reorders claims; what to
 do with a score (a threshold, the top N) is the consumer's decision.
+
+Beside the highlight score, which says how much a claim carries the discussion, each
+claim gets a moment score, which says how much a viewer would want to watch it, and a
+repeat-group id, which says which claims make the same point.
 """
 
 from typing import Dict, List, Literal, Optional
@@ -85,7 +89,21 @@ class ScoredClaim(BaseModel):
         description="Every decision asked, 0–1. `essential` is the probability of yes, which is the "
         "score; `relevance`, `quality` and `controversy` are positions on a four-level scale "
         "(0 = surely the lowest level, 1 = surely the highest), reported beside the score and not "
-        "folded into it.",
+        "folded into it. `moment` is the claim's mean probability over the three shuffled "
+        "which-would-a-viewer-most-want-to-watch questions; it sums to one over the debate's claims, "
+        "so read it through `moment_score`.",
+    )
+    moment_score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="How much a viewer would want to watch the claim, comparable within this debate "
+        "and not across debates: 0.6 x the claim's percentile on `moment` + 0.4 x its percentile on "
+        "`controversy`, both among this debate's claims. Take the top N by it, one claim per "
+        "`repeat_group`.",
+    )
+    repeat_group: int = Field(
+        description="Claims that make the same point, whichever debater said them, share a group "
+        "id: the lowest `index` among them. A claim with no repeat is alone in its group.",
     )
 
 

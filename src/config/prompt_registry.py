@@ -137,11 +137,16 @@ _register("claims_link_entities", _link.CLAIMS_LINK_ENTITIES_PROMPT, formatted=T
 _register("claims_judge_equivalence.rubric", _judge.CLAIMS_JUDGE_EQUIVALENCE_RUBRIC, formatted=False, module=_judge)
 
 # claims.score_highlights, under the media type: the yes/no score decision (its
-# instructions and its yes/no criteria), then each axis scale (its instructions
+# instructions and its yes/no criteria), the per-debate moment choice and repeat
+# yes/no, then each axis scale (its instructions
 # and one text per level, keyed by the level name).
 _register("claims_score_highlights.debate.essential", _highlights.DEBATE_ESSENTIAL_INSTRUCTIONS, formatted=False, module=_highlights)
 _register("claims_score_highlights.debate.essential.yes", _highlights.DEBATE_ESSENTIAL_YES, formatted=False, module=_highlights)
 _register("claims_score_highlights.debate.essential.no", _highlights.DEBATE_ESSENTIAL_NO, formatted=False, module=_highlights)
+_register("claims_score_highlights.debate.moment", _highlights.DEBATE_MOMENT_INSTRUCTIONS, formatted=False, module=_highlights)
+_register("claims_score_highlights.debate.repeat", _highlights.DEBATE_REPEAT_INSTRUCTIONS, formatted=False, module=_highlights)
+_register("claims_score_highlights.debate.repeat.yes", _highlights.DEBATE_REPEAT_YES, formatted=False, module=_highlights)
+_register("claims_score_highlights.debate.repeat.no", _highlights.DEBATE_REPEAT_NO, formatted=False, module=_highlights)
 for _axis, (_instructions, _levels) in _highlights.DEBATE_AXES.items():
     _register(f"claims_score_highlights.debate.{_axis}", _instructions, formatted=False, module=_highlights)
     for _level, _text in _levels.items():
