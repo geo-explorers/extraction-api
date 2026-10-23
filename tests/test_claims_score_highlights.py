@@ -11,15 +11,17 @@ from src.api.schemas.claims_score_highlights_schema import (
     HighlightDocument,
 )
 from src.config.overrides import activate
-from src.decisions import Choice, DecisionError, Scale, ScaleAnswer, YesNo, YesNoAnswer, get_decision_model
+from src.decisions import Choice, ChoiceAnswer, DecisionError, Scale, ScaleAnswer, YesNo, YesNoAnswer, get_decision_model
 from src.decisions import perplexity as pplx
 from src.pipeline.claims_score_highlights_core import (
     AXES,
     AXIS_LEVELS,
     DECISIONS,
+    DebateDecisions,
     assemble_result,
     build_content,
     build_questions,
+    claim_decisions,
     highlight_score,
 )
 
@@ -150,33 +152,58 @@ def test_score_is_the_essential_probability():
     assert highlight_score({"essential": 0.5, "other": 1.0}) == pytest.approx(0.5)
 
 
-def test_score_claim_rejects_an_answer_set_missing_or_mistyping_a_decision():
-    from src.pipeline.claims_score_highlights_core import score_claim
-
+def test_claim_decisions_reject_an_answer_set_missing_or_mistyping_a_decision():
     with pytest.raises(DecisionError, match="do not match"):
-        score_claim(0, HighlightClaim(text="x"), {"other": YesNoAnswer(1.0)})
+        claim_decisions({"other": YesNoAnswer(1.0)})
     without_an_axis = {name: answer for name, answer in _answers().items() if name != "quality"}
     with pytest.raises(DecisionError, match="do not match"):
-        score_claim(0, HighlightClaim(text="x"), without_an_axis)
+        claim_decisions(without_an_axis)
     # An axis answered as a yes/no is the wrong shape, however plausible the number.
     with pytest.raises(DecisionError, match="do not match"):
-        score_claim(0, HighlightClaim(text="x"), {**_answers(), "quality": YesNoAnswer(0.9)})
+        claim_decisions({**_answers(), "quality": YesNoAnswer(0.9)})
+
+
+def _decisions(answers, moments=None, groups=None) -> DebateDecisions:
+    n = len(answers)
+    return DebateDecisions(list(answers), moments or [1 / n] * n, groups or list(range(n)))
 
 
 def test_assemble_keeps_every_claim_in_order_and_refuses_an_incomplete_set():
     inp = _input()
     answers = [_answers(essential=0.62, relevance=0.75, controversy=0.5), _answers(essential=1.0), _answers()]
-    out = assemble_result(inp, answers, "fake", "fake-model")
+    out = assemble_result(inp, _decisions(answers, [0.5, 0.3, 0.2], [0, 1, 0]), "fake", "fake-model")
     assert [c.index for c in out.claims] == [0, 1, 2]
     assert out.claims[0].id == "c0" and out.claims[0].score == pytest.approx(0.62)
-    # The axes ride beside the score, in decision order, and never move it.
-    assert list(out.claims[0].decisions) == list(DECISIONS)
-    assert out.claims[0].decisions == {"essential": 0.62, "relevance": 0.75, "quality": 0.0, "controversy": 0.5}
+    # The axes and the moment ride beside the score, in decision order, and never move it.
+    assert list(out.claims[0].decisions) == [*DECISIONS, "moment"]
+    assert out.claims[0].decisions == {
+        "essential": 0.62, "relevance": 0.75, "quality": 0.0, "controversy": 0.5, "moment": 0.5,
+    }
     assert out.claims[1].score == 1.0 and out.claims[2].score == 0.0
+    assert [c.repeat_group for c in out.claims] == [0, 1, 0]
     assert out.claims_scored == 3 and out.provider == "fake" and out.model_used == "fake-model"
     # Fewer answer sets than claims is a broken contract, not two unscored claims.
     with pytest.raises(DecisionError, match="answer sets"):
-        assemble_result(inp, [_answers()], "fake", "fake-model")
+        assemble_result(inp, _decisions([_answers()]), "fake", "fake-model")
+
+
+def test_moment_score_is_the_weighted_percentiles_within_the_debate():
+    # Claim 0 tops the moment question, claim 2 tops controversy, claim 1 is middle on both.
+    answers = [_answers(controversy=0.2), _answers(controversy=0.5), _answers(controversy=0.9)]
+    out = assemble_result(_input(), _decisions(answers, [0.6, 0.3, 0.1]), "fake", "m")
+    assert [c.moment_score for c in out.claims] == pytest.approx([0.6 * 1 + 0.4 * 0, 0.5, 0.6 * 0 + 0.4 * 1])
+    # Percentiles, not raw values: a moment probability of 0.31 against 0.30 is the same
+    # step as 0.9 against 0.1.
+    close = assemble_result(_input(), _decisions(answers, [0.31, 0.30, 0.29]), "fake", "m")
+    assert [c.moment_score for c in close.claims] == pytest.approx([0.6, 0.5, 0.4])
+
+
+def test_percentiles_share_ties_and_a_lone_claim_sits_in_the_middle():
+    from src.pipeline.claims_score_highlights_core import percentiles
+
+    assert percentiles([0.1, 0.9, 0.5]) == [0.0, 1.0, 0.5]
+    assert percentiles([0.4, 0.4, 0.9]) == [0.25, 0.25, 1.0]
+    assert percentiles([0.7]) == [0.5]
 
 
 # ── Perplexity wire format ───────────────────────────────────────────────────
@@ -388,20 +415,47 @@ def test_provider_factory_needs_a_known_provider_and_a_key(monkeypatch):
 # ── The task ─────────────────────────────────────────────────────────────────
 
 
+def _varied(claim_index: int):
+    """Answers that differ between claims and between axes, as a model that read the content gives."""
+    return _answers(
+        essential=0.2 + 0.1 * (claim_index % 8),
+        relevance=0.9 - 0.1 * (claim_index % 8),
+        quality=0.35,
+        controversy=0.1 + 0.1 * (claim_index % 8),
+    )
+
+
 class _FakeDecider:
+    """Answers all three kinds of request: a claim's questions (varied by claim), the moment
+    choice (the lower the claim number, the likelier), and a repeat pair (yes for `same`)."""
+
     provider = "fake"
 
-    def __init__(self, fail_on=(), hang_on=(), retryable=False, delay=0.0):
+    def __init__(self, fail_on=(), hang_on=(), retryable=False, delay=0.0, same=(), answers=None):
         self.fail_on = set(fail_on)
         self.hang_on = set(hang_on)
         self.retryable = retryable
         self.delay = delay
-        self.seen = []
+        self.same = set(same)
+        self.answers = answers  # replaces the per-claim answers: claim index -> answer set
+        self.seen = []  # (kind, detail, model) per request
+        self.contents = []
         self.in_flight = 0
         self.max_in_flight = 0
 
     async def decide(self, content, questions, *, model):
-        self.seen.append((content["claim_under_test"], list(questions), model))
+        self.contents.append((content, questions))
+        names = list(questions)
+        if names == ["moment"]:
+            self.seen.append(("moment", list(questions["moment"].options), model))
+            options = questions["moment"].options
+            weights = {name: 1.0 / int(name) for name in options}
+            total = sum(weights.values())
+            return {"moment": ChoiceAnswer(choice=min(options, key=int), probabilities={n: w / total for n, w in weights.items()})}
+        if "essential" not in names:
+            self.seen.append(("repeat", names, model))
+            return {name: YesNoAnswer(0.9 if tuple(map(int, name.split("_"))) in self.same else 0.1) for name in names}
+        self.seen.append(("claim", content["claim_under_test"], model))
         claim_index = int(content["claim_under_test"].split(",")[0].split()[1]) - 1
         self.in_flight += 1
         self.max_in_flight = max(self.max_in_flight, self.in_flight)
@@ -412,7 +466,7 @@ class _FakeDecider:
                 await asyncio.sleep(self.delay)
             if claim_index in self.fail_on:
                 raise DecisionError(f"claim {claim_index + 1} failed", retryable=self.retryable)
-            return _answers(essential=0.5)
+            return self.answers[claim_index] if self.answers else _varied(claim_index)
         finally:
             self.in_flight -= 1
 
@@ -425,11 +479,19 @@ async def test_task_scores_each_claim_with_the_configured_model(monkeypatch):
     monkeypatch.setattr(task, "get_decision_model", lambda provider: fake)
     with activate(llm_overrides={"claims_highlights_model": "other-model"}):
         result = await task._handle(_input(), None)
-    assert [c.score for c in result.claims] == [0.5, 0.5, 0.5]
+    assert [c.score for c in result.claims] == pytest.approx([0.2, 0.3, 0.4])
     assert result.claims_scored == 3 and result.provider == "fake" and result.model_used == "other-model"
-    assert len(fake.seen) == 3
+    kinds = [kind for kind, _, _ in fake.seen]
+    # One request per claim, three moment rounds, and the three pairs of three claims in one request.
+    assert sorted(kinds) == ["claim"] * 3 + ["moment"] * 3 + ["repeat"]
+    assert all(m == "other-model" for _, _, m in fake.seen)
     # Every claim is asked the score decision and the three axes in one request.
-    assert all(q == list(DECISIONS) and m == "other-model" for _, q, m in fake.seen)
+    assert [list(questions) for content, questions in fake.contents if "claim_under_test" in content] == [list(DECISIONS)] * 3
+    # The first claim is the likeliest moment in every round, so it ranks first; no repeats here.
+    assert [c.repeat_group for c in result.claims] == [0, 1, 2]
+    assert result.claims[0].decisions["moment"] > result.claims[1].decisions["moment"] > result.claims[2].decisions["moment"]
+    assert result.claims[0].moment_score == pytest.approx(0.6 * 1 + 0.4 * 0)  # top moment, lowest controversy
+    assert result.claims[2].moment_score == pytest.approx(0.6 * 0 + 0.4 * 1)
 
 
 @pytest.mark.asyncio
@@ -462,6 +524,148 @@ async def test_in_flight_requests_are_bounded_and_each_is_counted_by_the_spend_g
     assert fake.max_in_flight <= core.DECISION_CONCURRENCY
     assert fake.max_in_flight > 1, "the bound is a bound, not a serialisation"
     assert counted == ["fake"] * 20
+    # A whole run adds the moment rounds and the 190 pairs of 20 claims, 120 to a request.
+    counted.clear()
+    decided = await core.decide_debate(many, fake, "m")
+    assert len(decided.claims) == len(decided.moments) == len(decided.groups) == 20
+    assert counted == ["fake"] * (20 + core.MOMENT_ROUNDS + 2)
+
+
+# ── Moment, repeat groups and the glitch guard ───────────────────────────────
+
+
+def test_moment_requests_show_the_claims_in_a_different_seeded_order_each_round():
+    from src.pipeline.claims_score_highlights_core import MOMENT_ROUNDS, moment_requests, shuffled_order
+
+    many = _input(claims=[HighlightClaim(text=f"Claim {i}", document_indices=[i % 2]) for i in range(12)])
+    requests = moment_requests(many)
+    assert len(requests) == MOMENT_ROUNDS == 3
+    orders = [list(questions["moment"].options) for _, _, questions in requests]
+    # Options are named by the claim's number in the input, whatever the order shown.
+    assert all(sorted(order, key=int) == [str(i + 1) for i in range(12)] for order in orders)
+    assert len({tuple(order) for order in orders}) == 3, "each round shuffles differently"
+    assert orders == [list(map(str, (i + 1 for i in shuffled_order(many, r)))) for r in range(3)]
+    # Seeded: the same debate is shuffled the same way again.
+    assert [list(q["moment"].options) for _, _, q in moment_requests(many)] == orders
+    _, content, questions = requests[0]
+    assert "transcript" in content and "claim_under_test" not in content
+    assert questions["moment"].options["1"] == "(Ann) Claim 0"
+    assert "most want to watch" in questions["moment"].instructions
+
+
+def test_moment_rounds_read_probabilities_back_by_claim_number():
+    from src.pipeline.claims_score_highlights_core import moment_rounds
+
+    inp = _input()
+    answer = {"moment": ChoiceAnswer(choice="3", probabilities={"3": 0.5, "1": 0.3, "2": 0.2})}
+    assert moment_rounds(inp, [answer]) == [[0.3, 0.2, 0.5]]
+    with pytest.raises(DecisionError, match="no probability for claim"):
+        moment_rounds(inp, [{"moment": ChoiceAnswer(choice="1", probabilities={"1": 1.0})}])
+    with pytest.raises(DecisionError, match="moment question"):
+        moment_rounds(inp, [{"moment": YesNoAnswer(0.5)}])
+
+
+def test_repeat_requests_ask_every_pair_without_the_transcript_in_batches_the_provider_accepts():
+    from src.pipeline.claims_score_highlights_core import PAIRS_PER_REQUEST, repeat_requests
+
+    requests = repeat_requests(_input())
+    assert len(requests) == 1
+    _, content, questions = requests[0]
+    assert list(questions) == ["0_1", "0_2", "1_2"]
+    assert "transcript" not in content and "extracted_claims" in content
+    assert "Claim A: A coffee date saves time" in questions["0_1"].instructions
+    assert "Claim B: Nobody said this" in questions["0_2"].instructions
+    assert questions["0_1"].yes and questions["0_1"].no
+    many = _input(claims=[HighlightClaim(text=f"Claim {i}") for i in range(20)])
+    batches = repeat_requests(many)
+    assert [len(q) for _, _, q in batches] == [PAIRS_PER_REQUEST, 190 - PAIRS_PER_REQUEST]
+    assert PAIRS_PER_REQUEST <= 128, "the provider takes at most 128 questions a request"
+
+
+def _pair_answers(count, yes):
+    return [{f"{i}_{j}": YesNoAnswer(0.9 if (i, j) in yes else 0.2) for i in range(count) for j in range(i + 1, count)}]
+
+
+def test_repeat_groups_join_pairs_and_chains_under_the_lowest_index():
+    from src.pipeline.claims_score_highlights_core import repeat_groups
+
+    assert repeat_groups(5, _pair_answers(5, set())) == [0, 1, 2, 3, 4]
+    # 1~3 and 3~4 make one group of three though 1 and 4 were never paired as yes; 0 and 2 stay alone.
+    assert repeat_groups(5, _pair_answers(5, {(1, 3), (3, 4)})) == [0, 1, 2, 1, 1]
+    # The bar is a probability of yes of at least one half.
+    at_bar = [{"0_1": YesNoAnswer(0.5)}]
+    assert repeat_groups(2, at_bar) == [0, 0]
+    assert repeat_groups(1, []) == [0]
+    with pytest.raises(DecisionError, match="every pair"):
+        repeat_groups(3, [{"0_1": YesNoAnswer(0.9)}])
+
+
+def _glitch_inputs():
+    """A debate of three claims whose answers differ between claims and axes."""
+    return [_varied(i) for i in range(3)], [[0.6, 0.3, 0.1]] * 3
+
+
+def test_a_healthy_run_passes_the_glitch_check():
+    from src.pipeline.claims_score_highlights_core import check_for_glitch
+
+    check_for_glitch(*_glitch_inputs())
+    # A saturated claim is not a glitch while its axes still differ.
+    saturated = {"essential": YesNoAnswer(1.0), "relevance": _scale(1.0), "quality": _scale(0.0), "controversy": _scale(1.0)}
+    check_for_glitch([saturated, *_glitch_inputs()[0][1:]], [[0.6, 0.3, 0.1]])
+
+
+def test_one_distribution_for_every_axis_question_fails_the_run_and_can_be_retried():
+    from src.pipeline.claims_score_highlights_core import check_for_glitch
+
+    claims, rounds = _glitch_inputs()
+    same = _scale(0.62)
+    stuck = {"essential": YesNoAnswer(0.4), "relevance": same, "quality": same, "controversy": same}
+    with pytest.raises(DecisionError, match="claim 1 got one identical distribution") as failed:
+        check_for_glitch([claims[0], stuck, claims[2]], rounds)
+    assert failed.value.retryable
+    # Within a millionth is the same: the provider's own rounding must not hide it.
+    nearly = {**stuck, "quality": ScaleAnswer(0.62, [0.38 + 5e-7, 0.0, 0.0, 0.62 - 5e-7])}
+    with pytest.raises(DecisionError, match="identical distribution"):
+        check_for_glitch([claims[0], nearly, claims[2]], rounds)
+    # A hundredth apart is a different answer.
+    apart = {**stuck, "quality": ScaleAnswer(0.63, [0.37, 0.0, 0.0, 0.63])}
+    check_for_glitch([claims[0], apart, claims[2]], rounds)
+
+
+def test_the_same_answers_for_every_claim_or_a_flat_moment_round_fail_the_run():
+    from src.pipeline.claims_score_highlights_core import check_for_glitch
+
+    claims, rounds = _glitch_inputs()
+    with pytest.raises(DecisionError, match="every claim got the same answers") as failed:
+        check_for_glitch([_varied(1)] * 3, rounds)
+    assert failed.value.retryable
+    # Two claims cannot show it: a pair of similar claims may honestly score alike.
+    check_for_glitch([_varied(1)] * 2, [[0.5, 0.5]])
+    with pytest.raises(DecisionError, match="moment round 1 gave every claim the same probability"):
+        check_for_glitch(claims, [[0.6, 0.3, 0.1], [1 / 3] * 3])
+
+
+@pytest.mark.asyncio
+async def test_a_glitched_run_fails_instead_of_returning_scores(monkeypatch):
+    from src.tasks import claims_score_highlights as task
+
+    same = _scale(0.5)
+    stuck = {"essential": YesNoAnswer(0.4), "relevance": same, "quality": same, "controversy": same}
+    fake = _FakeDecider(answers={0: stuck, 1: _varied(1), 2: _varied(2)})
+    monkeypatch.setattr(task, "get_decision_model", lambda provider: fake)
+    with pytest.raises(DecisionError, match="provider glitch") as failed:
+        await task._handle(_input(), None)
+    assert failed.value.retryable
+
+
+@pytest.mark.asyncio
+async def test_repeats_share_a_group_id_whichever_debater_said_them(monkeypatch):
+    from src.tasks import claims_score_highlights as task
+
+    fake = _FakeDecider(same={(0, 1)})  # Ann's claim and Bob's say the same thing
+    monkeypatch.setattr(task, "get_decision_model", lambda provider: fake)
+    result = await task._handle(_input(), None)
+    assert [c.repeat_group for c in result.claims] == [0, 0, 2]
 
 
 def test_prompt_overrides_for_the_rubric_are_accepted_at_enqueue():
@@ -480,9 +684,10 @@ def test_every_media_type_has_a_registered_rubric_and_nothing_else_is_registered
     media_types = set(get_args(MediaType))
     for media_type in media_types:
         assert list(build_questions(media_type)) == list(DECISIONS), media_type
-        # The keys under a media type are exactly the score decision with its two criteria and
-        # each axis with one text per level — nothing stale, nothing missing.
+        # The keys under a media type are exactly the score decision with its two criteria, the
+        # moment choice, the repeat yes/no and each axis with one text per level — nothing stale, nothing missing.
         expected = {f"{media_type}.essential", f"{media_type}.essential.yes", f"{media_type}.essential.no"}
+        expected |= {f"{media_type}.moment", f"{media_type}.repeat", f"{media_type}.repeat.yes", f"{media_type}.repeat.no"}
         for axis, levels in AXIS_LEVELS.items():
             expected.add(f"{media_type}.{axis}")
             expected.update(f"{media_type}.{axis}.{level}" for level in levels)

@@ -1,11 +1,17 @@
 # `claims.score_highlights`
 
 A discussion and the claims extracted from it in; a **highlight score** per claim out, with three
-**axis scores** beside it. The highlight score says how much a claim carries the discussion, so a
+**axis scores**, a **moment score** and a **repeat-group id** beside it. The highlight score says how much a claim carries the discussion, so a
 consumer can show the few claims that matter instead of all of them. The axes — relevance, quality,
 controversy — describe the claim on three planes the highlight score does not: how directly it
 bears on the main claim, whether it stands as a clean statement, and how likely an audience is to
 split on it.
+
+The **moment score** says how much a viewer would want to watch the claim, comparable within its
+debate; the **repeat group** says which claims make the same point (see below). A consumer picking
+clips takes the top N by moment score, one claim per repeat group. The highlight score is
+unchanged and still answers its own question, whether the list would lose something without the
+claim.
 
 The task is a pure scorer. It does not extract, drop, or reorder claims, and it does not pick a
 cut-off: what to do with a score (a threshold, the top N) is the consumer's decision. A consumer
@@ -54,7 +60,9 @@ Poll `GET /tasks/{id}`. The result:
     {
       "index": 0, "id": null, "text": "The vast majority of undocumented immigrants…",
       "score": 0.29,
-      "decisions": {"essential": 0.29, "relevance": 0.94, "quality": 0.97, "controversy": 0.88}
+      "decisions": {"essential": 0.29, "relevance": 0.94, "quality": 0.97, "controversy": 0.88, "moment": 0.07},
+      "moment_score": 0.81,
+      "repeat_group": 0
     }
   ],
   "claims_scored": 2,
@@ -63,10 +71,12 @@ Poll `GET /tasks/{id}`. The result:
 }
 ```
 
-(The numbers are from the 2026-10-08 evaluation run, debate 12, claim 1.)
+(The first four decisions are from the 2026-10-08 evaluation run, debate 12, claim 1; `moment`,
+`moment_score` and `repeat_group` are illustrative, not measured.)
 
 `score` is the highlight score; `decisions` holds every decision asked — `essential`, which is the
-score, and the three axes described below — each 0 to 1.
+score, the three axes described below, and `moment`, the claim's mean probability over the moment
+rounds — each 0 to 1. `moment_score` and `repeat_group` are described under "Moments and repeats".
 
 `claims` carries every input claim in input order, each with a score. **A run scores every claim
 or fails**: the first claim whose request fails stops the others and fails the run, so Hatchet
@@ -133,6 +143,61 @@ list-like claim and the one that sharpened what the speaker said. Because the mo
 scores can change (see the evaluation), use them to rank claims within a debate rather than
 against a fixed threshold.
 
+## Moments and repeats
+
+Two questions are asked once per debate rather than once per claim, because they compare claims
+with each other.
+
+**Moment.** One `choice` question over the whole claim list: which claim would a viewer most want to
+watch? The options are the claims (named by their number in the input, shown with their speaker),
+the model reads the transcript, and the probabilities of one answer sum to one over the debate. It
+is asked `MOMENT_ROUNDS = 3` times with the list shuffled differently each time and the
+probabilities are averaged, so one claim's probability does not depend on where it sat in the list.
+The shuffle is seeded by the claim texts and the round, so scoring the same debate again asks the
+same questions. The averaged probability is reported as `decisions.moment`, and is only meaningful
+against the other claims of its debate. The ranking score is
+
+> `moment_score` = 0.6 × the claim's percentile on `moment` + 0.4 × its percentile on `controversy`
+
+with both percentiles taken among the debate's claims (0 for the lowest, 1 for the highest, ties
+sharing the middle of their places), so the score runs 0 to 1 and the top N is a plain sort. The
+0.6 is the weight the 21 October proposal found in 30 of 30 leave-one-debate-out folds; it is
+`MOMENT_WEIGHT`, with `CONTROVERSY_WEIGHT` for the rest. Balancing debaters is the picker's job, not
+the score's.
+
+**Repeat groups.** One yes/no question per pair of claims: do they make the same point, whichever
+debater said them? The pair request carries the title, the claim list and the two claims' texts but
+not the transcript, so a pair costs a few hundred tokens, not a transcript. At most 120 pairs go in
+a request (the provider takes 128 questions). Claims joined by a yes (probability at least
+`REPEAT_THRESHOLD = 0.5`), directly or through others, share a `repeat_group`: the lowest `index`
+among them. A claim with no repeat is alone in its group, so every claim has one. This is a step of
+the scoring run, after extraction and apart from the per-claim request: it was kept out of the
+per-claim request because each of that request's questions is paid for with the whole transcript, and
+a claim's pairs would have been up to 99 more of them.
+
+The threshold is untuned and the first-run recall is unmeasured: the evaluation set has no repeat
+labels (the proposal measured 0.55 recall for a pairwise check).
+
+**Cost.** A run adds `MOMENT_ROUNDS` requests carrying the transcript and `ceil(n(n-1)/2 / 120)`
+requests without it (1 for up to 16 claims, 4 for 30), to the one request per claim. For the 30
+evaluation debates that is 444 + 90 + 42 requests, and about a fifth more input tokens than before,
+mostly the moment rounds' transcripts.
+
+### A run that returns the same answer to everything fails
+
+On 12 October three live debates got one identical distribution back for all three score questions.
+`check_for_glitch` fails the run, with a retryable error so the engine tries again, and nothing is
+returned or published, when:
+
+- a claim's three axis scales have the same probability per level, within 1e-6 (three differently
+  worded rubrics do not agree to six decimals);
+- in a debate of three or more claims, every claim got the same answers to every question (the
+  answers do not depend on the claim);
+- a moment round gave every claim the same probability.
+
+One glitched claim fails the whole run. A consumer stores what it gets and does not ask again, so it
+is better to run again than to keep a distribution that carries no information.
+
 ## The decision model
 
 The scorer talks to a **decision model**: a model that answers named questions about content with
@@ -166,7 +231,8 @@ The first provider is Perplexity's [Decisions API](https://docs.perplexity.ai/do
 | `PERPLEXITY_API_KEY` | required for the `perplexity` provider |
 | `DECISIONS_GLOBAL_RATE_PER_MIN` | task runs per minute across all workers (default `20`) |
 
-Cost: one request per claim, each carrying the whole discussion. Three things keep requests under
+Cost: one request per claim, each carrying the whole discussion, plus the moment and repeat
+requests described above. Three things keep requests under
 Perplexity's 10 per second per organisation:
 
 - a **per-worker bound of 6 requests in flight** across all runs the worker is executing (a
@@ -185,6 +251,10 @@ under the provider's name; a tripped guard fails the run.
 
 `tests/fixtures/claim_highlights_eval.json` holds the 30 debates with a label per claim: `selected`
 (with its job) or the main reason it was left out. The labels are one reader's and **preliminary**.
+The script's closing "ranking" block compares the highlight score and the moment score (with and
+without one claim per repeat group) as pickers: precision at 6, the first pick, how often the first
+pick comes from the opening round. It has not been run against the provider yet (no key was
+available when the moment score was written), so the results below are the highlight score's alone.
 
 ```sh
 uv run python scripts/eval_claim_highlights.py --dry-run           # print the first request; sends nothing

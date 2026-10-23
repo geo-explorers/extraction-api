@@ -2,6 +2,9 @@
 
 Live:    PERPLEXITY_API_KEY=… uv run python scripts/eval_claim_highlights.py [--debates N] [--out results.json]
 No key:  uv run python scripts/eval_claim_highlights.py --dry-run   (prints the first request, sends nothing)
+Remote:  EXTRACTION_API_KEY=… uv run python scripts/eval_claim_highlights.py --remote https://<extraction-api>
+         (runs each debate as a claims.score_highlights task on a deployed service, whose own
+         provider key is used; needs only that service's API key)
 Table:   uv run python scripts/eval_claim_highlights.py --table 12 --from results.json
          (one debate as a Markdown table: every claim verbatim, the score, the reader's label)
 
@@ -20,13 +23,19 @@ import asyncio
 import dataclasses
 import json
 import sys
+import os
 import time
 from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.api.schemas.claims_score_highlights_schema import ClaimsScoreHighlightsInput  # noqa: E402
+import requests  # noqa: E402
+
+from src.api.schemas.claims_score_highlights_schema import (  # noqa: E402
+    ClaimsScoreHighlightsInput,
+    ClaimsScoreHighlightsResult,
+)
 from src.config.settings import settings  # noqa: E402
 from src.decisions import get_decision_model, provider_names  # noqa: E402
 from src.pipeline.claims_score_highlights_core import (  # noqa: E402
@@ -36,7 +45,9 @@ from src.pipeline.claims_score_highlights_core import (  # noqa: E402
     attribution,
     build_content,
     build_questions,
-    decide_claims,
+    decide_debate,
+    moment_requests,
+    repeat_requests,
 )
 
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "claim_highlights_eval.json"
@@ -52,6 +63,39 @@ def task_input(debate: dict) -> ClaimsScoreHighlightsInput:
     )
 
 
+REMOTE_TIMEOUT_S = 900
+REMOTE_POLL_S = 3
+REMOTE_FAILED = {"FAILED", "CANCELLED", "TIMED_OUT"}
+
+
+def score_remotely(inp: ClaimsScoreHighlightsInput, base_url: str, api_key: str) -> ClaimsScoreHighlightsResult:
+    """One claims.score_highlights task on a deployed service, enqueued and polled the way
+    geo-chat's client does: done on `COMPLETED`, whose `result` is the task's result."""
+    headers = {"X-API-Key": api_key}
+    enqueue = requests.post(
+        f"{base_url}/tasks",
+        json={"type": "claims.score_highlights", "payload": inp.model_dump(mode="json")},
+        headers=headers,
+        timeout=60,
+    )
+    enqueue.raise_for_status()
+    task_id = enqueue.json()["id"]
+    deadline = time.time() + REMOTE_TIMEOUT_S
+    while time.time() < deadline:
+        time.sleep(REMOTE_POLL_S)
+        response = requests.get(f"{base_url}/tasks/{task_id}", headers=headers, timeout=60)
+        if response.status_code >= 500:
+            continue
+        response.raise_for_status()
+        status = response.json()
+        state = (status.get("status") or "").upper()
+        if state == "COMPLETED":
+            return ClaimsScoreHighlightsResult.model_validate(status["result"])
+        if state in REMOTE_FAILED:
+            raise RuntimeError(f"task {task_id} {state}: {status.get('error')}")
+    raise TimeoutError(f"task {task_id} still running after {REMOTE_TIMEOUT_S}s")
+
+
 def auc(positives: list[float], negatives: list[float]) -> float:
     """Probability that a selected claim outscores an unselected one (ties count half)."""
     if not positives or not negatives:
@@ -64,7 +108,11 @@ def dry_run(debates: list[dict]) -> int:
     first = task_input(debates[0])
     content, questions = build_content(first, 0), build_questions("debate")
     print(json.dumps({"content": content, "questions": {k: dataclasses.asdict(q) for k, q in questions.items()}}, indent=1))
-    requests = sum(len(d["claims"]) for d in debates)
+    first_moment = moment_requests(first)[0]
+    print("\nfirst moment request:")
+    print(json.dumps({"content": first_moment[1], "questions": {k: dataclasses.asdict(q) for k, q in first_moment[2].items()}}, indent=1))
+    extra = sum(len(moment_requests(task_input(d))) + len(repeat_requests(task_input(d))) for d in debates)
+    requests = sum(len(d["claims"]) for d in debates) + extra
     chars = sum(
         len(json.dumps(build_content(task_input(d), i))) + len(json.dumps({k: dataclasses.asdict(q) for k, q in questions.items()}))
         for d in debates
@@ -137,12 +185,78 @@ def axis_report(rows: list[dict]) -> None:
             print(f"  controversy is_contestable vs not {auc(of('controversy', flagged), of('controversy', unflagged)):.3f}  (n = {len(flagged)} / {len(unflagged)})")
 
 
+def top_picks(rows: list[dict], key: str, n: int, one_per_group: bool) -> list[dict]:
+    """The n best rows by `key`, best first; with `one_per_group`, a claim is skipped when
+    a better-ranked one of its repeat group is already picked."""
+    picked: list[dict] = []
+    groups: set = set()
+    for row in sorted(rows, key=lambda r: r[key], reverse=True):
+        if one_per_group and row["repeat_group"] in groups:
+            continue
+        groups.add(row["repeat_group"])
+        picked.append(row)
+        if len(picked) == n:
+            break
+    return picked
+
+
+def ranking_report(rows: list[dict], n: int = 6) -> None:
+    """The moment score against the highlight score as pickers of the reader's highlights.
+
+    Precision at n is the share of a debate's top n that the reader selected, averaged over
+    debates. With about four selections a debate the ceiling is below 1 however good the
+    ranking: it is printed. The first pick is good when it is a selected claim (loosely, a
+    selected claim or a runner-up). The opening round is the first two documents, one turn
+    each; the 21 October feedback found the highlight score's #1 there 68% of the time
+    against 41% of claims. The repeat groups are checked against the reader's `restatement`
+    label, the one repeat signal the set carries: it has no pairs, so this is recall of a
+    proxy and says nothing about false joins."""
+    if not rows or not all("moment_score" in r and r.get("repeat_group") is not None for r in rows):
+        return
+    debates: dict[int, list[dict]] = defaultdict(list)
+    for r in rows:
+        debates[r["debate"]].append(r)
+    opening = lambda r: bool(r["document_indices"]) and max(r["document_indices"]) <= 1  # noqa: E731
+    print(f"\nranking: the top {n} of each debate against the reader's selected claims")
+    ceiling = sum(min(n, sum(r["label"] == "selected" for r in g)) / n for g in debates.values()) / len(debates)
+    print(f"  ceiling for precision at {n} (the reader selected fewer than {n} in most debates): {ceiling:.3f}")
+    print(f"  claims in the opening round: {sum(map(opening, rows)) / len(rows):.0%}")
+    for name, key, grouped in (
+        ("highlight score", "score", False),
+        ("moment score", "moment_score", False),
+        ("moment score, one per repeat group", "moment_score", True),
+    ):
+        hits = loose = first = first_loose = first_opening = 0
+        for g in debates.values():
+            top = top_picks(g, key, n, grouped)
+            hits += sum(r["label"] == "selected" for r in top) / n
+            loose += sum(r["label"] in ("selected", "runner_up") for r in top) / n
+            first += top[0]["label"] == "selected"
+            first_loose += top[0]["label"] in ("selected", "runner_up")
+            first_opening += opening(top[0])
+        d = len(debates)
+        print(
+            f"  {name:<36} precision at {n} {hits / d:.3f}  (counting runner-ups {loose / d:.3f})  "
+            f"first pick selected {first / d:.0%} (or runner-up {first_loose / d:.0%})  first pick in opening round {first_opening / d:.0%}"
+        )
+    sizes: dict[tuple[int, int], int] = defaultdict(int)
+    for r in rows:
+        sizes[(r["debate"], r["repeat_group"])] += 1
+    repeated = [r for r in rows if sizes[(r["debate"], r["repeat_group"])] > 1]
+    restatements = [r for r in rows if r["label"] == "restatement"]
+    print(
+        f"  repeat groups: {len(sizes)} groups over {len(rows)} claims; {len(repeated)} claims share a group; "
+        f"{sum(r in repeated for r in restatements)} of {len(restatements)} claims the reader labelled restatement are in one"
+    )
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--debates", type=int, default=None, help="score only the first N debates")
     parser.add_argument("--provider", default=settings.claims_highlights_provider, choices=provider_names())
     parser.add_argument("--model", default=settings.claims_highlights_model)
     parser.add_argument("--out", type=Path, default=None, help="write every claim's label and scores as JSON")
+    parser.add_argument("--remote", default=None, metavar="URL", help="score on this deployed extraction-api (key in EXTRACTION_API_KEY) instead of calling the provider")
     parser.add_argument("--dry-run", action="store_true", help="print the first request and exit")
     parser.add_argument("--table", type=int, default=None, metavar="N", help="print debate N as a Markdown table")
     parser.add_argument("--from", dest="source", type=Path, default=None, help="with --table: read scores from this --out file instead of calling the provider")
@@ -164,8 +278,13 @@ async def main() -> int:
     if args.table is not None:
         debates = [all_debates[args.table - 1]]
 
-    decider = get_decision_model(args.provider)
-    print(f"provider={args.provider} model={args.model} debates={len(debates)}")
+    remote_key = os.environ.get("EXTRACTION_API_KEY", "") if args.remote else ""
+    if args.remote and not remote_key:
+        print("--remote needs EXTRACTION_API_KEY", file=sys.stderr)
+        return 1
+    decider = None if args.remote else get_decision_model(args.provider)
+    where = f"remote={args.remote}" if args.remote else f"provider={args.provider} model={args.model}"
+    print(f"{where} debates={len(debates)}")
     rows: list[dict] = []
     precision_at_k: list[float] = []
     loose_precision_at_k: list[float] = []
@@ -173,7 +292,10 @@ async def main() -> int:
     for debate in debates:
         number = all_debates.index(debate) + 1
         inp = task_input(debate)
-        result = assemble_result(inp, await decide_claims(inp, decider, args.model), args.provider, args.model)
+        if args.remote:
+            result = await asyncio.to_thread(score_remotely, inp, args.remote.rstrip("/"), remote_key)
+        else:
+            result = assemble_result(inp, await decide_debate(inp, decider, args.model), args.provider, args.model)
         scored = []
         for gold, claim in zip(debate["claims"], result.claims):
             row = {
@@ -181,6 +303,7 @@ async def main() -> int:
                 "label": gold["label"],
                 "gold_job": gold.get("job"),
                 "is_contestable": gold.get("is_contestable"),
+                "document_indices": gold["document_indices"],
                 **claim.model_dump(),
             }
             rows.append(row)
@@ -234,6 +357,7 @@ async def main() -> int:
         if group:
             print(f"  reader's {gold:<9} (n={len(group):>2}): mean score {sum(r['score'] for r in group) / len(group):.2f}")
     axis_report(scored)
+    ranking_report(scored)
 
     if args.out:
         args.out.write_text(json.dumps(rows, indent=1, ensure_ascii=False))
