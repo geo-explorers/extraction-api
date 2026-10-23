@@ -2,6 +2,9 @@
 
 Live:    PERPLEXITY_API_KEY=… uv run python scripts/eval_claim_highlights.py [--debates N] [--out results.json]
 No key:  uv run python scripts/eval_claim_highlights.py --dry-run   (prints the first request, sends nothing)
+Remote:  EXTRACTION_API_KEY=… uv run python scripts/eval_claim_highlights.py --remote https://<extraction-api>
+         (runs each debate as a claims.score_highlights task on a deployed service, whose own
+         provider key is used; needs only that service's API key)
 Table:   uv run python scripts/eval_claim_highlights.py --table 12 --from results.json
          (one debate as a Markdown table: every claim verbatim, the score, the reader's label)
 
@@ -20,13 +23,19 @@ import asyncio
 import dataclasses
 import json
 import sys
+import os
 import time
 from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.api.schemas.claims_score_highlights_schema import ClaimsScoreHighlightsInput  # noqa: E402
+import requests  # noqa: E402
+
+from src.api.schemas.claims_score_highlights_schema import (  # noqa: E402
+    ClaimsScoreHighlightsInput,
+    ClaimsScoreHighlightsResult,
+)
 from src.config.settings import settings  # noqa: E402
 from src.decisions import get_decision_model, provider_names  # noqa: E402
 from src.pipeline.claims_score_highlights_core import (  # noqa: E402
@@ -52,6 +61,39 @@ def task_input(debate: dict) -> ClaimsScoreHighlightsInput:
         documents=debate["documents"],
         claims=[{"text": c["text"], "document_indices": c["document_indices"]} for c in debate["claims"]],
     )
+
+
+REMOTE_TIMEOUT_S = 900
+REMOTE_POLL_S = 3
+REMOTE_FAILED = {"FAILED", "CANCELLED", "TIMED_OUT"}
+
+
+def score_remotely(inp: ClaimsScoreHighlightsInput, base_url: str, api_key: str) -> ClaimsScoreHighlightsResult:
+    """One claims.score_highlights task on a deployed service, enqueued and polled the way
+    geo-chat's client does: done on `COMPLETED`, whose `result` is the task's result."""
+    headers = {"X-API-Key": api_key}
+    enqueue = requests.post(
+        f"{base_url}/tasks",
+        json={"type": "claims.score_highlights", "payload": inp.model_dump(mode="json")},
+        headers=headers,
+        timeout=60,
+    )
+    enqueue.raise_for_status()
+    task_id = enqueue.json()["id"]
+    deadline = time.time() + REMOTE_TIMEOUT_S
+    while time.time() < deadline:
+        time.sleep(REMOTE_POLL_S)
+        response = requests.get(f"{base_url}/tasks/{task_id}", headers=headers, timeout=60)
+        if response.status_code >= 500:
+            continue
+        response.raise_for_status()
+        status = response.json()
+        state = (status.get("status") or "").upper()
+        if state == "COMPLETED":
+            return ClaimsScoreHighlightsResult.model_validate(status["result"])
+        if state in REMOTE_FAILED:
+            raise RuntimeError(f"task {task_id} {state}: {status.get('error')}")
+    raise TimeoutError(f"task {task_id} still running after {REMOTE_TIMEOUT_S}s")
 
 
 def auc(positives: list[float], negatives: list[float]) -> float:
@@ -214,6 +256,7 @@ async def main() -> int:
     parser.add_argument("--provider", default=settings.claims_highlights_provider, choices=provider_names())
     parser.add_argument("--model", default=settings.claims_highlights_model)
     parser.add_argument("--out", type=Path, default=None, help="write every claim's label and scores as JSON")
+    parser.add_argument("--remote", default=None, metavar="URL", help="score on this deployed extraction-api (key in EXTRACTION_API_KEY) instead of calling the provider")
     parser.add_argument("--dry-run", action="store_true", help="print the first request and exit")
     parser.add_argument("--table", type=int, default=None, metavar="N", help="print debate N as a Markdown table")
     parser.add_argument("--from", dest="source", type=Path, default=None, help="with --table: read scores from this --out file instead of calling the provider")
@@ -235,8 +278,13 @@ async def main() -> int:
     if args.table is not None:
         debates = [all_debates[args.table - 1]]
 
-    decider = get_decision_model(args.provider)
-    print(f"provider={args.provider} model={args.model} debates={len(debates)}")
+    remote_key = os.environ.get("EXTRACTION_API_KEY", "") if args.remote else ""
+    if args.remote and not remote_key:
+        print("--remote needs EXTRACTION_API_KEY", file=sys.stderr)
+        return 1
+    decider = None if args.remote else get_decision_model(args.provider)
+    where = f"remote={args.remote}" if args.remote else f"provider={args.provider} model={args.model}"
+    print(f"{where} debates={len(debates)}")
     rows: list[dict] = []
     precision_at_k: list[float] = []
     loose_precision_at_k: list[float] = []
@@ -244,7 +292,10 @@ async def main() -> int:
     for debate in debates:
         number = all_debates.index(debate) + 1
         inp = task_input(debate)
-        result = assemble_result(inp, await decide_debate(inp, decider, args.model), args.provider, args.model)
+        if args.remote:
+            result = await asyncio.to_thread(score_remotely, inp, args.remote.rstrip("/"), remote_key)
+        else:
+            result = assemble_result(inp, await decide_debate(inp, decider, args.model), args.provider, args.model)
         scored = []
         for gold, claim in zip(debate["claims"], result.claims):
             row = {
