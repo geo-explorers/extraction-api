@@ -127,9 +127,12 @@ class Settings(BaseSettings):
         description="Per-provider hourly LLM call ceiling (0 = disabled). Backstop against runaway loops."
     )
 
-    # Gemini Guest/Keyword Extraction
+    # Gemini Guest/Keyword/Host Extraction. gemini-3.8-flash since 2026-10-26:
+    # Google withdrew the 2.5 models from accounts created after the cutoff
+    # (generateContent returns 404 "no longer available to new users") and
+    # names 3.8-flash as the replacement for 2.5-flash.
     gemini_extraction_model: str = Field(
-        default="gemini-2.5-flash",
+        default="gemini-3.8-flash",
         description="Gemini model for guest/keyword extraction"
     )
     gemini_extraction_temperature: float = Field(
@@ -296,14 +299,15 @@ class Settings(BaseSettings):
     # and gemini_news_claim_model so each pipeline stays independently tunable.
     # Defaults to the pro tier rather than flash: this endpoint serves
     # unbenchmarked media (multi-hour debates, dense papers), so quality
-    # headroom beats the flash speedup. gemini-2.5-pro is the latest STABLE
-    # pro on the API as of 2026-07-13 (3.x pro exists only as -preview;
-    # gemini-3.5-pro not yet GA — swap it in via CLAIMS_EXTRACT_MODEL once
-    # released, and set CLAIMS_EXTRACT_THINKING_LEVEL=low with it).
-    # Cost/speed downshift: CLAIMS_EXTRACT_MODEL=gemini-3.5-flash
-    # (news-benchmark-proven, 2026-05-27).
+    # headroom beats the flash speedup. gemini-3.1-pro-preview since
+    # 2026-10-26: gemini-2.5-pro is withdrawn for accounts created after the
+    # cutoff (404 "no longer available to new users") and Google names
+    # 3.1-pro-preview as its replacement; no GA 3.x pro exists yet. Swap a GA
+    # pro in via CLAIMS_EXTRACT_MODEL once released.
+    # Cost/speed downshift: CLAIMS_EXTRACT_MODEL=gemini-3.8-flash (the
+    # podcast pipeline's benchmarked choice, 2026-10-14).
     claims_extract_model: str = Field(
-        default="gemini-2.5-pro",
+        default="gemini-3.1-pro-preview",
         description="Gemini model for the generalized claims.extract DAG"
     )
     claims_extract_temperature: float = Field(
@@ -470,7 +474,7 @@ class Settings(BaseSettings):
     # canonical spaces. Kept separate from the other Gemini model settings so this
     # pipeline can be tuned independently.
     gemini_space_assignment_model: str = Field(
-        default="gemini-2.5-flash",
+        default="gemini-3.5-flash",
         description="Gemini model for assigning canonical spaces to entities"
     )
     gemini_space_assignment_temperature: float = Field(
