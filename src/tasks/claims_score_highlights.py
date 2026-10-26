@@ -4,9 +4,10 @@ A pure scorer: the discussion and its extracted claims in, a highlight score
 per claim out, with a moment score (how much a viewer would want to watch it)
 and a repeat-group id (which claims make the same point). One decision-model
 request per claim, each with the whole discussion in view, plus three requests
-for the moment question and the repeat pairs, which read the claim list. The model sits behind the DecisionModel interface
-(src/decisions), chosen by CLAIMS_HIGHLIGHTS_PROVIDER, so it can be swapped
-without touching this task. DB-free: results return to the caller.
+for the moment question and one per claim for the repeat question, which read
+the claim list without the transcript. The model sits behind the DecisionModel
+interface (src/decisions), chosen by CLAIMS_HIGHLIGHTS_PROVIDER, so it can be
+swapped without touching this task. DB-free: results return to the caller.
 
 All or nothing: a run returns a score for every claim or fails, so the engine
 retries it and a consumer never stores a half-scored list.

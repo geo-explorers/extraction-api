@@ -145,8 +145,7 @@ _register("claims_score_highlights.debate.essential.yes", _highlights.DEBATE_ESS
 _register("claims_score_highlights.debate.essential.no", _highlights.DEBATE_ESSENTIAL_NO, formatted=False, module=_highlights)
 _register("claims_score_highlights.debate.moment", _highlights.DEBATE_MOMENT_INSTRUCTIONS, formatted=False, module=_highlights)
 _register("claims_score_highlights.debate.repeat", _highlights.DEBATE_REPEAT_INSTRUCTIONS, formatted=False, module=_highlights)
-_register("claims_score_highlights.debate.repeat.yes", _highlights.DEBATE_REPEAT_YES, formatted=False, module=_highlights)
-_register("claims_score_highlights.debate.repeat.no", _highlights.DEBATE_REPEAT_NO, formatted=False, module=_highlights)
+_register("claims_score_highlights.debate.repeat.none", _highlights.DEBATE_REPEAT_NONE, formatted=False, module=_highlights)
 for _axis, (_instructions, _levels) in _highlights.DEBATE_AXES.items():
     _register(f"claims_score_highlights.debate.{_axis}", _instructions, formatted=False, module=_highlights)
     for _level, _text in _levels.items():

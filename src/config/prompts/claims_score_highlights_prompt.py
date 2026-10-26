@@ -26,14 +26,14 @@ quality — whether the claim stands as a faithful, single, self-contained
 statement; controversy — how likely a general audience is to split on it.
 They are reported beside the highlight score, not folded into it.
 
-Two more questions are asked once per debate rather than once per claim, and
-read the whole claim list instead of one claim: which claim a viewer would
-most want to watch (a choice over the claims, asked three times in shuffled
-order), and whether two claims make the same point (a yes/no per pair, with no
-transcript). The first ranks the claims for the viewer, which the coverage
-question above does not: it measures whether the list would lose something, not
-whether anyone would stop scrolling for it. The second finds the points the
-debate makes twice, which the coverage question punishes on both copies.
+Two more questions read the claim list instead of the transcript: which claim
+a viewer would most want to watch (a choice over all the claims, asked three
+times in shuffled order, once per debate), and which other claim makes the same
+point as this one, or none (a choice per claim, with no transcript). The first
+ranks the claims for the viewer, which the coverage question above does not: it
+measures whether the list would lose something, not whether anyone would stop
+scrolling for it. The second finds the points the debate makes twice, which the
+coverage question punishes on both copies.
 """
 
 DEBATE_ESSENTIAL_INSTRUCTIONS = (
@@ -158,25 +158,30 @@ DEBATE_MOMENT_INSTRUCTIONS = (
     "in the debate it was said."
 )
 
-# ── Repeat: do two claims make the same point ────────────────────────────────
+# ── Repeat: which other claim makes the same point ───────────────────────────
 #
-# One yes/no per pair of claims, answered without the transcript. The two
-# claims' texts are appended to the instructions by the task.
+# One choice per claim, answered without the transcript: the options are the
+# other claims of the debate (number, speaker, passage and text) and `none`.
+# The wording is the same-point rubric the three labellers of 2026-10-23 worked
+# from, so the question is measured against labels that mean the same thing by
+# "same point". A variant that spelled out the cross-speaker case and asked
+# whether the viewer would learn anything new moved the answers by 0.004 on
+# average, so the plain wording is kept. Asked as a choice over the whole list
+# rather than a yes/no per pair: the pair form ranked the labelled pairs at AUC
+# 0.971 against 0.989 for this form, which weighs each candidate against the
+# others and against `none`.
 
 DEBATE_REPEAT_INSTRUCTIONS = (
-    "Two claims were extracted from the same debate. Do they make the same point, so that a viewer "
-    "who had watched one would feel they were hearing the same thing again? Judge what the claims "
-    "assert, not who said them: the same point made by both debaters, or by one debater twice, "
-    "counts."
+    "The target claim was extracted from a recorded debate (the title is the motion). The options are the other "
+    "claims extracted from the same debate. Pick the option that makes the SAME POINT as the target claim: a viewer "
+    "who had just heard the target would feel they were hearing the same thing again. Same point: the same assertion "
+    "in other words, the same side's same argument at another level of detail or generality, a looser or stricter "
+    "quantifier on the same assertion, a general rule and its application, or the same conclusion reached by the "
+    "same reasoning. The speaker does not matter. Different points: a different reason for the same conclusion, a "
+    "cause and its consequence, a claim and a reply to it, the same topic with a different assertion, or an added "
+    "condition, mechanism or example that changes what is asserted. If no option makes the same point, pick none."
 )
-DEBATE_REPEAT_YES = (
-    "They assert the same thing, or one is a restatement or a narrower wording of the other, "
-    "whether the same debater said both or each debater said one."
-)
-DEBATE_REPEAT_NO = (
-    "They assert different things: the same topic with a different point, a claim and its "
-    "counter, or a claim and an example or detail of it that adds something new."
-)
+DEBATE_REPEAT_NONE = "No other claim in this debate makes the same point as the target claim."
 
 # The scales by axis name: instructions and the level texts, lowest first. The
 # prompt registry turns these into keys `claims_score_highlights.debate.<axis>`

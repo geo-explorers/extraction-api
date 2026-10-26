@@ -145,8 +145,9 @@ against a fixed threshold.
 
 ## Moments and repeats
 
-Two questions are asked once per debate rather than once per claim, because they compare claims
-with each other.
+Two questions compare the claims with each other instead of judging one claim against the
+transcript: the moment question, asked once per debate over the whole list, and the repeat
+question, asked once per claim over the other claims.
 
 **Moment.** One `choice` question over the whole claim list: which claim would a viewer most want to
 watch? The options are the claims (named by their number in the input, shown with their speaker),
@@ -165,23 +166,43 @@ sharing the middle of their places), so the score runs 0 to 1 and the top N is a
 `MOMENT_WEIGHT`, with `CONTROVERSY_WEIGHT` for the rest. Balancing debaters is the picker's job, not
 the score's.
 
-**Repeat groups.** One yes/no question per pair of claims: do they make the same point, whichever
-debater said them? The pair request carries the title, the claim list and the two claims' texts but
-not the transcript, so a pair costs a few hundred tokens, not a transcript. At most 120 pairs go in
-a request (the provider takes 128 questions). Claims joined by a yes (probability at least
-`REPEAT_THRESHOLD = 0.5`), directly or through others, share a `repeat_group`: the lowest `index`
-among them. A claim with no repeat is alone in its group, so every claim has one. This is a step of
-the scoring run, after extraction and apart from the per-claim request: it was kept out of the
-per-claim request because each of that request's questions is paid for with the whole transcript, and
-a claim's pairs would have been up to 99 more of them.
+**Repeat groups.** One `choice` question per claim, without the transcript: the target claim is
+shown with the title and context, the options are the other claims (number, speaker, passage and
+text, under neutral keys) and `none`, and the model picks the one that makes the same point. The
+wording is the same-point rubric the labellers worked from — the same assertion in other words, the
+same side's argument at another level of detail, a looser or stricter quantifier, a rule and its
+application; not a different reason for the same conclusion, a cause and its consequence, a claim
+and its reply, or an added condition that changes what is asserted; the speaker does not matter. A
+pair's score is the mean of its two directions, what claim 1's question gave claim 2 and what claim
+2's gave claim 1, and groups come from average linkage over those scores: every claim starts
+alone, and the two groups whose pairs average the highest score are joined, again and again, while
+that average is at least `REPEAT_THRESHOLD = 0.3`. Claims in a group share a `repeat_group`, the
+lowest `index` among them; a claim with no repeat is alone in its group, so every claim has one.
 
-The threshold is untuned and the first-run recall is unmeasured: the evaluation set has no repeat
-labels (the proposal measured 0.55 recall for a pairwise check).
+Why this shape (measured 2026-10-23 in the evaluation repository, `debate-highlight-eval`, against
+same-point labels from three dedicated labellers and two earlier ones over the 30 evaluation
+debates; the gold is the 125 pairs at least two of the five agreed on, 4.2 per debate):
 
-**Cost.** A run adds `MOMENT_ROUNDS` requests carrying the transcript and `ceil(n(n-1)/2 / 120)`
-requests without it (1 for up to 16 claims, 4 for 30), to the one request per claim. For the 30
-evaluation debates that is 444 + 90 + 42 requests, and about a fifth more input tokens than before,
-mostly the moment rounds' transcripts.
+- The per-claim choice ranks the gold pairs at AUC 0.989; a yes/no per pair, the shape it
+  replaces, at 0.971. Asking the choice once per claim is enough: showing the options in the
+  reverse order moved a probability by 0.012 on average.
+- Average linkage instead of joining on single pairs (union-find): at 0.3, single pairs made 23
+  groups of three or four and put a pair scoring under 0.15 in 17 of the 103 groups — chains of
+  look-alikes; average linkage made 102 pairs and 2 triples.
+- The threshold, judged with the picker geo-chat will run (top six by `moment_score`, at least two
+  per debater, one per group): with no groups the six picks carried 39 gold repeats over the 30
+  debates. At 0.3 they carry 15, 4 claims are dropped for a claim that is not their repeat, and
+  precision at six against the readers' picks goes from 0.692 to 0.719; 0.25 leaves 10 repeats for
+  8 wrong drops (0.700); 0.35 leaves 17 for 4 (0.717). At 0.3 the gold pairs are recalled at 0.71
+  with precision 0.71.
+- Repeats across the two debaters are recalled less (0.61 against 0.72 within a debater), but only
+  4 of the 39 repeats the picker let through were cross-debater.
+
+**Cost.** A run adds `MOMENT_ROUNDS` requests carrying the transcript and one request per claim
+without it (title, context, the claim and the other claims: about a thousand tokens each), to the
+one request per claim. For the 30 evaluation debates that is 444 + 90 + 444 requests; the repeat
+requests come to about 14,000 input tokens per debate, a third of what the per-claim requests
+cost, or about 0.0003 USD at the decider's price.
 
 ### A run that returns the same answer to everything fails
 

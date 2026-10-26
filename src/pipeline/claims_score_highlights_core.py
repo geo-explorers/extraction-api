@@ -19,9 +19,12 @@ viewer most want to watch? — is a choice over the whole claim list, asked
 MOMENT_ROUNDS times with the list shuffled and averaged, so one claim's
 probability does not depend on where it sat in the list. The claim's moment
 score blends its percentile on that with its percentile on controversy within
-the debate (MOMENT_WEIGHT / CONTROVERSY_WEIGHT). The repeat question — do these
-two claims make the same point? — is a yes/no per pair, asked without the
-transcript; claims joined by a yes share a repeat-group id.
+the debate (MOMENT_WEIGHT / CONTROVERSY_WEIGHT). The repeat question — which other
+claim makes the same point as this one, or none? — is a choice asked once per
+claim, without the transcript; the two directions of a pair are averaged into a
+pair score, and claims are grouped by average linkage over those scores, so a
+chain of look-alikes does not become one group. Claims in a group share a
+repeat-group id.
 
 A run whose answers show the provider's identical-distribution glitch fails
 (check_for_glitch) instead of publishing scores that carry no information.
@@ -96,11 +99,17 @@ MOMENT = "moment"
 MOMENT_WEIGHT = 0.6
 CONTROVERSY_WEIGHT = 0.4
 
-# The repeat question: a pair is the same point at or above this probability of
-# yes. Not tuned: the labelled set has no repeat labels (see the docs).
-REPEAT_THRESHOLD = 0.5
-# Questions per request the provider accepts is 128; stay a little under.
-PAIRS_PER_REQUEST = 120
+# The repeat question: asked once per claim as a choice among the other claims
+# and `none`. A pair's score is the mean of its two directions, and two groups
+# are joined while the mean score over their pairs is at least this (average
+# linkage). Measured 2026-10-23 against 125 same-point pairs that at least two
+# of five labellers agreed on, over the 30 evaluation debates: at 0.3 recall
+# 0.71 and precision 0.71, and the picker's top six carried 15 repeated points
+# instead of 39 while wrongly dropping 4 claims; 0.25 caught a few more at
+# twice the wrong drops, 0.35 caught fewer at the same (see the docs).
+REPEAT = "repeat"
+REPEAT_NONE = "none"
+REPEAT_THRESHOLD = 0.3
 
 # Two probabilities closer than this are the same number for the glitch check.
 GLITCH_TOLERANCE = 1e-6
@@ -293,59 +302,92 @@ def moment_rounds(input: ClaimsScoreHighlightsInput, answers: Sequence[Mapping[s
     return rounds
 
 
-def pairs(count: int) -> List[tuple[int, int]]:
-    return [(i, j) for i in range(count) for j in range(i + 1, count)]
+def repeat_label(input: ClaimsScoreHighlightsInput, index: int) -> str:
+    """A claim as the repeat question shows it: its number, who said it and
+    where, then its text."""
+    claim = input.claims[index]
+    where = attribution(claim, input.documents)
+    if claim.document_indices:
+        where += ", passage " + ", ".join(f"[{i}]" for i in claim.document_indices)
+    return f"Claim {index + 1} ({where}): {claim.text}"
+
+
+def repeat_options(count: int, target: int) -> List[tuple[str, int]]:
+    """(option key, claim index) for the claims the repeat question offers as
+    claim `target`'s repeat: every other claim, in claim order, under neutral
+    keys that say nothing about the claim."""
+    others = [j for j in range(count) if j != target]
+    return [(f"o{k + 1:02d}", j) for k, j in enumerate(others)]
 
 
 def repeat_requests(input: ClaimsScoreHighlightsInput) -> List[Request]:
-    """The repeat question for every pair of claims, PAIRS_PER_REQUEST to a
-    request. The transcript is left out on purpose: the question is about two
-    texts, and with the transcript every request would cost as much as a
-    claim's."""
-    p = f"{_P}{input.media_type}.repeat"
-    content = {**_header(input), "extracted_claims": render_claims(input)}
-    instructions, yes, no = prompts.get(p), prompts.get(f"{p}.yes"), prompts.get(f"{p}.no")
-    everything = pairs(len(input.claims))
+    """One request per claim, in claim order: which of the other claims makes
+    the same point as this one, or none? The transcript is left out on purpose:
+    the question is about the claim texts, this is the shape that was measured,
+    and with the transcript each request would cost as much as a claim's. A
+    debate of one claim has nothing to ask."""
+    count = len(input.claims)
+    if count < 2:
+        return []
+    p = f"{_P}{input.media_type}.{REPEAT}"
+    instructions, none = prompts.get(p), prompts.get(f"{p}.{REPEAT_NONE}")
+    header = _header(input)
     requests: List[Request] = []
-    for start in range(0, len(everything), PAIRS_PER_REQUEST):
-        batch = everything[start : start + PAIRS_PER_REQUEST]
-        questions: Dict[str, Question] = {
-            f"{i}_{j}": YesNo(
-                instructions=f"{instructions}\n\nClaim A: {input.claims[i].text}\nClaim B: {input.claims[j].text}",
-                yes=yes,
-                no=no,
-            )
-            for i, j in batch
-        }
-        requests.append((f"repeat pairs {start}-{start + len(batch) - 1}", content, questions))
+    for target in range(count):
+        options: Dict[str, str] = {key: repeat_label(input, j) for key, j in repeat_options(count, target)}
+        options[REPEAT_NONE] = none
+        content = {**header, "target_claim": repeat_label(input, target)}
+        requests.append((f"repeat claim {target}", content, {REPEAT: Choice(instructions=instructions, options=options)}))
     return requests
 
 
-def repeat_groups(count: int, answers: Sequence[Mapping[str, Answer]]) -> List[int]:
-    """The repeat-group id of each claim: the lowest claim index among the
-    claims joined to it by a pair answered yes, directly or through others. A
-    claim with no repeat is its own group."""
-    parent = list(range(count))
+def repeat_scores(count: int, answers: Sequence[Mapping[str, Answer]]) -> List[List[float]]:
+    """How much every two claims make the same point, as a symmetric matrix:
+    the mean of the probability claim i's question gave claim j and the one
+    claim j's question gave claim i. The diagonal is unused and left at 0."""
+    if count < 2:
+        return [[0.0] * count for _ in range(count)]
+    if len(answers) != count:
+        raise DecisionError(f"{len(answers)} repeat answers for {count} claims")
+    directed = [[0.0] * count for _ in range(count)]
+    for target, answer_set in enumerate(answers):
+        answer = answer_set.get(REPEAT)
+        if not isinstance(answer, ChoiceAnswer):
+            raise DecisionError("decision answers do not match the repeat question")
+        for key, j in repeat_options(count, target):
+            if key not in answer.probabilities:
+                raise DecisionError(f"the repeat answer for claim {target} has no probability for claim {j}")
+            directed[target][j] = answer.probabilities[key]
+    return [[(directed[i][j] + directed[j][i]) / 2 for j in range(count)] for i in range(count)]
 
-    def find(i: int) -> int:
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
 
-    seen = set()
-    for answer_set in answers:
-        for name, answer in answer_set.items():
-            if not isinstance(answer, YesNoAnswer):
-                raise DecisionError("decision answers do not match the repeat question")
-            i, j = (int(part) for part in name.split("_"))
-            seen.add((i, j))
-            if answer.probability >= REPEAT_THRESHOLD:
-                low, high = sorted((find(i), find(j)))
-                parent[high] = low
-    if seen != set(pairs(count)):
-        raise DecisionError("the repeat answers do not cover every pair of claims")
-    return [find(i) for i in range(count)]
+def repeat_groups(scores: Sequence[Sequence[float]], threshold: float = REPEAT_THRESHOLD) -> List[int]:
+    """The repeat-group id of each claim, by average linkage over the pair
+    scores: every claim starts alone, and the two groups whose pairs average
+    the highest score are joined, again and again, while that average is at
+    least `threshold`. Joining on the average rather than on any one pair keeps
+    a chain (A~B and B~C while A and C make different points) from becoming one
+    group: on the evaluation debates at 0.3, joining on single pairs made 23
+    groups of three or four and put a pair scoring under 0.15 in 17 of the 103
+    groups; average linkage made 102 pairs and 2 triples. The id is the lowest
+    claim index in the group; a claim with no repeat is its own group."""
+    groups = [[i] for i in range(len(scores))]
+    while len(groups) > 1:
+        best = None
+        for a in range(len(groups)):
+            for b in range(a + 1, len(groups)):
+                mean = sum(scores[i][j] for i in groups[a] for j in groups[b]) / (len(groups[a]) * len(groups[b]))
+                if mean >= threshold and (best is None or mean > best[0]):
+                    best = (mean, a, b)
+        if best is None:
+            break
+        _, a, b = best
+        groups[a].extend(groups.pop(b))
+    ids = [0] * len(scores)
+    for members in groups:
+        for i in members:
+            ids[i] = min(members)
+    return ids
 
 
 def percentiles(values: Sequence[float]) -> List[float]:
@@ -376,17 +418,20 @@ def _same(a: Sequence[float], b: Sequence[float]) -> bool:
 def check_for_glitch(
     claim_answers: Sequence[Mapping[str, Answer]],
     rounds: Sequence[Sequence[float]],
+    repeat_answers: Sequence[Mapping[str, Answer]] = (),
 ) -> None:
     """Fail the run on the provider's identical-distribution glitch (three live
     debates on 12 October got one distribution back for all three score
-    questions). Three signs, each impossible in an answer that read the content:
+    questions). Four signs, each impossible in an answer that read the content:
 
     - a claim whose axis scales all have the same distribution over their
       levels, within GLITCH_TOLERANCE — three differently worded rubrics do not
       agree to six decimals;
     - in a debate of three or more claims, every decision identical across all
       the claims — the answers do not depend on the claim;
-    - a moment round that gives every claim the same probability.
+    - a moment round that gives every claim the same probability;
+    - a repeat question with three or more options (two other claims and none)
+      that gives every option the same probability.
 
     The error is retryable: the engine runs the task again and a later request
     usually answers properly. Nothing is returned, so nothing is published."""
@@ -408,6 +453,15 @@ def check_for_glitch(
     for round, probabilities in enumerate(rounds):
         if len(probabilities) >= 3 and max(probabilities) - min(probabilities) <= GLITCH_TOLERANCE:
             raise DecisionError(f"moment round {round} gave every claim the same probability: provider glitch", retryable=True)
+    for index, answers in enumerate(repeat_answers):
+        answer = answers.get(REPEAT)
+        if isinstance(answer, ChoiceAnswer) and len(answer.probabilities) >= 3:
+            values = list(answer.probabilities.values())
+            if max(values) - min(values) <= GLITCH_TOLERANCE:
+                raise DecisionError(
+                    f"the repeat question for claim {index} gave every option the same probability: provider glitch",
+                    retryable=True,
+                )
 
 
 @dataclass(frozen=True)
@@ -421,13 +475,14 @@ class DebateDecisions:
 
 async def decide_debate(input: ClaimsScoreHighlightsInput, decider: DecisionModel, model: str) -> DebateDecisions:
     """Every request of a run — the claims, the moment rounds, the repeat
-    pairs — in one all-or-nothing batch, checked for the provider glitch."""
+    questions — in one all-or-nothing batch, checked for the provider glitch."""
     per_claim, moment, repeat = claim_requests(input), moment_requests(input), repeat_requests(input)
     answers = await run_requests([*per_claim, *moment, *repeat], decider, model)
     claim_answers = answers[: len(per_claim)]
     rounds = moment_rounds(input, answers[len(per_claim) : len(per_claim) + len(moment)])
-    check_for_glitch(claim_answers, rounds)
-    groups = repeat_groups(len(input.claims), answers[len(per_claim) + len(moment) :])
+    repeat_answers = answers[len(per_claim) + len(moment) :]
+    check_for_glitch(claim_answers, rounds, repeat_answers)
+    groups = repeat_groups(repeat_scores(len(input.claims), repeat_answers))
     moments = [sum(r[i] for r in rounds) / len(rounds) for i in range(len(input.claims))]
     return DebateDecisions(claim_answers, moments, groups)
 
