@@ -89,7 +89,7 @@ def extract_news_claims_factual(
     )
     config_kwargs: dict = {"temperature": llm.get("gemini_news_claim_temperature")}
     # thinking_level is a Gemini-3+ control. Only attach it when set, so a
-    # revert to a 2.5-era model (e.g. GEMINI_NEWS_CLAIM_MODEL=gemini-2.5-pro
+    # revert to a pro model (e.g. GEMINI_NEWS_CLAIM_MODEL=gemini-3.1-pro-preview
     # with GEMINI_NEWS_CLAIM_THINKING_LEVEL unset) runs cleanly with no
     # thinking config and no error.
     thinking_level = (llm.get("gemini_news_claim_thinking_level") or "").strip()
