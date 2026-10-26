@@ -50,8 +50,9 @@ RETRY_INITIAL_DELAY = 2.0
 # whole run has a budget of minutes, and one request must not sleep it away.
 MAX_RETRY_AFTER_SECONDS = 30.0
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
-# A `score` question takes 2 to 10 levels.
+# A `score` question takes 2 to 10 levels; a `choice` question 1 to 255 options.
 MAX_SCALE_LEVELS = 10
+MAX_CHOICE_OPTIONS = 255
 # How far a distribution may stray from summing to one before it is not one.
 PROBABILITY_SUM_TOLERANCE = 0.05
 
@@ -70,6 +71,8 @@ def to_wire(question: Question) -> Dict[str, Any]:
             "instructions": question.instructions,
             "criteria": list(question.levels),
         }
+    if len(question.options) > MAX_CHOICE_OPTIONS:
+        raise DecisionError(f"Perplexity takes at most {MAX_CHOICE_OPTIONS} options a choice; got {len(question.options)}")
     return {
         "type": "choice",
         "instructions": question.instructions,

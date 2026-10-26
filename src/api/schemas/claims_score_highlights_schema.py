@@ -103,7 +103,10 @@ class ScoredClaim(BaseModel):
     )
     repeat_group: int = Field(
         description="Claims that make the same point, whichever debater said them, share a group "
-        "id: the lowest `index` among them. A claim with no repeat is alone in its group.",
+        "id: the lowest `index` among them. A claim with no repeat is alone in its group. Each claim "
+        "is asked which other claim makes the same point (or none); two groups are joined while the "
+        "answers over their pairs average at least 0.3, so a chain of look-alikes stays apart. Show "
+        "one claim per group.",
     )
 
 

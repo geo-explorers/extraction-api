@@ -131,7 +131,7 @@ def test_content_shows_the_whole_discussion_every_claim_and_the_claim_under_test
         "3. (unattributed) Nobody said this"
     )
     assert content["claim_under_test"] == (
-        "Claim 2, attributed to Bob and Ann, drawn from passage [1], [0], [1]: "
+        "Claim 2, attributed to Bob and Ann, drawn from passage [1], [0]: "
         "Money should stay out of a first meeting"
     )
 
@@ -427,7 +427,8 @@ def _varied(claim_index: int):
 
 class _FakeDecider:
     """Answers all three kinds of request: a claim's questions (varied by claim), the moment
-    choice (the lower the claim number, the likelier), and a repeat pair (yes for `same`)."""
+    choice (the lower the claim number, the likelier), and a claim's repeat question (the other
+    claim it is paired with in `same` is likely, `none` otherwise)."""
 
     provider = "fake"
 
@@ -452,9 +453,22 @@ class _FakeDecider:
             weights = {name: 1.0 / int(name) for name in options}
             total = sum(weights.values())
             return {"moment": ChoiceAnswer(choice=min(options, key=int), probabilities={n: w / total for n, w in weights.items()})}
-        if "essential" not in names:
-            self.seen.append(("repeat", names, model))
-            return {name: YesNoAnswer(0.9 if tuple(map(int, name.split("_"))) in self.same else 0.1) for name in names}
+        if names == ["repeat"]:
+            target = int(content["target_claim"].split()[1]) - 1
+            self.seen.append(("repeat", target, model))
+            # Each claim's answer differs a little from the others', as a real one would: one
+            # distribution for every question is the glitch the guard rejects.
+            weights = {}
+            for key, label in questions["repeat"].options.items():
+                other = None if key == "none" else int(label.split()[1]) - 1
+                if other is None:
+                    weights[key] = 0.1
+                elif tuple(sorted((target, other))) in self.same:
+                    weights[key] = 0.8
+                else:
+                    weights[key] = 0.02 + 0.001 * (target + other)
+            total = sum(weights.values())
+            return {"repeat": ChoiceAnswer(choice=max(weights, key=weights.get), probabilities={k: w / total for k, w in weights.items()})}
         self.seen.append(("claim", content["claim_under_test"], model))
         claim_index = int(content["claim_under_test"].split(",")[0].split()[1]) - 1
         self.in_flight += 1
@@ -482,8 +496,8 @@ async def test_task_scores_each_claim_with_the_configured_model(monkeypatch):
     assert [c.score for c in result.claims] == pytest.approx([0.2, 0.3, 0.4])
     assert result.claims_scored == 3 and result.provider == "fake" and result.model_used == "other-model"
     kinds = [kind for kind, _, _ in fake.seen]
-    # One request per claim, three moment rounds, and the three pairs of three claims in one request.
-    assert sorted(kinds) == ["claim"] * 3 + ["moment"] * 3 + ["repeat"]
+    # One request per claim, three moment rounds, and one repeat question per claim.
+    assert sorted(kinds) == ["claim"] * 3 + ["moment"] * 3 + ["repeat"] * 3
     assert all(m == "other-model" for _, _, m in fake.seen)
     # Every claim is asked the score decision and the three axes in one request.
     assert [list(questions) for content, questions in fake.contents if "claim_under_test" in content] == [list(DECISIONS)] * 3
@@ -524,11 +538,11 @@ async def test_in_flight_requests_are_bounded_and_each_is_counted_by_the_spend_g
     assert fake.max_in_flight <= core.DECISION_CONCURRENCY
     assert fake.max_in_flight > 1, "the bound is a bound, not a serialisation"
     assert counted == ["fake"] * 20
-    # A whole run adds the moment rounds and the 190 pairs of 20 claims, 120 to a request.
+    # A whole run adds the moment rounds and one repeat question per claim.
     counted.clear()
     decided = await core.decide_debate(many, fake, "m")
     assert len(decided.claims) == len(decided.moments) == len(decided.groups) == 20
-    assert counted == ["fake"] * (20 + core.MOMENT_ROUNDS + 2)
+    assert counted == ["fake"] * (20 + core.MOMENT_ROUNDS + 20)
 
 
 # ── Moment, repeat groups and the glitch guard ───────────────────────────────
@@ -565,39 +579,89 @@ def test_moment_rounds_read_probabilities_back_by_claim_number():
         moment_rounds(inp, [{"moment": YesNoAnswer(0.5)}])
 
 
-def test_repeat_requests_ask_every_pair_without_the_transcript_in_batches_the_provider_accepts():
-    from src.pipeline.claims_score_highlights_core import PAIRS_PER_REQUEST, repeat_requests
+def test_repeat_requests_ask_each_claim_which_other_makes_the_same_point_without_the_transcript():
+    from src.pipeline.claims_score_highlights_core import repeat_requests
 
     requests = repeat_requests(_input())
-    assert len(requests) == 1
-    _, content, questions = requests[0]
-    assert list(questions) == ["0_1", "0_2", "1_2"]
-    assert "transcript" not in content and "extracted_claims" in content
-    assert "Claim A: A coffee date saves time" in questions["0_1"].instructions
-    assert "Claim B: Nobody said this" in questions["0_2"].instructions
-    assert questions["0_1"].yes and questions["0_1"].no
-    many = _input(claims=[HighlightClaim(text=f"Claim {i}") for i in range(20)])
-    batches = repeat_requests(many)
-    assert [len(q) for _, _, q in batches] == [PAIRS_PER_REQUEST, 190 - PAIRS_PER_REQUEST]
-    assert PAIRS_PER_REQUEST <= 128, "the provider takes at most 128 questions a request"
+    assert [label for label, _, _ in requests] == ["repeat claim 0", "repeat claim 1", "repeat claim 2"]
+    _, content, questions = requests[1]
+    assert list(questions) == ["repeat"]
+    assert "transcript" not in content and "extracted_claims" not in content
+    assert content["title"] == "A coffee date is an acceptable first date"
+    # Passages are listed once each, however many times a claim cites them.
+    assert content["target_claim"] == "Claim 2 (Bob and Ann, passage [1], [0]): Money should stay out of a first meeting"
+    # The other claims under neutral keys, in claim order, then `none`. The speaker and passage
+    # travel with each claim's text; the key says nothing about it.
+    assert questions["repeat"].options == {
+        "o01": "Claim 1 (Ann, passage [0]): A coffee date saves time",
+        "o02": "Claim 3 (unattributed): Nobody said this",
+        "none": "No other claim in this debate makes the same point as the target claim.",
+    }
+    assert "SAME POINT" in questions["repeat"].instructions
+    assert "The speaker does not matter" in questions["repeat"].instructions
+    # A lone claim has nothing to be a repeat of.
+    assert repeat_requests(_input(claims=[HighlightClaim(text="alone")])) == []
+    # The biggest debate's choice (every other claim and `none`) fits the provider's option limit.
+    from src.api.schemas.claims_score_highlights_schema import MAX_CLAIMS
+
+    assert MAX_CLAIMS <= pplx.MAX_CHOICE_OPTIONS
+    with pytest.raises(DecisionError, match="at most 255 options"):
+        pplx.to_wire(Choice(instructions="?", options={str(i): None for i in range(256)}))
 
 
-def _pair_answers(count, yes):
-    return [{f"{i}_{j}": YesNoAnswer(0.9 if (i, j) in yes else 0.2) for i in range(count) for j in range(i + 1, count)}]
+def _repeat_answers(count, directed):
+    """One repeat answer per claim from {(target, other): probability}; an unnamed direction
+    gets 0.05 and `none` whatever is left."""
+    from src.pipeline.claims_score_highlights_core import repeat_options
+
+    answers = []
+    for target in range(count):
+        probabilities = {key: directed.get((target, j), 0.05) for key, j in repeat_options(count, target)}
+        probabilities["none"] = max(0.0, 1 - sum(probabilities.values()))
+        answers.append({"repeat": ChoiceAnswer(choice=max(probabilities, key=probabilities.get), probabilities=probabilities)})
+    return answers
 
 
-def test_repeat_groups_join_pairs_and_chains_under_the_lowest_index():
-    from src.pipeline.claims_score_highlights_core import repeat_groups
+def test_repeat_scores_average_the_two_directions_of_a_pair():
+    from src.pipeline.claims_score_highlights_core import repeat_scores
 
-    assert repeat_groups(5, _pair_answers(5, set())) == [0, 1, 2, 3, 4]
-    # 1~3 and 3~4 make one group of three though 1 and 4 were never paired as yes; 0 and 2 stay alone.
-    assert repeat_groups(5, _pair_answers(5, {(1, 3), (3, 4)})) == [0, 1, 2, 1, 1]
-    # The bar is a probability of yes of at least one half.
-    at_bar = [{"0_1": YesNoAnswer(0.5)}]
-    assert repeat_groups(2, at_bar) == [0, 0]
-    assert repeat_groups(1, []) == [0]
-    with pytest.raises(DecisionError, match="every pair"):
-        repeat_groups(3, [{"0_1": YesNoAnswer(0.9)}])
+    scores = repeat_scores(3, _repeat_answers(3, {(0, 1): 0.9, (1, 0): 0.5, (2, 0): 0.45}))
+    assert scores[0][1] == scores[1][0] == pytest.approx(0.7)
+    assert scores[0][2] == scores[2][0] == pytest.approx((0.45 + 0.05) / 2)
+    assert scores[1][2] == scores[2][1] == pytest.approx(0.05)
+    assert repeat_scores(1, []) == [[0.0]]
+    with pytest.raises(DecisionError, match="3 repeat answers for 4 claims"):
+        repeat_scores(4, _repeat_answers(3, {}))
+    with pytest.raises(DecisionError, match="repeat question"):
+        repeat_scores(2, [{"repeat": YesNoAnswer(0.5)}] * 2)
+    with pytest.raises(DecisionError, match="claim 0 has no probability for claim 1"):
+        repeat_scores(2, [{"repeat": ChoiceAnswer(choice="none", probabilities={"none": 1.0})}] * 2)
+
+
+def _matrix(count, pairs):
+    scores = [[0.0] * count for _ in range(count)]
+    for (i, j), score in pairs.items():
+        scores[i][j] = scores[j][i] = score
+    return scores
+
+
+def test_repeat_groups_join_by_average_linkage_under_the_lowest_index():
+    from src.pipeline.claims_score_highlights_core import REPEAT_THRESHOLD, repeat_groups
+
+    assert REPEAT_THRESHOLD == 0.3
+    assert repeat_groups(_matrix(5, {})) == [0, 1, 2, 3, 4]
+    assert repeat_groups(_matrix(5, {(1, 3): 0.9, (3, 4): 0.9, (1, 4): 0.8})) == [0, 1, 2, 1, 1]
+    # The bar is inclusive.
+    assert repeat_groups(_matrix(2, {(0, 1): 0.3})) == [0, 0]
+    assert repeat_groups(_matrix(2, {(0, 1): 0.29})) == [0, 1]
+    # No chaining: 3 repeats 1 and half-repeats 4, but 1 and 4 share nothing, so {1, 3} averages
+    # (0.5 + 0.0) / 2 = 0.25 with 4 — under the bar. Joining on single pairs would have made one
+    # group of three.
+    assert repeat_groups(_matrix(5, {(1, 3): 0.9, (3, 4): 0.5})) == [0, 1, 2, 1, 4]
+    # When the average holds the group grows, strongest pair first.
+    assert repeat_groups(_matrix(4, {(0, 1): 0.4, (1, 2): 0.9, (0, 2): 0.35, (2, 3): 0.1})) == [0, 0, 0, 3]
+    assert repeat_groups([[0.0]]) == [0]
+    assert repeat_groups([]) == []
 
 
 def _glitch_inputs():
@@ -632,7 +696,7 @@ def test_one_distribution_for_every_axis_question_fails_the_run_and_can_be_retri
     check_for_glitch([claims[0], apart, claims[2]], rounds)
 
 
-def test_the_same_answers_for_every_claim_or_a_flat_moment_round_fail_the_run():
+def test_the_same_answers_for_every_claim_or_a_flat_moment_or_repeat_answer_fail_the_run():
     from src.pipeline.claims_score_highlights_core import check_for_glitch
 
     claims, rounds = _glitch_inputs()
@@ -643,6 +707,22 @@ def test_the_same_answers_for_every_claim_or_a_flat_moment_round_fail_the_run():
     check_for_glitch([_varied(1)] * 2, [[0.5, 0.5]])
     with pytest.raises(DecisionError, match="moment round 1 gave every claim the same probability"):
         check_for_glitch(claims, [[0.6, 0.3, 0.1], [1 / 3] * 3])
+    # A repeat answer that cannot tell two other claims from `none` did not read them.
+    repeats = _repeat_answers(3, {(0, 1): 0.6})
+    check_for_glitch(claims, rounds, repeats)
+    flat = {"repeat": ChoiceAnswer(choice="o01", probabilities={"o01": 1 / 3, "o02": 1 / 3, "none": 1 / 3})}
+    with pytest.raises(DecisionError, match="repeat question for claim 1 gave every option the same probability") as failed:
+        check_for_glitch(claims, rounds, [repeats[0], flat, repeats[2]])
+    assert failed.value.retryable
+    # With one other claim the two options may honestly split evenly.
+    check_for_glitch(claims, rounds, [{"repeat": ChoiceAnswer(choice="none", probabilities={"o01": 0.5, "none": 0.5})}])
+    # One distribution handed back to every claim's question, though each asks about other claims,
+    # is the 12 October signature even when it is not flat.
+    stuck = {"repeat": ChoiceAnswer(choice="o01", probabilities={"o01": 0.5, "o02": 0.3, "none": 0.2})}
+    with pytest.raises(DecisionError, match="every repeat question got the same answer") as failed:
+        check_for_glitch(claims, rounds, [stuck] * 3)
+    assert failed.value.retryable
+    check_for_glitch(claims, rounds, [stuck] * 2)  # two alike may be honest
 
 
 @pytest.mark.asyncio
@@ -685,9 +765,10 @@ def test_every_media_type_has_a_registered_rubric_and_nothing_else_is_registered
     for media_type in media_types:
         assert list(build_questions(media_type)) == list(DECISIONS), media_type
         # The keys under a media type are exactly the score decision with its two criteria, the
-        # moment choice, the repeat yes/no and each axis with one text per level — nothing stale, nothing missing.
+        # moment choice, the repeat choice with its `none` option and each axis with one text per
+        # level — nothing stale, nothing missing.
         expected = {f"{media_type}.essential", f"{media_type}.essential.yes", f"{media_type}.essential.no"}
-        expected |= {f"{media_type}.moment", f"{media_type}.repeat", f"{media_type}.repeat.yes", f"{media_type}.repeat.no"}
+        expected |= {f"{media_type}.moment", f"{media_type}.repeat", f"{media_type}.repeat.none"}
         for axis, levels in AXIS_LEVELS.items():
             expected.add(f"{media_type}.{axis}")
             expected.update(f"{media_type}.{axis}.{level}" for level in levels)
