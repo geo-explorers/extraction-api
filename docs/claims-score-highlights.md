@@ -214,7 +214,9 @@ returned or published, when:
   worded rubrics do not agree to six decimals);
 - in a debate of three or more claims, every claim got the same answers to every question (the
   answers do not depend on the claim);
-- a moment round gave every claim the same probability.
+- a moment round gave every claim the same probability;
+- a repeat question with three or more options gave every option the same probability, or three
+  or more repeat questions, each about a different claim, got one and the same distribution.
 
 One glitched claim fails the whole run. A consumer stores what it gets and does not ask again, so it
 is better to run again than to keep a distribution that carries no information.

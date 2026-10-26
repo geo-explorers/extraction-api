@@ -131,7 +131,7 @@ def test_content_shows_the_whole_discussion_every_claim_and_the_claim_under_test
         "3. (unattributed) Nobody said this"
     )
     assert content["claim_under_test"] == (
-        "Claim 2, attributed to Bob and Ann, drawn from passage [1], [0], [1]: "
+        "Claim 2, attributed to Bob and Ann, drawn from passage [1], [0]: "
         "Money should stay out of a first meeting"
     )
 
@@ -456,10 +456,17 @@ class _FakeDecider:
         if names == ["repeat"]:
             target = int(content["target_claim"].split()[1]) - 1
             self.seen.append(("repeat", target, model))
+            # Each claim's answer differs a little from the others', as a real one would: one
+            # distribution for every question is the glitch the guard rejects.
             weights = {}
             for key, label in questions["repeat"].options.items():
                 other = None if key == "none" else int(label.split()[1]) - 1
-                weights[key] = 0.1 if other is None else (0.8 if tuple(sorted((target, other))) in self.same else 0.02)
+                if other is None:
+                    weights[key] = 0.1
+                elif tuple(sorted((target, other))) in self.same:
+                    weights[key] = 0.8
+                else:
+                    weights[key] = 0.02 + 0.001 * (target + other)
             total = sum(weights.values())
             return {"repeat": ChoiceAnswer(choice=max(weights, key=weights.get), probabilities={k: w / total for k, w in weights.items()})}
         self.seen.append(("claim", content["claim_under_test"], model))
@@ -581,7 +588,8 @@ def test_repeat_requests_ask_each_claim_which_other_makes_the_same_point_without
     assert list(questions) == ["repeat"]
     assert "transcript" not in content and "extracted_claims" not in content
     assert content["title"] == "A coffee date is an acceptable first date"
-    assert content["target_claim"] == "Claim 2 (Bob and Ann, passage [1], [0], [1]): Money should stay out of a first meeting"
+    # Passages are listed once each, however many times a claim cites them.
+    assert content["target_claim"] == "Claim 2 (Bob and Ann, passage [1], [0]): Money should stay out of a first meeting"
     # The other claims under neutral keys, in claim order, then `none`. The speaker and passage
     # travel with each claim's text; the key says nothing about it.
     assert questions["repeat"].options == {
@@ -593,6 +601,12 @@ def test_repeat_requests_ask_each_claim_which_other_makes_the_same_point_without
     assert "The speaker does not matter" in questions["repeat"].instructions
     # A lone claim has nothing to be a repeat of.
     assert repeat_requests(_input(claims=[HighlightClaim(text="alone")])) == []
+    # The biggest debate's choice (every other claim and `none`) fits the provider's option limit.
+    from src.api.schemas.claims_score_highlights_schema import MAX_CLAIMS
+
+    assert MAX_CLAIMS <= pplx.MAX_CHOICE_OPTIONS
+    with pytest.raises(DecisionError, match="at most 255 options"):
+        pplx.to_wire(Choice(instructions="?", options={str(i): None for i in range(256)}))
 
 
 def _repeat_answers(count, directed):
@@ -702,6 +716,13 @@ def test_the_same_answers_for_every_claim_or_a_flat_moment_or_repeat_answer_fail
     assert failed.value.retryable
     # With one other claim the two options may honestly split evenly.
     check_for_glitch(claims, rounds, [{"repeat": ChoiceAnswer(choice="none", probabilities={"o01": 0.5, "none": 0.5})}])
+    # One distribution handed back to every claim's question, though each asks about other claims,
+    # is the 12 October signature even when it is not flat.
+    stuck = {"repeat": ChoiceAnswer(choice="o01", probabilities={"o01": 0.5, "o02": 0.3, "none": 0.2})}
+    with pytest.raises(DecisionError, match="every repeat question got the same answer") as failed:
+        check_for_glitch(claims, rounds, [stuck] * 3)
+    assert failed.value.retryable
+    check_for_glitch(claims, rounds, [stuck] * 2)  # two alike may be honest
 
 
 @pytest.mark.asyncio
