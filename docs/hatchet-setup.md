@@ -43,10 +43,10 @@ Same Docker image as `extraction-api` (one image, two start commands).
   - `HATCHET_CLIENT_HOST_PORT` = `hatchet-lite.railway.internal:7077`
   - `HATCHET_CLIENT_TLS_STRATEGY` = `none` (private networking, no TLS)
   - `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, model settings (as the API service)
-  - `GEMINI_FALLBACK_API_KEY` (optional; a key from another Google project) and
-    `GEMINI_FALLBACK_MODEL` (default `gemini-3.8-flash`): the Gemini ladder's rungs
-    when a key or a model's daily quota runs out (see `.env.example`). Set them on
-    the API service too: both run the same code.
+  - `GEMINI_FALLBACK_API_KEY` (optional; a key from another Google project): the
+    key the Gemini ladder moves to when `GEMINI_API_KEY` or a model's daily quota on
+    it runs out, with the same model (see `.env.example`). Set it on the API service
+    too: both run the same code.
   - `HATCHET_WORKER_SLOTS` = `10` (optional; the provider rate limit is the real throttle)
   - `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` = `600` — on redeploy the worker stops
     pulling new runs and finishes in-flight ones before SIGKILL

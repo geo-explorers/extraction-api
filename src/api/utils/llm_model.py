@@ -18,11 +18,11 @@ def _create_chat_model(
   temperature = temperature if temperature is not None else llm.get("gemini_extraction_temperature")
 
   def invoke(prompt_value):
-    # One chat model per rung: the ladder picks the key and model (see gemini_ladder).
+    # One chat model per key: the ladder picks the key (see gemini_ladder).
     return gemini_ladder.run(
       model,
-      lambda key, rung_model: ChatGoogleGenerativeAI(
-        model=rung_model,
+      lambda key: ChatGoogleGenerativeAI(
+        model=model,
         temperature=temperature,
         api_key=key,
         max_retries=3,

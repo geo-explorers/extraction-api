@@ -289,8 +289,8 @@ async def cmd_pipeline(args: argparse.Namespace) -> None:
         # The prompt is always built flat (no topics pass here), so assemble must be
         # told the same thing or it would run the grouping path over a flat answer.
         inp = inp.model_copy(update={"grouping": False})
-        extraction, model = await extractor.extract_claims(build_extract_prompt(inp, []))
-        result = assemble_result(inp, extraction.model_dump(), [], model_used=model)
+        extraction = await extractor.extract_claims(build_extract_prompt(inp, []))
+        result = assemble_result(inp, extraction.model_dump(), [], model_used=settings.claims_extract_model)
         claims = [{"text": c.text, "is_factual": c.is_factual,
                    "prompt_contestable": c.is_contestable} for c in result.claims]
         labels = await classify(extractor, rubric, [c["text"] for c in claims]) if claims else []

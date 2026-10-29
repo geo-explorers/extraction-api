@@ -88,8 +88,8 @@ def run_metrics(claims: List[Dict[str, Any]], speakers: List[str]) -> Dict[str, 
 async def _one_run(extractor: ClaimsExtractor, inp: ClaimsExtractInput, prompt: str, sem: asyncio.Semaphore) -> Dict[str, Any]:
     async with sem:
         t0 = time.time()
-        extraction, model = await extractor.extract_claims(prompt)
-        result = assemble_result(inp, extraction.model_dump(), [], model_used=model)
+        extraction = await extractor.extract_claims(prompt)
+        result = assemble_result(inp, extraction.model_dump(), [], model_used=settings.claims_extract_model)
         return {
             "elapsed_s": round(time.time() - t0, 1),
             "claims": [

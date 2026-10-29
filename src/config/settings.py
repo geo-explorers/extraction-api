@@ -90,15 +90,11 @@ class Settings(BaseSettings):
         description="Google Gemini API key"
     )
     # The Gemini ladder (src/infrastructure/gemini_ladder.py): when a model's
-    # per-day quota runs out on a key, or the key stops working, calls move to
-    # the same model on the fallback key, then to the fallback model on each key.
+    # per-day quota runs out on GEMINI_API_KEY, or the key stops working, calls
+    # move to the same model on the fallback key. The model never changes.
     gemini_fallback_api_key: str | None = Field(
         default=None,
-        description="Second Gemini API key, from another Google project, used when GEMINI_API_KEY is out (unset = no key rung)"
-    )
-    gemini_fallback_model: str = Field(
-        default="gemini-3.8-flash",
-        description="Model used when the requested model is out on every key (empty = no model rung)"
+        description="Second Gemini API key, from another Google project, used when GEMINI_API_KEY is out (unset = no fallback)"
     )
     perplexity_api_key: str | None = Field(
         default=None,

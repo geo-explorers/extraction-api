@@ -1,26 +1,23 @@
-"""Gemini calls that step down a ladder instead of failing when a key runs out.
+"""Gemini calls that move to a second API key instead of failing when a key runs out.
 
-The rungs, in order:
-
-1. the requested model on GEMINI_API_KEY
-2. the same model on GEMINI_FALLBACK_API_KEY
-3. GEMINI_FALLBACK_MODEL on GEMINI_API_KEY
-4. GEMINI_FALLBACK_MODEL on GEMINI_FALLBACK_API_KEY
+The rungs, in order: GEMINI_API_KEY, then GEMINI_FALLBACK_API_KEY. The model is
+never changed: every rung calls the model the caller asked for.
 
 A rung is skipped only after an error that retrying will not clear:
 
 - **The model's per-day request quota is used up** (a 429 that names a PerDay
   quota). Google resets these at midnight Pacific, so that model is skipped on
-  that key until the reset. The quota is per project and per model, which is
-  why the same key can still serve the fallback model.
+  that key until the reset. The quota is per project and per model, so other
+  models keep using the key.
 - **The key no longer works at all**: the monthly spending cap, 402 (prepaid
-  credit used up), 401/403, or an invalid key. The key is skipped on every
+  credit used up), 401/403, or an invalid key. The key is skipped for every
   model and tried again after KEY_RETRY, in case someone fixed it.
 
 Any other error (a per-minute 429, a 5xx, a bad request) is raised unchanged,
-so each caller's own retries behave as before. An unset fallback key or model
-simply removes its rungs. Skip state is per process, which matches the
-worker's and the API's scale today (same caveat as spend_guard).
+so each caller's own retries behave as before. An unset fallback key leaves a
+single rung, which is the behaviour before the ladder. Skip state is per
+process, which matches the worker's and the API's scale today (same caveat as
+spend_guard).
 """
 
 import hashlib
@@ -42,7 +39,7 @@ T = TypeVar("T")
 KEY_RETRY = timedelta(hours=1)
 # Per-day quotas reset at midnight Pacific: 07:00 UTC in summer, 08:00 UTC in
 # winter. 08:00 UTC is past both, at the cost of up to one extra hour on the
-# next rung in summer, and needs no time-zone database in the image.
+# fallback key in summer, and needs no time-zone database in the image.
 _DAILY_RESET_HOUR_UTC = 8
 
 MODEL_OUT = "model"  # this model on this key, until the daily reset
@@ -54,7 +51,7 @@ _skips: Dict[Tuple[str, Optional[str]], Tuple[datetime, str]] = {}
 
 
 class GeminiUnavailable(Exception):
-    """Every rung of the ladder is out for this call."""
+    """Every key is out for this call's model."""
 
 
 def classify(err: Exception) -> Optional[str]:
@@ -98,60 +95,56 @@ def _skip_reason(fp: str, model: str, now: datetime) -> Optional[str]:
     return None
 
 
-def rungs(model: str, api_key: Optional[str] = None) -> List[Tuple[str, str, str]]:
-    """(key label, key, model) per rung, in order. `api_key` replaces GEMINI_API_KEY."""
+def rungs(api_key: Optional[str] = None) -> List[Tuple[str, str]]:
+    """(key label, key) per rung, in order. `api_key` replaces GEMINI_API_KEY."""
     keys: List[Tuple[str, str]] = []
     for label, key in (("primary", api_key or settings.gemini_api_key), ("fallback", settings.gemini_fallback_api_key)):
         key = (key or "").strip()
         if key and key not in (k for _, k in keys):
             keys.append((label, key))
-    models = [model]
-    fallback_model = (settings.gemini_fallback_model or "").strip()
-    if fallback_model and fallback_model != model:
-        models.append(fallback_model)
-    return [(label, key, m) for m in models for label, key in keys]
+    return keys
 
 
-def run(model: str, call: Callable[[str, str], T], api_key: Optional[str] = None) -> T:
-    """Return `call(key, model)` from the first rung that is not out.
+def run(model: str, call: Callable[[str], T], api_key: Optional[str] = None) -> T:
+    """Return `call(key)` from the first key that is not out for `model`.
 
-    Steps down past a rung on a MODEL_OUT or KEY_OUT error and remembers it, so
-    later calls skip that rung without spending a request on it. Raises
-    GeminiUnavailable when every rung is out.
+    Moves past a key on a MODEL_OUT or KEY_OUT error and remembers it, so later
+    calls skip that key without spending a request on it. Raises
+    GeminiUnavailable when every key is out.
     """
-    requested = rungs(model, api_key)
-    if not requested:
+    keys = rungs(api_key)
+    if not keys:
         raise GeminiUnavailable("GEMINI_API_KEY is not configured")
     out: List[str] = []
     last: Optional[Exception] = None
-    for i, (label, key, m) in enumerate(requested):
+    for i, (label, key) in enumerate(keys):
         fp = _fingerprint(key)
         now = _now()
-        reason = _skip_reason(fp, m, now)
+        reason = _skip_reason(fp, model, now)
         if reason is None:
             try:
-                result = call(key, m)
+                result = call(key)
             except Exception as err:
                 scope = classify(err)
                 if scope is None:
                     raise
                 last = err
                 if scope == MODEL_OUT:
-                    until, reason = _next_daily_reset(now), f"per-day quota for {m} used up"
+                    until, reason = _next_daily_reset(now), f"per-day quota for {model} used up"
                 else:
                     until, reason = now + KEY_RETRY, f"key refused (HTTP {getattr(err, 'code', None) or '?'})"
                 with _lock:
-                    _skips[(fp, m if scope == MODEL_OUT else None)] = (until, reason)
+                    _skips[(fp, model if scope == MODEL_OUT else None)] = (until, reason)
                 logger.warning(
-                    f"Gemini ladder: {m} on the {label} key is out ({reason}); "
-                    f"skipping it until {until:%Y-%m-%d %H:%M} UTC and stepping down"
+                    f"Gemini ladder: the {label} key is out for {model} ({reason}); "
+                    f"skipping it until {until:%Y-%m-%d %H:%M} UTC"
                 )
             else:
                 if i:
-                    logger.info(f"Gemini ladder: {model} answered by {m} on the {label} key (rung {i + 1})")
+                    logger.info(f"Gemini ladder: {model} answered on the {label} key")
                 return result
-        out.append(f"{m} on the {label} key: {reason}")
-    raise GeminiUnavailable(f"every Gemini rung is out for {model}: " + "; ".join(out)) from last
+        out.append(f"the {label} key: {reason}")
+    raise GeminiUnavailable(f"every Gemini key is out for {model}: " + "; ".join(out)) from last
 
 
 class _Models:
@@ -165,8 +158,7 @@ class _Models:
 class GeminiClient:
     """Stands in for genai.Client where only `models.generate_content` is used.
 
-    Each call runs down the ladder. The response's `model_version` is set to the
-    model that answered, so a caller can report a step down to the fallback model.
+    Each call runs down the ladder of keys, always with the model it was given.
     """
 
     def __init__(self, api_key: Optional[str] = None, http_options: Optional[types.HttpOptions] = None):
@@ -181,9 +173,4 @@ class GeminiClient:
         return self._clients[key]
 
     def _generate_content(self, model: str, kwargs: Dict[str, Any]) -> types.GenerateContentResponse:
-        def call(key: str, m: str) -> types.GenerateContentResponse:
-            response = self._client(key).models.generate_content(model=m, **kwargs)
-            response.model_version = m
-            return response
-
-        return run(model, call, self._api_key)
+        return run(model, lambda key: self._client(key).models.generate_content(model=model, **kwargs), self._api_key)

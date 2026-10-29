@@ -79,10 +79,10 @@ async def topics(input: ClaimsExtractInput, ctx: Context) -> dict:
 async def extract(input: ClaimsExtractInput, ctx: Context) -> dict:
     topic_list = ctx.task_output(topics)["topics"]
     spend_guard.check_and_record("gemini")
-    extraction, model = await _extractor().extract_claims(
+    extraction = await _extractor().extract_claims(
         build_extract_prompt(input, topic_list)
     )
-    return {"extraction": extraction.model_dump(), "model": model}
+    return {"extraction": extraction.model_dump()}
 
 
 @claims_workflow.task(
@@ -108,17 +108,14 @@ async def takeaways(input: ClaimsExtractInput, ctx: Context) -> dict:
 )
 @with_overrides(label="claims.extract:finalize")
 async def finalize(input: ClaimsExtractInput, ctx: Context) -> ClaimsExtractResult:
-    extracted = ctx.task_output(extract)
+    extraction = ctx.task_output(extract)["extraction"]
     takeaway_texts = ctx.task_output(takeaways)["takeaways"]
 
-    # The model that answered the extract step: the ladder's fallback model
-    # after a step down (an extract output checkpointed before the ladder
-    # carries none, so it falls back to the configured model).
     result = assemble_result(
         input,
-        extracted["extraction"],
+        extraction,
         takeaway_texts,
-        model_used=extracted.get("model") or _extractor().model_name,
+        model_used=_extractor().model_name,
     )
     logger.info(
         f"finalize claims.extract ({input.media_type}, grouping={input.grouping}): "
