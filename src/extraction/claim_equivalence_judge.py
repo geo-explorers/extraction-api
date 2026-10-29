@@ -19,7 +19,6 @@ import json
 import time
 from typing import List, Literal, Optional, Sequence
 
-from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 from pydantic import BaseModel, Field
@@ -27,6 +26,7 @@ from pydantic import BaseModel, Field
 from src.config.overrides import llm, prompts
 from src.config.prompts.claims_judge_equivalence_prompt import CLAIMS_JUDGE_EQUIVALENCE_RUBRIC
 from src.config.settings import settings
+from src.infrastructure.gemini_ladder import GeminiClient
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -121,7 +121,7 @@ class ClaimEquivalenceJudge:
         key = api_key or settings.gemini_api_key
         if not key:
             raise ValueError("GEMINI_API_KEY is required for ClaimEquivalenceJudge")
-        self.client = genai.Client(
+        self.client = GeminiClient(
             api_key=key, http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_SECONDS * 1000)
         )
         self._explicit_model = model

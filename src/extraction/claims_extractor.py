@@ -13,15 +13,15 @@ this module stays provider-mechanics only.
 
 import asyncio
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field
-from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
 from src.config.overrides import llm
 from src.config.settings import settings
+from src.infrastructure.gemini_ladder import GeminiClient, GeminiUnavailable
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -141,8 +141,7 @@ class ClaimsExtractor:
         if not settings.gemini_api_key:
             raise ValueError("GEMINI_API_KEY required for claim extraction")
 
-        self.client = genai.Client(
-            api_key=settings.gemini_api_key,
+        self.client = GeminiClient(
             http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_SECONDS * 1000),
         )
         self._explicit_model: Optional[str] = None
@@ -181,8 +180,15 @@ class ClaimsExtractor:
     async def _call_gemini(
         self, prompt: str, config: types.GenerateContentConfig, step_name: str
     ) -> str:
+        """The raw response text of `_generate`."""
+        return (await self._generate(prompt, config, step_name)).text
+
+    async def _generate(
+        self, prompt: str, config: types.GenerateContentConfig, step_name: str
+    ) -> types.GenerateContentResponse:
         """Call Gemini with app-level retries on transient errors (same policy
-        as PremiumClaimExtractor). Returns the raw response text."""
+        as PremiumClaimExtractor). Its model_version names the model that
+        answered, which differs from model_name after a ladder step down."""
         for attempt in range(1, APP_MAX_RETRIES + 1):
             try:
                 start = time.time()
@@ -203,7 +209,7 @@ class ClaimsExtractor:
                         f"Gemini {step_name} succeeded on attempt "
                         f"{attempt}/{APP_MAX_RETRIES} ({elapsed:.1f}s)"
                     )
-                return response.text
+                return response
 
             except APIError as e:
                 status_code = getattr(e, "code", None)
@@ -221,8 +227,9 @@ class ClaimsExtractor:
                 )
                 raise
 
-            except ValueError:
-                # Empty response is not retryable — fail immediately.
+            except (ValueError, GeminiUnavailable):
+                # Empty response is not retryable, nor is every ladder rung
+                # being out (that lasts until a quota reset) — fail immediately.
                 raise
 
             except Exception as e:
@@ -254,19 +261,20 @@ class ClaimsExtractor:
         logger.info(f"Extracted {len(result.topics)} topics")
         return result.topics
 
-    async def extract_claims(self, prompt: str) -> LLMExtraction:
-        """The fused extraction call (claims + groups + quotes + summary).
+    async def extract_claims(self, prompt: str) -> Tuple[LLMExtraction, str]:
+        """The fused extraction call (claims + groups + quotes + summary), and
+        the model that answered it (the ladder's fallback model after a step down).
 
         An empty claims list is returned as-is (with a warning) rather than
         raised: a generalized endpoint can legitimately receive material with
         nothing extractable, and the caller should get an empty result, not a
         failed workflow run."""
-        response_text = await self._call_gemini(
+        response = await self._generate(
             prompt=prompt,
             config=self._config(LLMExtraction),
             step_name="claim extraction",
         )
-        result = LLMExtraction.model_validate_json(response_text)
+        result = LLMExtraction.model_validate_json(response.text)
         if not result.claims:
             logger.warning("Claim extraction returned zero claims")
         else:
@@ -274,7 +282,7 @@ class ClaimsExtractor:
                 f"Extracted {len(result.claims)} claims, {len(result.groups)} groups, "
                 f"{len(result.quotes)} quotes"
             )
-        return result
+        return result, response.model_version or self.model_name
 
     async def extract_takeaways(self, prompt: str) -> List[str]:
         """Key-takeaway selection over extracted claims. Raises on empty — a

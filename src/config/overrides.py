@@ -85,6 +85,7 @@ LLM_SETTINGS: tuple[str, ...] = (
 LLM_SETTINGS_NOT_OVERRIDABLE: tuple[str, ...] = (
     "ollama_embedding_model",  # embedding dimensions are baked into stored vectors
     "premium_extraction_rate_limit_max_tokens",  # a rate-limit budget, not a call parameter
+    "gemini_fallback_model",  # the ladder's last rung for every call, an outage setting
 )
 LLM_SETTING_SUFFIXES = ("_model", "_temperature", "_thinking_level", "_max_tokens")
 

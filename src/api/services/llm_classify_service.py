@@ -11,12 +11,12 @@ The google-genai call is blocking; callers on an event loop offload via
 ``asyncio.to_thread``.
 """
 
-from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
 from src.config.overrides import llm
 from src.config.settings import settings
+from src.infrastructure.gemini_ladder import GeminiClient
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -61,10 +61,7 @@ def classify_items(
     if not settings.gemini_api_key:
         raise ValueError("GEMINI_API_KEY required for LLM classification")
 
-    client = genai.Client(
-        api_key=settings.gemini_api_key,
-        http_options=types.HttpOptions(timeout=_GEMINI_TIMEOUT_MS),
-    )
+    client = GeminiClient(http_options=types.HttpOptions(timeout=_GEMINI_TIMEOUT_MS))
     config = types.GenerateContentConfig(
         temperature=(
             llm.get("gemini_space_assignment_temperature")

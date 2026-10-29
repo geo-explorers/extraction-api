@@ -65,7 +65,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-from google import genai
 from google.genai import types
 
 from src.api.schemas.news_claim_extract_schema import (
@@ -81,6 +80,7 @@ from src.api.schemas.news_collection_review_schema import (
 from src.api.services.claim_anchor_guard import calendar_block, check_claim, source_anchors
 from src.config.overrides import bind_context, llm, prompts
 from src.config.settings import settings
+from src.infrastructure.gemini_ladder import GeminiClient
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -890,10 +890,7 @@ def order_and_case(
 
 
 def _gemini(prompt: str, thinking_level: Optional[str]) -> str:
-  client = genai.Client(
-    api_key=settings.gemini_api_key,
-    http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
-  )
+  client = GeminiClient(http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS))
   kwargs: dict = {"temperature": llm.get("news_collection_review_temperature"), "response_mime_type": "application/json"}
   if thinking_level:
     kwargs["thinking_config"] = types.ThinkingConfig(thinking_level=thinking_level)

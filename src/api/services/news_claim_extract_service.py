@@ -2,7 +2,6 @@ import json
 import re
 from typing import List
 
-from google import genai
 from google.genai import types
 
 from src.api.schemas.news_claim_extract_schema import (
@@ -13,6 +12,7 @@ from src.config.overrides import llm, prompts
 from src.api.services.claim_anchor_enforce import enforce_anchors
 from src.api.services.claim_anchor_guard import calendar_block, describe_published, source_anchors
 from src.config.settings import settings
+from src.infrastructure.gemini_ladder import GeminiClient
 from src.infrastructure.logger import get_logger
 from src.api.services.news_debate_claim_service import (
   extract_news_debate_claims,
@@ -83,10 +83,7 @@ def extract_news_claims_factual(
   prompt = _build_prompt(headline, sources, topics)
 
   try:
-    client = genai.Client(
-      api_key=settings.gemini_api_key,
-      http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
-    )
+    client = GeminiClient(http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS))
     config_kwargs: dict = {"temperature": llm.get("gemini_news_claim_temperature")}
     # thinking_level is a Gemini-3+ control. Only attach it when set, so a
     # revert to a pro model (e.g. GEMINI_NEWS_CLAIM_MODEL=gemini-3.1-pro-preview
