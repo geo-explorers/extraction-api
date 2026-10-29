@@ -89,6 +89,13 @@ class Settings(BaseSettings):
         default=None,
         description="Google Gemini API key"
     )
+    # The Gemini ladder (src/infrastructure/gemini_ladder.py): when a model's
+    # per-day quota runs out on GEMINI_API_KEY, or the key stops working, calls
+    # move to the same model on the fallback key. The model never changes.
+    gemini_fallback_api_key: str | None = Field(
+        default=None,
+        description="Second Gemini API key, from another Google project, used when GEMINI_API_KEY is out (unset = no fallback)"
+    )
     perplexity_api_key: str | None = Field(
         default=None,
         description="Perplexity API key (Decisions API, used by the perplexity decision model)"

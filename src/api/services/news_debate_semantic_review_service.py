@@ -18,7 +18,6 @@ import json
 import re
 from typing import Callable
 
-from google import genai
 from google.genai import types
 
 from src.api.schemas.news_claim_extract_schema import (
@@ -39,6 +38,7 @@ from src.api.schemas.news_debate_semantic_review_schema import (
 )
 from src.config.overrides import llm, prompts
 from src.config.settings import settings
+from src.infrastructure.gemini_ladder import GeminiClient
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -292,10 +292,7 @@ def second_opinion(
 
 
 def _gemini_json(prompt: str, schema, label: str):
-  client = genai.Client(
-    api_key=settings.gemini_api_key,
-    http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
-  )
+  client = GeminiClient(http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS))
   config_kwargs: dict = {
     "temperature": llm.get("gemini_news_debate_review_temperature"),
     "response_mime_type": "application/json",

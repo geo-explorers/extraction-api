@@ -4,12 +4,12 @@ import asyncio
 import time
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
-from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
 from src.config.overrides import llm, prompts
 from src.config.settings import settings
+from src.infrastructure.gemini_ladder import GeminiClient
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,8 +71,7 @@ class PremiumClaimExtractor:
         if not settings.gemini_api_key:
             raise ValueError("GEMINI_API_KEY required for premium extraction")
 
-        self.client = genai.Client(
-            api_key=settings.gemini_api_key,
+        self.client = GeminiClient(
             http_options=types.HttpOptions(
                 timeout=GEMINI_TIMEOUT_SECONDS * 1000,
             )

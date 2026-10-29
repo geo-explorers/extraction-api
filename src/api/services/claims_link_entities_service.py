@@ -15,7 +15,6 @@ import json
 import re
 from typing import Iterable, List
 
-from google import genai
 from google.genai import types
 
 from src.api.schemas.claims_link_entities_schema import (
@@ -26,6 +25,7 @@ from src.api.schemas.claims_link_entities_schema import (
 from src.config.overrides import llm
 from src.config.prompts.claims_link_entities_prompt import build_user_prompt
 from src.config.settings import settings
+from src.infrastructure.gemini_ladder import GeminiClient
 
 from src.infrastructure.logger import get_logger
 
@@ -133,10 +133,7 @@ def link_claim_entities(
         claims=request.claims, facets=populated, context=request.context
     )
 
-    client = genai.Client(
-        api_key=settings.gemini_api_key,
-        http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
-    )
+    client = GeminiClient(http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS))
     config_kwargs: dict = {"temperature": llm.get("claims_link_temperature")}
     # Gemini 3+ control; attach only when set so 2.5-era model overrides run clean.
     thinking_level = (llm.get("claims_link_thinking_level") or "").strip()

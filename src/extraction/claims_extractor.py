@@ -16,12 +16,12 @@ import time
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
-from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
 from src.config.overrides import llm
 from src.config.settings import settings
+from src.infrastructure.gemini_ladder import GeminiClient, GeminiUnavailable
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -141,8 +141,7 @@ class ClaimsExtractor:
         if not settings.gemini_api_key:
             raise ValueError("GEMINI_API_KEY required for claim extraction")
 
-        self.client = genai.Client(
-            api_key=settings.gemini_api_key,
+        self.client = GeminiClient(
             http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_SECONDS * 1000),
         )
         self._explicit_model: Optional[str] = None
@@ -221,8 +220,9 @@ class ClaimsExtractor:
                 )
                 raise
 
-            except ValueError:
-                # Empty response is not retryable — fail immediately.
+            except (ValueError, GeminiUnavailable):
+                # Empty response is not retryable, nor is every Gemini key
+                # being out (that lasts until a quota reset) — fail immediately.
                 raise
 
             except Exception as e:
