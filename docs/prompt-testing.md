@@ -274,7 +274,7 @@ current defaults. Delete the prompt keys you are not overriding. For `POST /task
     "news_debate_semantic_review.claude_system": ""
   },
   "llm_overrides": {
-    "news_claim_claude_model": "claude-sonnet-4-5",
+    "news_claim_claude_model": "claude-sonnet-4-6",
     "news_claim_claude_max_tokens": 32000,
     "gemini_news_claim_temperature": 0.2,
     "gemini_news_debate_temperature": 0.0,
@@ -304,7 +304,7 @@ current defaults. Delete the prompt keys you are not overriding. For `POST /task
     "news_claim_extract": ""
   },
   "llm_overrides": {
-    "news_claim_claude_model": "claude-sonnet-4-5",
+    "news_claim_claude_model": "claude-sonnet-4-6",
     "gemini_news_claim_model": "gemini-3.5-flash",
     "gemini_news_claim_temperature": 0.2,
     "gemini_news_claim_thinking_level": "low"
@@ -414,7 +414,7 @@ current defaults. Delete the prompt keys you are not overriding. For `POST /task
     "news_topics_entities.user_rules": ""
   },
   "llm_overrides": {
-    "news_claim_claude_model": "claude-sonnet-4-5",
+    "news_claim_claude_model": "claude-sonnet-4-6",
     "gemini_news_claim_temperature": 0.2
   }
 }
