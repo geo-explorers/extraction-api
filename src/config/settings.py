@@ -291,9 +291,11 @@ class Settings(BaseSettings):
     # errors out, so a Gemini outage no longer drops the pipeline onto a weaker
     # locally-defined prompt (root cause of the 2026-06-10 inverted-claim
     # incident). Requires anthropic_api_key (ANTHROPIC_API_KEY env).
+    # claude-sonnet-4-6 since 2026-11-05: the Anthropic account the services moved to that day (Arturas's) has no
+    # claude-sonnet-4-5, which answered 404 "model: claude-sonnet-4-5" (topic extraction failed after 3 attempts).
     news_claim_claude_model: str = Field(
-        default="claude-sonnet-4-5",
-        description="Anthropic Claude model for the news-claim Claude fallback endpoint. Same strong prompt as the Gemini path."
+        default="claude-sonnet-4-6",
+        description="Anthropic Claude model for the news-claim Claude fallback endpoint (also topic extraction). Same strong prompt as the Gemini path."
     )
     news_claim_claude_max_tokens: int = Field(
         default=32000,
