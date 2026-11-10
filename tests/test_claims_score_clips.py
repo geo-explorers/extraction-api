@@ -70,7 +70,11 @@ class _FakeDecider:
             wanted = self.replies.get(target, "none")
             if isinstance(wanted, int):
                 wanted = next(key for key, label in options.items() if label and label.startswith(f"Clip {wanted + 1} "))
-            reply = {key: (0.8 if key == wanted else 0.2 / (len(options) - 1)) for key in options}
+            if self.same_answers:
+                # The glitch: one distribution for every question, whatever its options.
+                reply = {key: 1 / len(options) for key in options}
+            else:
+                reply = {key: (0.8 if key == wanted else 0.2 / (len(options) - 1)) for key in options}
             return {
                 **{name: YesNoAnswer(probability=p) for name, p in yes.items()},
                 "responds_to": ChoiceAnswer(choice=wanted, probabilities=reply),
@@ -161,7 +165,7 @@ async def test_a_lone_clip_is_its_own_opener():
     decisions = await core.decide_clips(one, fake, "m")
     result = core.assemble_result(one, decisions, "fake", "m")
     assert len(fake.requests) == 1
-    assert result.clips[0].hook == 0.5 and result.clips[0].decisions["opener"] == 1.0
+    assert result.clips[0].hook == 1.0 and result.clips[0].decisions["opener"] == 1.0
 
 
 @pytest.mark.asyncio
@@ -175,10 +179,27 @@ async def test_one_failed_clip_fails_the_run_and_stops_the_others():
 
 @pytest.mark.asyncio
 async def test_a_glitched_run_fails_and_can_be_retried():
+    # Two clips each, so every clip is offered the same number of replies.
+    even = _input(
+        clips=[
+            *_input().clips[:2],
+            ScoreClip(speaker="Urban", text="Closure is entitlement."),
+            ScoreClip(speaker="Susan", text="Silence is not an answer."),
+        ]
+    )
     for fake in (_FakeDecider(flat_opener=True), _FakeDecider(same_answers=True)):
         with pytest.raises(DecisionError, match="provider glitch") as failed:
-            await core.decide_clips(_input(), fake, "m")
+            await core.decide_clips(even, fake, "m")
         assert failed.value.retryable
+
+
+@pytest.mark.asyncio
+async def test_clean_clips_answering_yes_to_everything_are_not_a_glitch():
+    # Every clip saturates at yes on the three yes/no questions, as a pool of each debater's best
+    # clips well might; their replies still differ, so the run stands.
+    fake = _FakeDecider(yes={i: {name: 1.0 for name in core.YES_NO} for i in range(3)}, replies={0: "none", 1: 0, 2: "elsewhere"})
+    decisions = await core.decide_clips(_input(), fake, "m")
+    assert len(decisions.clips) == 3
 
 
 def test_answers_of_the_wrong_shape_fail_the_run():

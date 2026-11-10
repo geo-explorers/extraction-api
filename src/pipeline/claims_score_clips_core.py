@@ -176,13 +176,23 @@ def clip_decisions(input: ClaimsScoreClipsInput, target: int, answers: Mapping[s
 def check_for_glitch(clip_answers: Sequence[Mapping[str, Answer]], rounds: Sequence[Sequence[float]]) -> None:
     """Fail the run on the provider's identical-distribution glitch, as claims.score_highlights
     does: three or more clips with the same answers to every question, or an opener round that
-    gives every clip the same probability. Retryable, so the engine asks again."""
+    gives every clip the same probability. Retryable, so the engine asks again.
+
+    A clip's signature is its three yes/no probabilities and its whole reply distribution, so
+    clean clips that all answer yes to the yes/no questions (a likely pool, and one a saturating
+    or rounding provider could answer identically) still differ by their reply options, which
+    name different clips with different probabilities."""
     if len(clip_answers) >= 3:
         signatures = [
             [answers[name].probability for name in YES_NO if isinstance(answers.get(name), YesNoAnswer)]
+            + (
+                sorted(reply.probabilities.values())
+                if isinstance(reply := answers.get(RESPONDS_TO), ChoiceAnswer)
+                else []
+            )
             for answers in clip_answers
         ]
-        if all(len(s) == len(YES_NO) for s in signatures) and all(same_distribution(signatures[0], s) for s in signatures[1:]):
+        if all(len(s) > len(YES_NO) for s in signatures) and all(same_distribution(signatures[0], s) for s in signatures[1:]):
             raise DecisionError("every clip got the same answers: provider glitch", retryable=True)
     for round, probabilities in enumerate(rounds):
         if flat_distribution(probabilities):
@@ -216,7 +226,8 @@ def assemble_result(
 ) -> ClaimsScoreClipsResult:
     if not (len(decisions.clips) == len(decisions.openers) == len(input.clips)):
         raise DecisionError(f"{len(decisions.clips)} answer sets for {len(input.clips)} clips")
-    hooks = percentiles(decisions.openers)
+    # A lone clip is the debate's best opener, so its hook is the top, not the middle.
+    hooks = percentiles(decisions.openers) if len(decisions.openers) > 1 else [1.0]
     scored = [
         ScoredClip(
             index=index,
