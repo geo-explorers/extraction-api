@@ -24,6 +24,7 @@ from src.config.prompts import claim_extraction_prompt as _podcast_claims
 from src.config.prompts import claim_keyword_extraction_prompt as _claim_keywords
 from src.config.prompts import claims_judge_equivalence_prompt as _judge
 from src.config.prompts import claims_link_entities_prompt as _link
+from src.config.prompts import claims_score_clips_prompt as _clips
 from src.config.prompts import claims_score_highlights_prompt as _highlights
 from src.config.prompts import guest_extraction_prompt as _guest
 from src.config.prompts import host_extraction_prompt as _host
@@ -150,6 +151,21 @@ for _axis, (_instructions, _levels) in _highlights.DEBATE_AXES.items():
     _register(f"claims_score_highlights.debate.{_axis}", _instructions, formatted=False, module=_highlights)
     for _level, _text in _levels.items():
         _register(f"claims_score_highlights.debate.{_axis}.{_level}", _text, formatted=False, module=_highlights)
+
+# claims.score_clips (GEO-3614), under the media type: three yes/no questions about
+# a clip as heard (instructions and yes/no criteria), the reply choice with its two
+# fixed options, and the listwise opener choice.
+for _name, _texts in (
+    ("own_side", (_clips.DEBATE_OWN_SIDE_INSTRUCTIONS, _clips.DEBATE_OWN_SIDE_YES, _clips.DEBATE_OWN_SIDE_NO)),
+    ("standalone", (_clips.DEBATE_STANDALONE_INSTRUCTIONS, _clips.DEBATE_STANDALONE_YES, _clips.DEBATE_STANDALONE_NO)),
+    ("complete", (_clips.DEBATE_COMPLETE_INSTRUCTIONS, _clips.DEBATE_COMPLETE_YES, _clips.DEBATE_COMPLETE_NO)),
+):
+    for _suffix, _text in zip(("", ".yes", ".no"), _texts):
+        _register(f"claims_score_clips.debate.{_name}{_suffix}", _text, formatted=False, module=_clips)
+_register("claims_score_clips.debate.responds_to", _clips.DEBATE_RESPONDS_TO_INSTRUCTIONS, formatted=False, module=_clips)
+_register("claims_score_clips.debate.responds_to.none", _clips.DEBATE_RESPONDS_TO_NONE, formatted=False, module=_clips)
+_register("claims_score_clips.debate.responds_to.elsewhere", _clips.DEBATE_RESPONDS_TO_ELSEWHERE, formatted=False, module=_clips)
+_register("claims_score_clips.debate.opener", _clips.DEBATE_OPENER_INSTRUCTIONS, formatted=False, module=_clips)
 
 _register("claims_extract.role", _ce_sections.ROLE_SECTION, formatted=True, module=_ce_sections)
 _register("claims_extract.core", _ce_core.CORE_CLAIM_RULES, formatted=False, module=_ce_core)
