@@ -39,7 +39,7 @@ import hashlib
 import random
 import weakref
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Sequence
+from typing import TYPE_CHECKING, Dict, List, Mapping, Sequence
 
 from src.api.schemas.claims_score_highlights_schema import (
     ClaimsScoreHighlightsInput,
@@ -49,6 +49,9 @@ from src.api.schemas.claims_score_highlights_schema import (
     ScoredClaim,
 )
 from src.config.overrides import prompts
+
+if TYPE_CHECKING:  # claims_score_clips_core imports this module.
+    from src.api.schemas.claims_score_clips_schema import ClaimsScoreClipsInput
 from src.decisions.base import (
     Answer,
     Choice,
@@ -263,7 +266,9 @@ async def decide_claims(
     return await run_requests(claim_requests(input), decider, model)
 
 
-def _header(input: ClaimsScoreHighlightsInput) -> Dict[str, str]:
+def header(input: "ClaimsScoreHighlightsInput | ClaimsScoreClipsInput") -> Dict[str, str]:
+    """The title and context sections, each only when it has text. Shared with
+    claims.score_clips, whose input carries the same two fields."""
     content: Dict[str, str] = {}
     if input.title:
         content["title"] = input.title
@@ -277,8 +282,14 @@ def shuffled_order(input: ClaimsScoreHighlightsInput, round: int) -> List[int]:
     round and the claim texts, so the same debate is shuffled the same way every
     time it is scored: a re-score differs from the first only when the model
     does."""
-    digest = hashlib.sha256("\n".join([str(round), *(c.text for c in input.claims)]).encode()).digest()
-    order = list(range(len(input.claims)))
+    return seeded_order([c.text for c in input.claims], round)
+
+
+def seeded_order(texts: Sequence[str], round: int) -> List[int]:
+    """Indices of `texts` shuffled by a seed from the round and the texts, so the
+    same list is shown the same way every run. Shared with claims.score_clips."""
+    digest = hashlib.sha256("\n".join([str(round), *texts]).encode()).digest()
+    order = list(range(len(texts)))
     random.Random(int.from_bytes(digest[:8], "big")).shuffle(order)
     return order
 
@@ -288,7 +299,7 @@ def moment_requests(input: ClaimsScoreHighlightsInput) -> List[Request]:
     different order. The options are named by the claim's number in the input
     list, so the answers map back whatever the order shown."""
     instructions = prompts.get(f"{_P}{input.media_type}.{MOMENT}")
-    content = {**_header(input), "transcript": render_transcript(input.documents)}
+    content = {**header(input), "transcript": render_transcript(input.documents)}
     requests: List[Request] = []
     for round in range(MOMENT_ROUNDS):
         options = {
@@ -343,13 +354,13 @@ def repeat_requests(input: ClaimsScoreHighlightsInput) -> List[Request]:
         return []
     p = f"{_P}{input.media_type}.{REPEAT}"
     instructions, none = prompts.get(p), prompts.get(f"{p}.{REPEAT_NONE}")
-    header = _header(input)
+    sections = header(input)
     labels = [repeat_label(input, i) for i in range(count)]
     requests: List[Request] = []
     for target in range(count):
         options: Dict[str, str] = {key: labels[j] for key, j in repeat_options(count, target)}
         options[REPEAT_NONE] = none
-        content = {**header, "target_claim": labels[target]}
+        content = {**sections, "target_claim": labels[target]}
         requests.append((f"repeat claim {target}", content, {REPEAT: Choice(instructions=instructions, options=options)}))
     return requests
 
@@ -424,11 +435,12 @@ def moment_scores(moments: Sequence[float], controversies: Sequence[float]) -> L
     ]
 
 
-def _same(a: Sequence[float], b: Sequence[float]) -> bool:
+def same_distribution(a: Sequence[float], b: Sequence[float]) -> bool:
+    """Two answers that agree to GLITCH_TOLERANCE on every probability."""
     return len(a) == len(b) and all(abs(x - y) <= GLITCH_TOLERANCE for x, y in zip(a, b))
 
 
-def _flat(values: Sequence[float]) -> bool:
+def flat_distribution(values: Sequence[float]) -> bool:
     """Three or more probabilities that are all the same number: an answer that
     did not tell its options apart. Two may honestly split evenly."""
     return len(values) >= 3 and max(values) - min(values) <= GLITCH_TOLERANCE
@@ -459,7 +471,7 @@ def check_for_glitch(
     usually answers properly. Nothing is returned, so nothing is published."""
     scales = [[a.probabilities for axis in AXES if isinstance(a := answers.get(axis), ScaleAnswer)] for answers in claim_answers]
     for index, vectors in enumerate(scales):
-        if len(vectors) == len(AXES) and all(_same(vectors[0], v) for v in vectors[1:]):
+        if len(vectors) == len(AXES) and all(same_distribution(vectors[0], v) for v in vectors[1:]):
             raise DecisionError(
                 f"claim {index} got one identical distribution for every axis question: provider glitch",
                 retryable=True,
@@ -470,10 +482,10 @@ def check_for_glitch(
             for answers, vectors in zip(claim_answers, scales)
             if isinstance(answers.get(ESSENTIAL), YesNoAnswer)
         ]
-        if len(signatures) == len(claim_answers) and all(_same(signatures[0], s) for s in signatures[1:]):
+        if len(signatures) == len(claim_answers) and all(same_distribution(signatures[0], s) for s in signatures[1:]):
             raise DecisionError("every claim got the same answers: provider glitch", retryable=True)
     for round, probabilities in enumerate(rounds):
-        if _flat(probabilities):
+        if flat_distribution(probabilities):
             raise DecisionError(f"moment round {round} gave every claim the same probability: provider glitch", retryable=True)
     repeats = [
         list(answer.probabilities.values())
@@ -481,12 +493,12 @@ def check_for_glitch(
         if isinstance(answer := answers.get(REPEAT), ChoiceAnswer)
     ]
     for index, values in enumerate(repeats):
-        if _flat(values):
+        if flat_distribution(values):
             raise DecisionError(
                 f"the repeat question for claim {index} gave every option the same probability: provider glitch",
                 retryable=True,
             )
-    if len(repeats) >= 3 and all(_same(repeats[0], values) for values in repeats[1:]):
+    if len(repeats) >= 3 and all(same_distribution(repeats[0], values) for values in repeats[1:]):
         raise DecisionError("every repeat question got the same answer: provider glitch", retryable=True)
 
 

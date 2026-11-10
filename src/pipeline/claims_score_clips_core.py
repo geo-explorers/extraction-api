@@ -13,8 +13,6 @@ shuffled orders and averaged, so a clip's probability does not depend on where
 it sat in the list. A clip's `hook` is its percentile on that average.
 """
 
-import hashlib
-import random
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Sequence
 
@@ -28,12 +26,13 @@ from src.config.overrides import prompts
 from src.decisions.base import Answer, Choice, ChoiceAnswer, DecisionError, DecisionModel, Question, YesNo, YesNoAnswer
 from src.pipeline.claims_score_highlights_core import (
     Request,
-    _flat,
-    _header,
-    _same,
+    flat_distribution,
+    header,
     percentiles,
     render_transcript,
     run_requests,
+    same_distribution,
+    seeded_order,
 )
 
 TASK = "claims.score_clips"
@@ -98,7 +97,7 @@ def build_content(input: ClaimsScoreClipsInput, target: int) -> Dict[str, str]:
     """What the model reads for one clip: the debate, every candidate clip, and the clip under
     test. Only the last section differs between the clips of a run."""
     return {
-        **_header(input),
+        **header(input),
         "transcript": render_transcript(input.documents),
         "candidate_clips": render_clips(input),
         "clip_under_test": clip_label(input.clips[target], target),
@@ -112,10 +111,7 @@ def clip_requests(input: ClaimsScoreClipsInput) -> List[Request]:
 def shuffled_order(input: ClaimsScoreClipsInput, round: int) -> List[int]:
     """The clip indices in the order round `round` shows them, seeded by the round and the clip
     words, so a re-score differs from the first only when the model does."""
-    digest = hashlib.sha256("\n".join([str(round), *(c.text for c in input.clips)]).encode()).digest()
-    order = list(range(len(input.clips)))
-    random.Random(int.from_bytes(digest[:8], "big")).shuffle(order)
-    return order
+    return seeded_order([c.text for c in input.clips], round)
 
 
 def opener_requests(input: ClaimsScoreClipsInput) -> List[Request]:
@@ -125,7 +121,7 @@ def opener_requests(input: ClaimsScoreClipsInput) -> List[Request]:
     if len(input.clips) < 2:
         return []
     instructions = prompts.get(f"{_P}{input.media_type}.{OPENER}")
-    content = {**_header(input), "transcript": render_transcript(input.documents)}
+    content = {**header(input), "transcript": render_transcript(input.documents)}
     requests: List[Request] = []
     for round in range(OPENER_ROUNDS):
         options = {str(i + 1): clip_label(input.clips[i], i) for i in shuffled_order(input, round)}
@@ -186,10 +182,10 @@ def check_for_glitch(clip_answers: Sequence[Mapping[str, Answer]], rounds: Seque
             [answers[name].probability for name in YES_NO if isinstance(answers.get(name), YesNoAnswer)]
             for answers in clip_answers
         ]
-        if all(len(s) == len(YES_NO) for s in signatures) and all(_same(signatures[0], s) for s in signatures[1:]):
+        if all(len(s) == len(YES_NO) for s in signatures) and all(same_distribution(signatures[0], s) for s in signatures[1:]):
             raise DecisionError("every clip got the same answers: provider glitch", retryable=True)
     for round, probabilities in enumerate(rounds):
-        if _flat(probabilities):
+        if flat_distribution(probabilities):
             raise DecisionError(f"opener round {round} gave every clip the same probability: provider glitch", retryable=True)
 
 
