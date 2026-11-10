@@ -214,7 +214,12 @@ def build_content(input: ClaimsScoreHighlightsInput, claim_index: int) -> Dict[s
 Request = tuple[str, Mapping[str, str], Mapping[str, Question]]
 
 
-async def run_requests(requests: Sequence[Request], decider: DecisionModel, model: str) -> List[Mapping[str, Answer]]:
+async def run_requests(
+    requests: Sequence[Request],
+    decider: DecisionModel,
+    model: str,
+    task: str = "claims.score_highlights",
+) -> List[Mapping[str, Answer]]:
     """The answers to `requests`, a few at a time, in request order. All or
     nothing: the first request that fails stops the rest (a refused key or an
     unknown model would fail every request the same way, and a rate limit that
@@ -229,7 +234,7 @@ async def run_requests(requests: Sequence[Request], decider: DecisionModel, mode
                 return await decider.decide(content, questions, model=model)
             except DecisionError as e:
                 logger.warning(
-                    f"claims.score_highlights: {label} failed "
+                    f"{task}: {label} failed "
                     f"({'retryable' if e.retryable else 'not retryable'}): {e}"
                 )
                 raise
