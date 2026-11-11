@@ -607,11 +607,10 @@ def test_the_first_clip_sets_the_debate_up_rather_than_opening_on_the_strongest_
         DEBATES_PICK_MOMENTS_SYSTEM,
     )
 
-    # Yaniv, 11 Nov: the first clip establishes the context; leading with the strongest clip is
-    # often a worse flow, and the strongest can come last. Neither the picker nor the judge
-    # rewards a reel for opening big.
-    assert "Clip 1 establishes the context" in DEBATES_PICK_MOMENTS_SYSTEM
-    assert "not for being the strongest line" in DEBATES_PICK_MOMENTS_SYSTEM
+    # Yaniv, 11 Nov: the first clip must establish the context. It can be strong, but setting the
+    # debate up comes first, and the strongest moment can come last.
+    assert "Clip 1 must set the debate up" in DEBATES_PICK_MOMENTS_SYSTEM
+    assert "setting the debate up comes first" in DEBATES_PICK_MOMENTS_SYSTEM
     assert "Does the first clip set the debate up?" in DEBATES_PICK_MOMENTS_JUDGE_SYSTEM
     for prompt in (DEBATES_PICK_MOMENTS_SYSTEM, DEBATES_PICK_MOMENTS_JUDGE_SYSTEM):
         assert "hook" not in prompt.lower()
