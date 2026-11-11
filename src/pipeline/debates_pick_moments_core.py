@@ -27,7 +27,7 @@ ROLES = ("opening", "answer", "rebuttal", "closing")
 # A clip opening on one of these leans on something the viewer did not hear, or on filler. The
 # prompt forbids it; the check asks again (a soft rule: the last answer is kept regardless).
 DANGLING_OPENERS = (
-    "and", "so", "but", "also", "because", "yeah", "yes", "okay", "ok", "um", "uh", "like",
+    "and", "but", "also", "because", "yeah", "yes", "okay", "ok", "um", "uh", "like",
     "that", "this", "they", "it's", "which", "then", "plus", "or",
 )
 

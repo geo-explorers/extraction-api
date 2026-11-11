@@ -236,15 +236,15 @@ def test_pick_sends_a_broken_reel_back_and_returns_the_fixed_one():
 
 def test_a_clip_opening_on_a_connective_is_asked_again_but_kept_on_the_last_answer():
     debate = _debate()
-    debate.sentences[3].text = "So it is a federal problem."
+    debate.sentences[3].text = "And it is a federal problem."
     accepted, problems, soft = pick.check(debate, GOOD)
     assert problems == [] and accepted is not None
-    assert any('opens on "so"' in p for p in soft), soft
+    assert any('opens on "and"' in p for p in soft), soft
     # Asked again while attempts remain; the last answer is kept with it.
     client = _FakeClaude(GOOD, GOOD, GOOD)
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert result.attempts == 3 and len(client.calls) == 3
-    assert 'opens on "so"' in client.calls[1]["messages"][2]["content"]
+    assert 'opens on "and"' in client.calls[1]["messages"][2]["content"]
 
 
 def test_pick_avoids_refused_stretches():
