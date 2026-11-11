@@ -601,16 +601,17 @@ def test_speakers_who_share_a_first_name_keep_their_full_names_in_the_story_and_
     assert "Clip 1, Alex Chen," in judged and "Clip 2, Alex Park," in judged
 
 
-def test_the_first_clip_sets_the_debate_up_rather_than_opening_on_the_strongest_line():
+def test_the_first_clip_must_provide_the_context_and_hooks_only_within_that():
     from src.config.prompts.debates_pick_moments_prompt import (
         DEBATES_PICK_MOMENTS_JUDGE_SYSTEM,
         DEBATES_PICK_MOMENTS_SYSTEM,
     )
 
-    # Yaniv, 11 Nov: the first clip must establish the context. It can be strong, but setting the
-    # debate up comes first, and the strongest moment can come last.
-    assert "Clip 1 must set the debate up" in DEBATES_PICK_MOMENTS_SYSTEM
-    assert "setting the debate up comes first" in DEBATES_PICK_MOMENTS_SYSTEM
-    assert "Does the first clip set the debate up?" in DEBATES_PICK_MOMENTS_JUDGE_SYSTEM
-    for prompt in (DEBATES_PICK_MOMENTS_SYSTEM, DEBATES_PICK_MOMENTS_JUDGE_SYSTEM):
-        assert "hook" not in prompt.lower()
+    # 11 Nov, with Yaniv: the first clip must provide the context; a hook is still wanted, but
+    # never in place of it, and the strongest moment can come last. Master asked only for a hook.
+    assert "Clip 1 must provide the context" in DEBATES_PICK_MOMENTS_SYSTEM
+    assert "Never trade the context for a stronger hook" in DEBATES_PICK_MOMENTS_SYSTEM
+    assert "Clip 1 is the hook" not in DEBATES_PICK_MOMENTS_SYSTEM
+    assert "doesn't grab them, they scroll away" not in DEBATES_PICK_MOMENTS_SYSTEM
+    assert "Does the first clip provide the context, and then hook?" in DEBATES_PICK_MOMENTS_JUDGE_SYSTEM
+    assert "Does the first clip hook?" not in DEBATES_PICK_MOMENTS_JUDGE_SYSTEM
