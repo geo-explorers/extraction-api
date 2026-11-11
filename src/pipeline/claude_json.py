@@ -43,8 +43,9 @@ PROVIDER = "anthropic"
 # budget covers every Claude call this service makes.
 SPEND_KEY = "claude"
 # One request's ceiling. The client does not retry on its own (max_retries=0): the engine retries
-# the run, so a task's execution timeout can be sized as attempts x this.
-REQUEST_TIMEOUT_S = 180
+# the run, so a task's execution timeout can be sized as attempts x this. 180 s cut off slow but
+# healthy answers during a story-reel backfill (GEO-3638), failing the whole run.
+REQUEST_TIMEOUT_S = 300
 
 T = TypeVar("T")
 
