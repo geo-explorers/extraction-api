@@ -40,13 +40,14 @@ DEBATES_PICK_MOMENTS_SPEC = TaskSpec(
     input_model=DebatesPickMomentsInput,
     output_model=DebatesPickMomentsResult,
     handler=_handle,
-    # Shares the Claude budget with the news fallback: one run at a time, so a
-    # backfill cannot starve news.
+    # Shares the Claude budget with the news fallback. Four runs at a time: one
+    # was too slow for a backfill batch (each run is 1-3 min of Claude calls), and
+    # four stays far under claude_global's 100 calls/min, so news is not starved.
     rate_limit_key="claude_global",
     # One unit per Claude call the run can make, as the news tasks reserve.
     rate_limit_units=CALLS,
     retries=2,
     execution_timeout=timedelta(seconds=execution_timeout_s(CALLS)),
     max_payload_bytes=DEBATES_PICK_MOMENTS_MAX_PAYLOAD_BYTES,
-    concurrency=1,
+    concurrency=4,
 )
