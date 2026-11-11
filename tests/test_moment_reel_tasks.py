@@ -282,15 +282,28 @@ def _long_first_turn(debate, lengths, texts=None):
         sentence.start_ms, sentence.end_ms = at + (k - 3) * 5_000, at + (k - 3) * 5_000 + 4_800
 
 
-def test_a_trim_marks_the_clip_and_asks_once_for_a_better_range():
+def test_a_trim_is_marked_on_the_clip_and_costs_no_extra_call():
     debate = _debate()
     _long_first_turn(debate, [12, 12, 11.8])  # 35.8 s
     (_, moments), problems, soft = pick.check(debate, GOOD)
-    assert problems == []
+    assert problems == [] and soft == []
     assert (moments[0].start_sentence, moments[0].trimmed_from_sentence) == (1, 0)
-    assert any("cut to start at sentence 1" in p for p in soft), soft
     # A clip that was not trimmed says so.
     assert moments[1].trimmed_from_sentence is None
+    # The trimmed reel is the answer: one call, not a send-back for each trim.
+    client = _FakeClaude(GOOD, GOOD, GOOD)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 1 and len(client.calls) == 1
+
+
+def test_a_trim_that_can_only_land_on_a_dangling_opener_is_not_nudged():
+    debate = _debate()
+    # 0-2 is 34 s; every start that fits (1 or 2) opens on a dangling word, so the trim takes 1.
+    _long_first_turn(debate, [10, 12, 12], ["One.", "And that.", "But so."])
+    (_, moments), problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and moments[0].start_sentence == 1
+    # Starting earlier would only be trimmed back: the model is not told to.
+    assert soft == []
 
 
 def test_a_trim_that_would_go_below_the_minimum_reports_the_real_length():

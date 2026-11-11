@@ -75,7 +75,7 @@ The task checks each of these rules before answering:
 - each clip links to a claim by its own speaker, and a speaker's two clips link to different claims
 - a clip only answers an earlier clip, by the other speaker
 
-A clip over the hard limit that spans several sentences is shortened from its start until it fits, and not onto a sentence that opens on a dangling word when a cleaner start fits. The payoff at its end stays. The reported `start_sentence` and `start_ms` are the trimmed ones, and `trimmed_from_sentence` says where the model's own pick started. The model is also told once, so it can pick the range again itself. A clip that can't be trimmed into the limits is reported at the length the model picked.
+A clip over the hard limit that spans several sentences is shortened from its start until it fits, and not onto a sentence that opens on a dangling word when a cleaner start fits. The payoff at its end stays. The reported `start_sentence` and `start_ms` are the trimmed ones, and `trimmed_from_sentence` says where the model's own pick started. A trim is final: it isn't sent back (a model content with it would only send the same pick again), and a trimmed clip's opener isn't held against it, since the model didn't choose that start. A clip that can't be trimmed into the limits is reported at the length the model picked.
 
 A broken answer goes back to Claude with its problems listed, up to three answers in all. If no answer passes, the run fails with a retryable error, and the caller falls back to its own picker.
 

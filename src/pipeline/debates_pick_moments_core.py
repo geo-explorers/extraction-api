@@ -131,17 +131,16 @@ def check(
         if len({s.turn for s in run}) != 1:
             problems.append(f"{name}: sentences {start}-{end} span more than one turn.")
             continue
+        # A trim is final: it is recorded on the moment (trimmed_from_sentence), not sent back,
+        # since a model content with it would send the same pick and be trimmed again. Nor is
+        # the opener of a trimmed clip held against it: the model did not choose that start,
+        # and starting earlier only makes the clip too long to keep.
         picked_start = start
         trimmed = trim_to_fit(input, start, end)
-        if trimmed is not None and trimmed != start:
-            start = trimmed
-            soft.append(
-                f"{name} was over {_seconds(input.clip_max_ms)} s, so it was cut to start at "
-                f"sentence {start}. Pick its range again if it should start elsewhere."
-            )
+        start = start if trimmed is None else trimmed
         run = sentences[start : end + 1]
         first_word = _first_word(run[0])
-        if first_word in DANGLING_OPENERS:
+        if start == picked_start and first_word in DANGLING_OPENERS:
             soft.append(
                 f'{name} opens on "{first_word}", which leans on what came before or is filler. '
                 "Start it on a sentence that opens a thought."

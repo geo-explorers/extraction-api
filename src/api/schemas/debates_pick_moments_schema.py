@@ -112,7 +112,7 @@ class PickedMoment(BaseModel):
         default=None,
         description="The model picked this clip from an earlier sentence, over the hard limit; it "
         "was shortened from its start to fit. claim, claim_fit, role and why were given for the "
-        "longer clip.",
+        "longer clip. The model is not asked again about a trim.",
     )
 
 
