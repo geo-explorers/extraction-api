@@ -603,15 +603,24 @@ def test_speakers_who_share_a_first_name_keep_their_full_names_in_the_story_and_
 
 def test_the_first_clip_must_provide_the_context_and_hooks_only_within_that():
     from src.config.prompts.debates_pick_moments_prompt import (
-        DEBATES_PICK_MOMENTS_JUDGE_SYSTEM,
-        DEBATES_PICK_MOMENTS_SYSTEM,
+        DEBATES_PICK_MOMENTS_JUDGE_SYSTEM as judge,
+        DEBATES_PICK_MOMENTS_SYSTEM as picker,
     )
 
     # 11 Nov, with Yaniv: the first clip must provide the context; a hook is still wanted, but
     # never in place of it, and the strongest moment can come last. Master asked only for a hook.
-    assert "Clip 1 must provide the context" in DEBATES_PICK_MOMENTS_SYSTEM
-    assert "Never trade the context for a stronger hook" in DEBATES_PICK_MOMENTS_SYSTEM
-    assert "Clip 1 is the hook" not in DEBATES_PICK_MOMENTS_SYSTEM
-    assert "doesn't grab them, they scroll away" not in DEBATES_PICK_MOMENTS_SYSTEM
-    assert "Does the first clip provide the context, and then hook?" in DEBATES_PICK_MOMENTS_JUDGE_SYSTEM
-    assert "Does the first clip hook?" not in DEBATES_PICK_MOMENTS_JUDGE_SYSTEM
+    assert "Clip 1 must provide the context" in picker
+    assert "Never trade the context for a stronger hook" in picker
+    assert "The strongest moment doesn't have to open the reel; it often lands best at the end." in picker
+    assert "Clip 4 lands the debate: often its strongest moment" in picker
+    assert "Clip 1 is the hook" not in picker
+    assert "doesn't grab them, they scroll away" not in picker
+
+    # The judge decides "in this order", so the context has to be part of the first test it
+    # applies: ranked below "a real exchange", a hook with no context could win on the exchange
+    # before the context was ever weighed.
+    follow, exchange, hook = (judge.index(f"\n{n}. ") for n in (1, 2, 3))
+    assert follow < judge.index("The first clip provides the context") < exchange
+    assert "A first clip that hooks but leaves the viewer without the context loses" in judge[hook:]
+    assert "A reel can save its strongest moment for the end." in judge
+    assert "Does the first clip hook?" not in judge

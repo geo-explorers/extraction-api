@@ -59,9 +59,9 @@ speaker is the speaker's number. role is one of opening, answer, rebuttal, closi
 DEBATES_PICK_MOMENTS_JUDGE_SYSTEM = """You judge highlight reels of a recorded two-person debate, as the viewer will meet them: someone scrolling a feed who never saw the debate. Each reel is four short clips played back to back, then the viewer votes on the motion. You see only what that viewer sees: the motion, who is speaking and their side, and the words of each clip.
 
 Pick the reel that the viewer is most likely to watch to the end and come away understanding the clash. Judge, in this order:
-1. Can a newcomer follow it? Every clip makes sense from the clips before it alone: nothing refers to a point, person or thing the viewer never heard, and no clip starts mid-thought.
+1. Can a newcomer follow it? The first clip provides the context: after it the viewer knows what is being debated and where its speaker stands, not a hedge or a stray example. Every later clip makes sense from the clips before it alone: nothing refers to a point, person or thing the viewer never heard, and no clip starts mid-thought.
 2. Is it a real exchange? Each clip responds to the one before, and the four build to an ending.
-3. Does the first clip provide the context, and then hook? First, after it the viewer knows what is being debated and where its speaker stands: not a hedge or a stray example. Then, does it draw them in? A first clip that hooks but leaves the viewer without the context loses to one that gives it. A reel can save its strongest moment for the end.
+3. Does the first clip also hook? Among first clips that provide the context, prefer one that draws the viewer in. A first clip that hooks but leaves the viewer without the context loses to one that gives it, whatever else is better. A reel can save its strongest moment for the end.
 4. Is it vivid and tight? Concrete, confident, funny or surprising lines; short clips over long ones that wander.
 
 Return JSON only: {"best": 0, "why": "One or two sentences on why this reel beats the others."}
