@@ -10,7 +10,11 @@ stretch of speech, one debater often had a single usable clip, and the picker
 kept the order said over alternation. Here the reel is chosen as a whole, from
 the transcript, for the story. Each clip is a run of whole sentences from one
 turn, and is linked to the claim of its speaker it best supports, so a viewer
-still votes on a claim.
+still votes on a claim. The moments are chosen first and the claim linked after, so
+a punchline or a question that no claim records can still be picked.
+
+Claude offers up to three candidate reels; when more than one passes every rule, a
+second call judges them on the clips' words alone, as a viewer meets them.
 
 Every rule below is checked here before the answer is returned. A caller should
 check them again against its own recordings.
@@ -67,7 +71,7 @@ class DebatesPickMomentsInput(OverridesMixin):
     claims: List[MomentClaim] = Field(min_length=2, max_length=MAX_CLAIMS)
     # A clip's length bounds, first sentence's start to last sentence's end.
     clip_min_ms: int = Field(default=6_000, ge=1_000)
-    clip_max_ms: int = Field(default=30_000, ge=2_000)
+    clip_max_ms: int = Field(default=22_000, ge=2_000)
     # What to aim for. The reel aims at about four times the middle of this range.
     target_min_ms: int = Field(default=10_000, ge=1_000)
     target_max_ms: int = Field(default=18_000, ge=2_000)
@@ -122,3 +126,5 @@ class DebatesPickMomentsResult(BaseModel):
     provider: str
     model_used: str
     attempts: int = Field(description="How many answers were asked for before one passed every rule.")
+    candidates: int = Field(default=1, description="How many candidate reels passed and were judged between.")
+    judge_why: Optional[str] = Field(default=None, description="Why the judge picked this reel, when it judged.")

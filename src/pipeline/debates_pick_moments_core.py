@@ -1,5 +1,10 @@
 """DB-free core of debates.pick_moments (GEO-3638): what Claude reads, the rules
-its reel must keep, and how an answer becomes four moments.
+its reels must keep, how the best reel is judged, and how it becomes four moments.
+
+Claude offers up to three candidate reels in one answer. Each is checked on its own
+(`check`); the answer is sent back only when none passes the hard rules. When more
+than one passes, a second call judges them as a viewer meets them, the clips' words
+alone, and its pick is returned (`judge`).
 
 Every rule the prompt states that can be checked mechanically is checked here:
 four clips, alternating speakers, whole sentences from one turn, length bounds,
@@ -22,16 +27,28 @@ from src.api.schemas.debates_pick_moments_schema import (
     PickedMoment,
 )
 from src.config.overrides import prompts
+from src.decisions.base import DecisionError
+from src.infrastructure.logger import get_logger
 from src.pipeline.claude_json import PROVIDER, ask_json
+
+logger = get_logger(__name__)
 
 TASK = "debates.pick_moments"
 # Answers asked for per run: the first, and two sent back with their problems.
 ATTEMPTS = 3
+# Judge answers per run, when more than one candidate reel passes.
+JUDGE_ATTEMPTS = 2
+# Claude calls one run can make: what it reserves of the shared budget, and times out by.
+CALLS = ATTEMPTS + JUDGE_ATTEMPTS
+# Candidate reels asked for in one answer; more are ignored.
+CANDIDATES = 3
+# A reel longer than this is improvable (a soft rule): reels past 80 s graded worst on 11 Nov.
+REEL_TARGET_MAX_MS = 70_000
 ROLES = ("opening", "answer", "rebuttal", "closing")
 # A clip opening on one of these leans on something the viewer did not hear, or on filler. The
 # prompt forbids it; the check asks again (a soft rule: the last answer is kept regardless).
 DANGLING_OPENERS = (
-    "and", "but", "also", "because", "yeah", "yes", "okay", "ok", "um", "uh", "like",
+    "and", "but", "so", "also", "because", "yeah", "yes", "okay", "ok", "um", "uh", "like",
     "that's", "they", "it's", "which", "then", "plus", "or",
 )
 
@@ -198,22 +215,139 @@ def check(
         for a in input.avoid:
             if m.start_sentence <= a.end_sentence and a.start_sentence <= m.end_sentence:
                 problems.append(f"Clip {i} uses sentences {a.start_sentence}-{a.end_sentence}, which you were told to avoid ({a.reason}).")
+    if not problems:
+        total = sum(m.end_ms - m.start_ms for m in moments)
+        if total > REEL_TARGET_MAX_MS:
+            soft.append(
+                f"The reel runs {_seconds(total)} s; keep the four clips under "
+                f"{_seconds(REEL_TARGET_MAX_MS)} s together. Shorten the longest clips."
+            )
     story = answer.get("story") if isinstance(answer.get("story"), str) else ""
-    return ((story, moments) if not problems else None), problems, soft
+    return ((named(input, story), moments) if not problems else None), problems, soft
+
+
+def first_name(name: str) -> str:
+    """A speaker's first name, as a story calls them: the display name's first word."""
+    return (name.split() or [name])[0]
+
+
+def named(input: DebatesPickMomentsInput, story: str) -> str:
+    """`story` with any "Speaker N" left in it replaced by that speaker's first name."""
+    names = {s.slot: first_name(s.name) for s in input.speakers}
+    return re.sub(
+        r"\bSpeaker (\d+)\b",
+        lambda m: names.get(int(m.group(1)), m.group(0)),
+        story,
+    )
+
+
+Reel = Tuple[str, List[PickedMoment]]
+
+
+def check_reels(
+    input: DebatesPickMomentsInput, answer: Any
+) -> Tuple[Optional[List[Tuple[Reel, List[str]]]], List[str], List[str]]:
+    """The candidate reels that keep every hard rule, each with its soft problems; the answer's
+    problems when none does; and its soft problems, when no candidate is free of them.
+
+    A single reel (an answer in the old shape, {"moments": ...}) is one candidate."""
+    if isinstance(answer, dict) and isinstance(answer.get("reels"), list):
+        reels = answer["reels"][:CANDIDATES]
+    elif isinstance(answer, dict) and "moments" in answer:
+        reels = [answer]
+    else:
+        return None, ['The answer needs a "reels" list.'], []
+    if not reels:
+        return None, ['The "reels" list is empty.'], []
+    passed: List[Tuple[Reel, List[str]]] = []
+    problems: List[str] = []
+    softs: List[str] = []
+    for number, reel in enumerate(reels):
+        value, hard, soft = check(input, reel)
+        label = f"Reel {number}: " if len(reels) > 1 else ""
+        if hard:
+            problems += [label + p for p in hard]
+            continue
+        passed.append((value, soft))
+        softs += [label + p for p in soft]
+    if not passed:
+        return None, problems, []
+    clean = any(not soft for _, soft in passed)
+    return passed, [], ([] if clean else softs)
+
+
+def render_for_judge(input: DebatesPickMomentsInput, reels: List[Reel]) -> str:
+    """The reels as a viewer meets them: the motion, who speaks for which side, and each clip's
+    words and length. No transcript, no claims, no story: the judge sees what the viewer sees."""
+    speakers = {s.slot: s for s in input.speakers}
+    lines = [f"Motion: {input.title}", ""]
+    for s in input.speakers:
+        side = f" ({s.side} with the motion)" if s.side else ""
+        lines.append(f"{first_name(s.name)}{side}")
+    for number, (_, moments) in enumerate(reels):
+        total = sum(m.end_ms - m.start_ms for m in moments)
+        lines += ["", f"## Reel {number} ({_seconds(total)} s)"]
+        for position, m in enumerate(moments):
+            words = " ".join(s.text.strip() for s in input.sentences[m.start_sentence : m.end_sentence + 1])
+            name = first_name(speakers[m.speaker].name)
+            lines.append(f"Clip {position + 1}, {name}, {_seconds(m.end_ms - m.start_ms)} s: {words}")
+    return "\n".join(lines)
+
+
+def judge_check(count: int):
+    def check_pick(answer: Any) -> Tuple[Optional[Tuple[int, str]], List[str], List[str]]:
+        best = _int(answer.get("best")) if isinstance(answer, dict) else None
+        if best is None or not 0 <= best < count:
+            return None, [f'The answer needs "best": a reel number from 0 to {count - 1}.'], []
+        why = answer.get("why") if isinstance(answer.get("why"), str) else ""
+        return (best, why[:500]), [], []
+
+    return check_pick
+
+
+async def judge(input: DebatesPickMomentsInput, reels: List[Reel], *, client: Any = None) -> Tuple[int, str]:
+    """The reel a viewer would watch through and understand, by a second call that sees only the
+    clips. When the judge cannot answer, the first reel: the picker put its best first."""
+    try:
+        (best, why), _, _ = await ask_json(
+            prompts.get("debates_pick_moments.judge_system"),
+            render_for_judge(input, reels),
+            judge_check(len(reels)),
+            task=f"{TASK} judge",
+            attempts=JUDGE_ATTEMPTS,
+            client=client,
+        )
+        return best, why
+    except DecisionError as e:
+        logger.warning(f"{TASK}: the judge gave no pick; keeping the first reel: {e}")
+        return 0, ""
 
 
 async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) -> DebatesPickMomentsResult:
-    (story, moments), model, attempts = await ask_json(
+    passed, model, attempts = await ask_json(
         prompts.get("debates_pick_moments.system"),
         render(input),
-        lambda answer: check(input, answer),
+        lambda answer: check_reels(input, answer),
         task=TASK,
         attempts=ATTEMPTS,
         client=client,
     )
+    # Judged among the reels with no soft problem when there are any, else among all that passed.
+    clean = [reel for reel, soft in passed if not soft]
+    reels = clean or [reel for reel, _ in passed]
+    best, why = (0, "")
+    if len(reels) > 1:
+        best, why = await judge(input, reels, client=client)
+    story, moments = reels[best]
     return DebatesPickMomentsResult(
-        story=story, moments=moments, provider=PROVIDER, model_used=model, attempts=attempts
+        story=story,
+        moments=moments,
+        provider=PROVIDER,
+        model_used=model,
+        attempts=attempts,
+        candidates=len(reels),
+        judge_why=why or None,
     )
 
 
-__all__ = ["TASK", "check", "pick_moments", "render"]
+__all__ = ["CALLS", "TASK", "check", "check_reels", "judge", "pick_moments", "render", "render_for_judge"]
