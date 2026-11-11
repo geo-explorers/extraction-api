@@ -601,26 +601,26 @@ def test_speakers_who_share_a_first_name_keep_their_full_names_in_the_story_and_
     assert "Clip 1, Alex Chen," in judged and "Clip 2, Alex Park," in judged
 
 
-def test_the_first_clip_must_provide_the_context_and_hooks_only_within_that():
+def test_the_first_clip_is_chosen_for_the_context_not_for_strength():
     from src.config.prompts.debates_pick_moments_prompt import (
         DEBATES_PICK_MOMENTS_JUDGE_SYSTEM as judge,
         DEBATES_PICK_MOMENTS_SYSTEM as picker,
     )
 
-    # 11 Nov, with Yaniv: the first clip must provide the context; a hook is still wanted, but
-    # never in place of it, and the strongest moment can come last. Master asked only for a hook.
+    # 11 Nov, Yaniv: the first clip establishes the debate's context; it isn't picked for being
+    # the strongest line, and the strongest moment can come last. No hook anywhere: master's
+    # "Clip 1 is the hook" and "does the first clip hook?" pushed reels to open big.
     assert "Clip 1 must provide the context" in picker
-    assert "Never trade the context for a stronger hook" in picker
+    assert "not for being the strongest line" in picker
     assert "The strongest moment doesn't have to open the reel; it often lands best at the end." in picker
     assert "Clip 4 lands the debate: often its strongest moment" in picker
-    assert "Clip 1 is the hook" not in picker
-    assert "doesn't grab them, they scroll away" not in picker
+    for prompt in (picker, judge):
+        assert "hook" not in prompt.lower()
+        assert "grab" not in prompt.lower()
 
-    # The judge decides "in this order", so the context has to be part of the first test it
-    # applies: ranked below "a real exchange", a hook with no context could win on the exchange
-    # before the context was ever weighed.
-    follow, exchange, hook = (judge.index(f"\n{n}. ") for n in (1, 2, 3))
+    # The judge decides "in this order", so the context is part of the first test it applies:
+    # ranked lower, a reel without it could win on the exchange before the context was weighed.
+    follow, exchange = (judge.index(f"\n{n}. ") for n in (1, 2))
     assert follow < judge.index("The first clip provides the context") < exchange
-    assert "A first clip that hooks but leaves the viewer without the context loses" in judge[hook:]
-    assert "A reel can save its strongest moment for the end." in judge
-    assert "Does the first clip hook?" not in judge
+    assert "don't favor one for opening on its strongest line" in judge
+
