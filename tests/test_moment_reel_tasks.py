@@ -444,8 +444,11 @@ def test_both_tasks_are_registered_with_their_contracts_on_the_claude_budget():
 
     from src.pipeline.claude_json import REQUEST_TIMEOUT_S
 
-    for spec, attempts in ((DEBATES_PICK_MOMENTS_SPEC, pick.CALLS), (TRANSCRIPT_PUNCTUATE_SPEC, punct.ATTEMPTS)):
-        assert spec.rate_limit_key == "claude_global" and spec.concurrency == 1
+    for spec, attempts, concurrency in (
+        (DEBATES_PICK_MOMENTS_SPEC, pick.CALLS, 4),
+        (TRANSCRIPT_PUNCTUATE_SPEC, punct.ATTEMPTS, 1),
+    ):
+        assert spec.rate_limit_key == "claude_global" and spec.concurrency == concurrency
         # One rate unit per Claude call the run can make, and time for every one of them.
         assert spec.rate_limit_units == attempts
         assert spec.execution_timeout.total_seconds() >= attempts * REQUEST_TIMEOUT_S
