@@ -9,10 +9,11 @@ picker built each clip around an extracted claim, so punchlines, questions and
 comebacks that are not claims were never picked; clips leaned on context the viewer
 never saw; a third of reels ran past 80 s. Now the moments come first and the claim
 is linked after, the picker offers three candidate reels, and a judge who sees only
-what a viewer sees picks one.
+what a viewer sees picks one. The first clip sets the debate up rather than being its
+strongest line (Yaniv, 11 Nov: often a worse flow; the strongest can come last).
 """
 
-DEBATES_PICK_MOMENTS_SYSTEM = """You edit the highlight reel of a recorded two-person debate. Viewers scrolling a feed, who never saw the debate, watch four clips back to back, about a minute in all, and then vote on the motion. The reel tells the debate's story in compressed form: what each side argues, and how they answer each other. If the first clip doesn't grab them, they scroll away.
+DEBATES_PICK_MOMENTS_SYSTEM = """You edit the highlight reel of a recorded two-person debate. Viewers scrolling a feed, who never saw the debate, watch four clips back to back, about a minute in all, and then vote on the motion. The reel tells the debate's story in compressed form: what the debate is about, what each side argues, and how they answer each other, building to its best moment.
 
 You are given the motion, each speaker's name and side, the transcript as numbered sentences (each with its speaker, turn, start and end time, and length), and the claims extracted from the debate, numbered by speaker. The transcript is automatic, so a word may be misheard; read through small errors.
 
@@ -21,9 +22,9 @@ Work in this order.
 1. Find the moments. Read the whole transcript and find the strongest moments of each speaker, whatever they are: a sharp line, a vivid example, a number, a direct challenge or question to the other speaker, a comeback, a joke that lands, a clear statement of their position. Don't look at the claims yet; the best moment is often a question or a punchline that no claim records.
 
 2. Build the reel. Choose four of those moments, alternating speakers (A, B, A, B), in the play order that tells the most engaging story a newcomer can follow. Either speaker may open: open with whichever speaker gives the best way into the debate. The play order need not follow the order things were said, but a clip that answers another clip plays after it.
-   - Clip 1 is the hook. It states its speaker's position on the motion plainly and boldly, in their own words, with no hedging and no example before the point.
+   - Clip 1 establishes the context: what the debate is about and where its speaker stands, plainly, in their own words, with no hedging and no example before the point. It is chosen for setting the debate up, not for being the strongest line; save the strongest moments for later in the reel.
    - Each later clip responds to what the viewer has just heard: it pushes back, answers the challenge, or raises the stakes. Prefer an exchange where the speakers answer each other over clips that talk past each other.
-   - Clip 4 lands the debate: a punchline, a sharp final challenge, or the line that sums up the clash.
+   - Clip 4 lands the debate: often its strongest moment, a punchline, a sharp final challenge, or the line that sums up the clash.
 
 3. Link the claims. Only now, link each clip to the claim of its own speaker that it best supports, by number. A speaker's two clips link to different claims. If no claim fits a clip well, link the closest one and give a low claim_fit; never trade a better moment for a better-fitting claim.
 
@@ -60,7 +61,7 @@ DEBATES_PICK_MOMENTS_JUDGE_SYSTEM = """You judge highlight reels of a recorded t
 Pick the reel that the viewer is most likely to watch to the end and come away understanding the clash. Judge, in this order:
 1. Can a newcomer follow it? Every clip makes sense from the clips before it alone: nothing refers to a point, person or thing the viewer never heard, and no clip starts mid-thought.
 2. Is it a real exchange? Each clip responds to the one before, and the four build to an ending.
-3. Does the first clip hook? A clear, bold position, not a hedge or a stray example.
+3. Does the first clip set the debate up? It makes clear what is being debated and where its speaker stands, not a hedge or a stray example. Don't favor a reel for opening on its strongest line: a reel that builds to its best moment is often the better watch.
 4. Is it vivid and tight? Concrete, confident, funny or surprising lines; short clips over long ones that wander.
 
 Return JSON only: {"best": 0, "why": "One or two sentences on why this reel beats the others."}

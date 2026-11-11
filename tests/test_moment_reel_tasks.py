@@ -599,3 +599,19 @@ def test_speakers_who_share_a_first_name_keep_their_full_names_in_the_story_and_
     assert pick.named(debate, "Speaker 1 v Speaker 2") == "Alex Chen v Alex Park"
     judged = pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
     assert "Clip 1, Alex Chen," in judged and "Clip 2, Alex Park," in judged
+
+
+def test_the_first_clip_sets_the_debate_up_rather_than_opening_on_the_strongest_line():
+    from src.config.prompts.debates_pick_moments_prompt import (
+        DEBATES_PICK_MOMENTS_JUDGE_SYSTEM,
+        DEBATES_PICK_MOMENTS_SYSTEM,
+    )
+
+    # Yaniv, 11 Nov: the first clip establishes the context; leading with the strongest clip is
+    # often a worse flow, and the strongest can come last. Neither the picker nor the judge
+    # rewards a reel for opening big.
+    assert "Clip 1 establishes the context" in DEBATES_PICK_MOMENTS_SYSTEM
+    assert "not for being the strongest line" in DEBATES_PICK_MOMENTS_SYSTEM
+    assert "Does the first clip set the debate up?" in DEBATES_PICK_MOMENTS_JUDGE_SYSTEM
+    for prompt in (DEBATES_PICK_MOMENTS_SYSTEM, DEBATES_PICK_MOMENTS_JUDGE_SYSTEM):
+        assert "hook" not in prompt.lower()
