@@ -269,6 +269,60 @@ def test_a_clip_too_long_is_trimmed_from_its_start_to_fit():
     assert (moments[0].start_sentence, moments[0].end_sentence, moments[0].start_ms) == (1, 2, 12_000)
 
 
+def _long_first_turn(debate, lengths, texts=None):
+    """Re-time turn 0 (sentences 0-2) to `lengths` seconds back to back, then the rest after it."""
+    at = 0
+    for k, seconds in enumerate(lengths):
+        sentence = debate.sentences[k]
+        sentence.start_ms, sentence.end_ms = at, at + int(seconds * 1000)
+        if texts:
+            sentence.text = texts[k]
+        at += int(seconds * 1000)
+    for k, sentence in enumerate(debate.sentences[3:], start=3):
+        sentence.start_ms, sentence.end_ms = at + (k - 3) * 5_000, at + (k - 3) * 5_000 + 4_800
+
+
+def test_a_trim_marks_the_clip_and_asks_once_for_a_better_range():
+    debate = _debate()
+    _long_first_turn(debate, [12, 12, 11.8])  # 35.8 s
+    (_, moments), problems, soft = pick.check(debate, GOOD)
+    assert problems == []
+    assert (moments[0].start_sentence, moments[0].trimmed_from_sentence) == (1, 0)
+    assert any("cut to start at sentence 1" in p for p in soft), soft
+    # A clip that was not trimmed says so.
+    assert moments[1].trimmed_from_sentence is None
+
+
+def test_a_trim_that_would_go_below_the_minimum_reports_the_real_length():
+    debate = _debate()
+    _long_first_turn(debate, [27, 2, 3])  # 32 s; dropping sentence 0 leaves 5 s
+    _, problems, _ = pick.check(debate, GOOD)
+    assert any("Clip 0 lasts 32.0 s" in p for p in problems), problems
+
+
+def test_a_trim_steps_past_a_dangling_opener_when_a_clean_start_fits():
+    debate = _debate()
+    # 0-2 is 34 s. Dropping sentence 0 lands on "And", so the trim steps on to sentence 2.
+    _long_first_turn(debate, [10, 12, 12], ["One.", "And that is why.", "So it holds."])
+    (_, moments), problems, soft = pick.check(debate, GOOD)
+    assert problems == []
+    assert moments[0].start_sentence == 2
+    assert not any('opens on "and"' in p for p in soft), soft
+
+
+def test_a_soft_answer_between_hard_ones_is_kept_and_its_nudge_sent_once():
+    debate = _debate()
+    debate.sentences[3].text = "And it is a federal problem."
+    broken = {"moments": GOOD["moments"][:3]}
+    client = _FakeClaude(broken, GOOD, broken)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 2 and len(result.moments) == 4
+    conversation = client.calls[-1]["messages"]
+    first, second = conversation[2]["content"], conversation[4]["content"]
+    assert "exactly 4" in first and 'opens on "and"' not in first
+    assert 'opens on "and"' in second
+
+
 def test_one_sentence_too_long_is_still_refused():
     debate = _debate()
     debate.sentences[2].end_ms = debate.sentences[2].start_ms + 31_000

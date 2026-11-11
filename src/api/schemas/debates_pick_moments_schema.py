@@ -108,6 +108,12 @@ class PickedMoment(BaseModel):
         default=None, description="Position in `moments` of the earlier clip this one answers, or null."
     )
     why: str
+    trimmed_from_sentence: Optional[int] = Field(
+        default=None,
+        description="The model picked this clip from an earlier sentence, over the hard limit; it "
+        "was shortened from its start to fit. claim, claim_fit, role and why were given for the "
+        "longer clip.",
+    )
 
 
 class DebatesPickMomentsResult(BaseModel):

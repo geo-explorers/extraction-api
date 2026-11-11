@@ -6,6 +6,8 @@ four clips, alternating speakers, whole sentences from one turn, length bounds,
 no overlap, each clip linked to a different claim of its own speaker, and an
 answer playing after what it answers. A broken answer is sent back with its
 problems (claude_json.ask_json), so Claude fixes it rather than the run failing.
+A clip over the hard limit is first shortened from its start to fit (trim_to_fit) and
+marked trimmed_from_sentence, rather than refused.
 """
 
 from __future__ import annotations
@@ -65,6 +67,32 @@ def render(input: DebatesPickMomentsInput) -> str:
     return "\n".join(lines)
 
 
+def _first_word(sentence) -> str:
+    """A sentence's first word, lowercased, letters and apostrophes only (curly ones straightened)."""
+    return re.sub(r"[^a-z']", "", (sentence.text.split() or [""])[0].lower().replace("’", "'"))
+
+
+def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optional[int]:
+    """Where a clip over the hard limit should start so it fits: sentences dropped from its start
+    (the payoff at its end stays), and past any that open on a dangling word, so the trim never
+    lands on "And ..." when a cleaner start fits. `None` when no start leaves it within the
+    limits, so the clip is reported at the length the model picked. A clip within the limit is
+    left where it starts."""
+    sentences = input.sentences
+    length = lambda first: sentences[end].end_ms - sentences[first].start_ms
+    if length(start) <= input.clip_max_ms:
+        return start
+    fitting = [
+        first
+        for first in range(start + 1, end + 1)
+        if input.clip_min_ms <= length(first) <= input.clip_max_ms
+    ]
+    if not fitting:
+        return None
+    clean = [first for first in fitting if _first_word(sentences[first]) not in DANGLING_OPENERS]
+    return (clean or fitting)[0]
+
+
 def _int(value: Any) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
@@ -103,13 +131,16 @@ def check(
         if len({s.turn for s in run}) != 1:
             problems.append(f"{name}: sentences {start}-{end} span more than one turn.")
             continue
-        # Too long but more than one sentence: drop sentences from the start until it fits, so
-        # the payoff at the end is kept. A clip slightly over the limit is the most common miss,
-        # and asking again rarely shortens it without breaking something else.
-        while start < end and sentences[end].end_ms - sentences[start].start_ms > input.clip_max_ms:
-            start += 1
+        picked_start = start
+        trimmed = trim_to_fit(input, start, end)
+        if trimmed is not None and trimmed != start:
+            start = trimmed
+            soft.append(
+                f"{name} was over {_seconds(input.clip_max_ms)} s, so it was cut to start at "
+                f"sentence {start}. Pick its range again if it should start elsewhere."
+            )
         run = sentences[start : end + 1]
-        first_word = re.sub(r"[^a-z']", "", (run[0].text.split() or [""])[0].lower().replace("’", "'"))
+        first_word = _first_word(run[0])
         if first_word in DANGLING_OPENERS:
             soft.append(
                 f'{name} opens on "{first_word}", which leans on what came before or is filler. '
@@ -145,6 +176,7 @@ def check(
                 role=role,
                 answers=answers,
                 why=str(row.get("why") or "")[:500],
+                trimmed_from_sentence=picked_start if start != picked_start else None,
             )
         )
     if len(moments) == len(rows) == MOMENTS:
