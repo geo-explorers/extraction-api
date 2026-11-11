@@ -23,12 +23,14 @@ from src.config.overrides import prompts
 from src.pipeline.claude_json import PROVIDER, ask_json
 
 TASK = "debates.pick_moments"
+# Answers asked for per run: the first, and two sent back with their problems.
+ATTEMPTS = 3
 ROLES = ("opening", "answer", "rebuttal", "closing")
 # A clip opening on one of these leans on something the viewer did not hear, or on filler. The
 # prompt forbids it; the check asks again (a soft rule: the last answer is kept regardless).
 DANGLING_OPENERS = (
     "and", "but", "also", "because", "yeah", "yes", "okay", "ok", "um", "uh", "like",
-    "that", "this", "they", "it's", "which", "then", "plus", "or",
+    "that's", "they", "it's", "which", "then", "plus", "or",
 )
 
 
@@ -101,7 +103,7 @@ def check(
         if len({s.turn for s in run}) != 1:
             problems.append(f"{name}: sentences {start}-{end} span more than one turn.")
             continue
-        first_word = re.sub(r"[^a-z']", "", (run[0].text.split() or [""])[0].lower())
+        first_word = re.sub(r"[^a-z']", "", (run[0].text.split() or [""])[0].lower().replace("’", "'"))
         if first_word in DANGLING_OPENERS:
             soft.append(
                 f'{name} opens on "{first_word}", which leans on what came before or is filler. '
@@ -168,7 +170,7 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
         render(input),
         lambda answer: check(input, answer),
         task=TASK,
-        attempts=3,
+        attempts=ATTEMPTS,
         client=client,
     )
     return DebatesPickMomentsResult(

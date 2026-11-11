@@ -9,7 +9,19 @@ Previously the reel was stitched together from clips cut around extracted claims
 - Clips judged to argue the wrong side were dropped, with nothing to replace them.
 - Transcripts lost their punctuation partway through, so no clean sentence ends could be found.
 
-Both tasks run on Claude, using the `moments_claude_*` settings. They write an answer rather than choosing among options, so they can't use the decision model. Both draw on the `claude_global` rate limit that the news Claude fallback also uses. They run one at a time (`concurrency=1`), so a backfill can't starve news.
+Both tasks run on Claude, using the `moments_claude_*` settings. They write an answer rather than choosing among options, so they can't use the decision model.
+
+**Budgets.** Both count against the `claude` spend-guard key that the news Claude paths use, so one hourly budget covers every Claude call. They draw on the `claude_global` per-minute rate limit at one unit per call the run can make (2 for punctuate, 3 for pick), as the news tasks reserve. They run one at a time (`concurrency=1`), so a backfill can't starve news.
+
+**Asking again.** Each task checks the answer. Problems go back to Claude in the same conversation: punctuate gets 2 answers, pick gets 3. The first answer with no problems wins. An answer with only soft problems is kept if the later ones get worse. The system prompt and the transcript are prompt-cached, so a send-back rereads them from cache.
+
+**Failures.** A failed request (network, rate limit, overload) is retryable, and Hatchet runs the task again. These are final (`FinalDecisionError`, a `NonRetryableException`), because running again cannot help:
+- no acceptable answer
+- an answer cut off at the token limit
+- a missing key
+- a tripped spend guard
+
+The caller then falls back. Each task's execution timeout covers every request at its 180 s ceiling. The client doesn't retry on its own.
 
 ## transcript.punctuate
 

@@ -13,7 +13,8 @@ from hatchet_sdk import Context
 
 from src.api.schemas.transcript_punctuate_schema import TranscriptPunctuateInput, TranscriptPunctuateResult
 from src.infrastructure.logger import get_logger
-from src.pipeline.transcript_punctuate_core import TASK, punctuate
+from src.pipeline.claude_json import execution_timeout_s
+from src.pipeline.transcript_punctuate_core import ATTEMPTS, TASK, punctuate
 from src.tasks.base import TaskSpec
 
 logger = get_logger(__name__)
@@ -36,9 +37,10 @@ TRANSCRIPT_PUNCTUATE_SPEC = TaskSpec(
     # The news Claude fallback shares this budget, so a backfill burst must not
     # starve it: one run at a time.
     rate_limit_key="claude_global",
-    rate_limit_units=1,
+    # One unit per Claude call the run can make, as the news tasks reserve.
+    rate_limit_units=ATTEMPTS,
     retries=2,
-    execution_timeout=timedelta(minutes=5),
+    execution_timeout=timedelta(seconds=execution_timeout_s(ATTEMPTS)),
     max_payload_bytes=TRANSCRIPT_PUNCTUATE_MAX_PAYLOAD_BYTES,
     concurrency=1,
 )

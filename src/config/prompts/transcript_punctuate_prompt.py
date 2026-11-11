@@ -11,5 +11,5 @@ For every turn, list where each sentence ends: the number of the sentence's last
 - False starts and fillers ("um", "like", "you know") stay inside the sentence they interrupt.
 - Never change, add or drop a word. You only answer with numbers and marks.
 
-Return JSON only, one entry per turn, in order:
+Return compact JSON only, on one line with no indentation, one entry per turn, in order:
 {"turns": [{"turn": 0, "ends": [[11, "."], [27, "?"]]}]}"""

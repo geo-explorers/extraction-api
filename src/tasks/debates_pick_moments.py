@@ -16,7 +16,8 @@ from hatchet_sdk import Context
 
 from src.api.schemas.debates_pick_moments_schema import DebatesPickMomentsInput, DebatesPickMomentsResult
 from src.infrastructure.logger import get_logger
-from src.pipeline.debates_pick_moments_core import TASK, pick_moments
+from src.pipeline.claude_json import execution_timeout_s
+from src.pipeline.debates_pick_moments_core import ATTEMPTS, TASK, pick_moments
 from src.tasks.base import TaskSpec
 
 logger = get_logger(__name__)
@@ -39,9 +40,10 @@ DEBATES_PICK_MOMENTS_SPEC = TaskSpec(
     # Shares the Claude budget with the news fallback: one run at a time, so a
     # backfill cannot starve news.
     rate_limit_key="claude_global",
-    rate_limit_units=1,
+    # One unit per Claude call the run can make, as the news tasks reserve.
+    rate_limit_units=ATTEMPTS,
     retries=2,
-    execution_timeout=timedelta(minutes=5),
+    execution_timeout=timedelta(seconds=execution_timeout_s(ATTEMPTS)),
     max_payload_bytes=DEBATES_PICK_MOMENTS_MAX_PAYLOAD_BYTES,
     concurrency=1,
 )

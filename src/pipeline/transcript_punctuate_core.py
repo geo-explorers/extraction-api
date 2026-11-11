@@ -21,6 +21,8 @@ from src.config.overrides import prompts
 from src.pipeline.claude_json import PROVIDER, ask_json
 
 TASK = "transcript.punctuate"
+# Answers asked for per run: the first, and one sent back with its problems.
+ATTEMPTS = 2
 MARKS = (".", "?", "!")
 
 
@@ -78,6 +80,7 @@ async def punctuate(input: TranscriptPunctuateInput, *, client: Any = None) -> T
         render(input),
         lambda answer: check(input, answer),
         task=TASK,
+        attempts=ATTEMPTS,
         client=client,
     )
     return TranscriptPunctuateResult(

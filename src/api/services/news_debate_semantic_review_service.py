@@ -39,6 +39,7 @@ from src.api.schemas.news_debate_semantic_review_schema import (
 from src.config.overrides import llm, prompts
 from src.config.settings import settings
 from src.infrastructure.gemini_ladder import GeminiClient
+from src.infrastructure.claude import parse_json as _parse_json
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -348,16 +349,6 @@ def _gemini_opinion(
     DebateJudgmentOpinionResponse,
     "News debate second opinion",
   )
-
-
-def _parse_json(raw: str) -> dict:
-  try:
-    return json.loads(raw)
-  except (json.JSONDecodeError, TypeError):
-    match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw or "", re.DOTALL | re.I)
-    if not match:
-      raise
-    return json.loads(match.group(1))
 
 
 def _claude_json(prompt: str, schema, label: str):

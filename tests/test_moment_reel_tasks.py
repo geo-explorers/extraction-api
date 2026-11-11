@@ -17,7 +17,8 @@ from src.api.schemas.transcript_punctuate_schema import PunctuateTurn, Transcrip
 from src.decisions.base import DecisionError
 from src.pipeline import debates_pick_moments_core as pick
 from src.pipeline import transcript_punctuate_core as punct
-from src.pipeline.claude_json import parse_json
+from src.pipeline.claude_json import FinalDecisionError, parse_json
+from hatchet_sdk.exceptions import NonRetryableException
 
 
 class _FakeClaude:
@@ -98,28 +99,51 @@ def test_a_refused_answer_goes_back_with_its_problems_and_the_fix_is_kept():
     assert retry[1]["role"] == "assistant" and "outside 0-12" in retry[2]["content"]
 
 
-def test_an_answer_still_wrong_after_the_last_attempt_fails_retryably():
+def test_an_answer_still_wrong_after_the_last_attempt_fails_without_an_engine_retry():
     bad = {"turns": [{"turn": 0, "ends": [[20, "."]]}]}
-    with pytest.raises(DecisionError) as raised:
+    with pytest.raises(FinalDecisionError) as raised:
         asyncio.run(punct.punctuate(_turns(), client=_FakeClaude(bad, bad)))
-    assert raised.value.retryable
+    # Hatchet only stops retrying on NonRetryableException: asking again could not help.
+    assert isinstance(raised.value, NonRetryableException) and not raised.value.retryable
 
 
-def test_an_answer_cut_off_at_the_token_limit_is_not_trusted():
+def test_an_answer_cut_off_at_the_token_limit_is_final_and_not_asked_again():
     good = {"turns": [{"turn": 0, "ends": [[12, "."]]}, {"turn": 1, "ends": []}]}
-    with pytest.raises(DecisionError):
-        asyncio.run(punct.punctuate(_turns(), client=_FakeClaude(good, good, stop_reason="max_tokens")))
+    client = _FakeClaude(good, good, stop_reason="max_tokens")
+    with pytest.raises(FinalDecisionError):
+        asyncio.run(punct.punctuate(_turns(), client=client))
+    # Every end is required, so a second answer would be as long: it is not asked for.
+    assert len(client.calls) == 1
 
 
 def test_a_provider_failure_is_retryable():
     with pytest.raises(DecisionError) as raised:
         asyncio.run(punct.punctuate(_turns(), client=_FakeClaude(RuntimeError("overloaded"))))
-    assert raised.value.retryable
+    assert raised.value.retryable and not isinstance(raised.value, NonRetryableException)
 
 
-def test_json_is_found_in_a_fence_or_surrounding_text():
-    assert parse_json('```json\n{"a": 1}\n```') == {"a": 1}
-    assert parse_json('Here it is: {"a": 1} hope that helps') == {"a": 1}
+def test_claude_calls_count_against_the_spend_budget_news_uses(monkeypatch):
+    from src.pipeline import claude_json
+
+    keys = []
+    monkeypatch.setattr(claude_json.spend_guard, "check_and_record", keys.append)
+    good = {"turns": [{"turn": 0, "ends": [[12, "."]]}, {"turn": 1, "ends": []}]}
+    asyncio.run(punct.punctuate(_turns(), client=_FakeClaude(good)))
+    assert keys == ["claude"]
+
+
+def test_the_transcript_is_marked_for_prompt_caching():
+    good = {"turns": [{"turn": 0, "ends": [[12, "."]]}, {"turn": 1, "ends": []}]}
+    client = _FakeClaude(good)
+    asyncio.run(punct.punctuate(_turns(), client=client))
+    call = client.calls[0]
+    assert call["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert call["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_json_is_read_whole_or_from_a_fence_as_the_news_paths_read_it():
+    assert parse_json('{"a": 1}') == {"a": 1}
+    assert parse_json('Here it is:\n```json\n{"a": 1}\n```') == {"a": 1}
 
 
 # --- debates.pick_moments ---------------------------------------------------------------
@@ -247,6 +271,27 @@ def test_a_clip_opening_on_a_connective_is_asked_again_but_kept_on_the_last_answ
     assert 'opens on "and"' in client.calls[1]["messages"][2]["content"]
 
 
+def test_an_acceptable_answer_is_kept_when_the_ones_sent_back_get_worse():
+    debate = _debate()
+    debate.sentences[3].text = "Yeah it is a federal problem."
+    broken = {"moments": GOOD["moments"][:3]}
+    client = _FakeClaude(GOOD, broken, broken)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    # The first answer only opened on "yeah": better than two that break hard rules.
+    assert result.attempts == 1 and len(result.moments) == 4 and len(client.calls) == 3
+
+
+def test_openers_are_matched_on_straight_and_curly_apostrophes_alike():
+    debate = _debate()
+    debate.sentences[3].text = "That\u2019s why it is federal."
+    _, _, soft = pick.check(debate, GOOD)
+    assert any("that's" in p for p in soft), soft
+    # A sentence that opens on "this" and says what it is about stands alone.
+    debate.sentences[3].text = "This is the number that matters."
+    _, _, soft = pick.check(debate, GOOD)
+    assert soft == []
+
+
 def test_pick_avoids_refused_stretches():
     from src.api.schemas.debates_pick_moments_schema import AvoidRange
 
@@ -275,5 +320,10 @@ def test_both_tasks_are_registered_with_their_contracts_on_the_claude_budget():
     from src.tasks.debates_pick_moments import DEBATES_PICK_MOMENTS_SPEC
     from src.tasks.transcript_punctuate import TRANSCRIPT_PUNCTUATE_SPEC
 
-    for spec in (DEBATES_PICK_MOMENTS_SPEC, TRANSCRIPT_PUNCTUATE_SPEC):
+    from src.pipeline.claude_json import REQUEST_TIMEOUT_S
+
+    for spec, attempts in ((DEBATES_PICK_MOMENTS_SPEC, pick.ATTEMPTS), (TRANSCRIPT_PUNCTUATE_SPEC, punct.ATTEMPTS)):
         assert spec.rate_limit_key == "claude_global" and spec.concurrency == 1
+        # One rate unit per Claude call the run can make, and time for every one of them.
+        assert spec.rate_limit_units == attempts
+        assert spec.execution_timeout.total_seconds() >= attempts * REQUEST_TIMEOUT_S

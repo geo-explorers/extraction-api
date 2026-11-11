@@ -316,8 +316,8 @@ class Settings(BaseSettings):
         description="Sampling temperature for transcript.punctuate and debates.pick_moments."
     )
     moments_claude_max_tokens: int = Field(
-        default=8000,
-        description="Max output tokens per call for transcript.punctuate and debates.pick_moments. Both answer in indices, so output stays small."
+        default=16000,
+        description="Max output tokens per call for transcript.punctuate and debates.pick_moments. Both answer in indices; punctuate's grows with the transcript (~7k compact at the 15,000-word cap)."
     )
 
     # Generalized claim extraction (claims.extract DAG) — one pipeline for any
