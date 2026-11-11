@@ -67,7 +67,7 @@ class DebatesPickMomentsInput(OverridesMixin):
     claims: List[MomentClaim] = Field(min_length=2, max_length=MAX_CLAIMS)
     # A clip's length bounds, first sentence's start to last sentence's end.
     clip_min_ms: int = Field(default=6_000, ge=1_000)
-    clip_max_ms: int = Field(default=25_000, ge=2_000)
+    clip_max_ms: int = Field(default=30_000, ge=2_000)
     # What to aim for. The reel aims at about four times the middle of this range.
     target_min_ms: int = Field(default=10_000, ge=1_000)
     target_max_ms: int = Field(default=18_000, ge=2_000)

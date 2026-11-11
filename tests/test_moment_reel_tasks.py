@@ -191,7 +191,7 @@ def test_pick_shows_the_motion_sides_lengths_claims_and_numbered_sentences_by_tu
     shown = pick.render(_debate())
     assert "Motion: Voter ID should be required nationwide" in shown
     assert "Speaker 2 (Nico): Agree with the motion" in shown
-    assert "Target clip length: 10.0-18.0 s. Hard limits: 6.0-25.0 s." in shown
+    assert "Target clip length: 10.0-18.0 s. Hard limits: 6.0-30.0 s." in shown
     assert "[9] Speaker 2: Every president tips the scales" in shown
     assert "## Turn 1: Speaker 2 (Nico)\n[3] 15.0-19.8 s (4.8 s): Point 1.0." in shown
 
@@ -260,20 +260,20 @@ def test_a_check_that_cannot_read_the_answer_sends_it_back():
 def test_a_clip_too_long_is_trimmed_from_its_start_to_fit():
     debate = _debate()
     for k, sentence in enumerate(debate.sentences[0:3]):
-        sentence.start_ms, sentence.end_ms = k * 10_000, k * 10_000 + 9_800  # 0-29.8 s in all
+        sentence.start_ms, sentence.end_ms = k * 12_000, k * 12_000 + 11_800  # 0-35.8 s in all
     for k, sentence in enumerate(debate.sentences[3:], start=3):
-        sentence.start_ms, sentence.end_ms = 30_000 + (k - 3) * 5_000, 30_000 + (k - 3) * 5_000 + 4_800
+        sentence.start_ms, sentence.end_ms = 36_000 + (k - 3) * 5_000, 36_000 + (k - 3) * 5_000 + 4_800
     (_, moments), problems, _ = pick.check(debate, GOOD)
     assert problems == []
-    # Sentence 0 is dropped: 1-2 is 19.8 s and keeps the clip's ending.
-    assert (moments[0].start_sentence, moments[0].end_sentence, moments[0].start_ms) == (1, 2, 10_000)
+    # Sentence 0 is dropped: 1-2 is 23.8 s and keeps the clip's ending.
+    assert (moments[0].start_sentence, moments[0].end_sentence, moments[0].start_ms) == (1, 2, 12_000)
 
 
 def test_one_sentence_too_long_is_still_refused():
     debate = _debate()
-    debate.sentences[2].end_ms = debate.sentences[2].start_ms + 26_000
+    debate.sentences[2].end_ms = debate.sentences[2].start_ms + 31_000
     _, problems, _ = pick.check(debate, _with(0, start_sentence=2, end_sentence=2))
-    assert any("lasts 26.0 s" in p for p in problems), problems
+    assert any("lasts 31.0 s" in p for p in problems), problems
 
 
 def test_hard_problems_are_sent_back_without_the_soft_ones():

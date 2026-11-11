@@ -55,7 +55,7 @@ A turn's last word always ends a sentence. If the model leaves it out, the task 
 - the two speakers, with their sides
 - the transcript as sentences: speaker, turn, start and end in ms, text
 - the claims, with the caller's index and the speaker
-- the clip length bounds, which default to 6–25 s hard and 10–18 s target
+- the clip length bounds, which default to 6–30 s hard and 10–18 s target
 
 **Output:** a one-sentence `story` and exactly four `moments` in play order. Each moment has:
 - `speaker`
@@ -70,7 +70,7 @@ A turn's last word always ends a sentence. If the model leaves it out, the task 
 The task checks each of these rules before answering:
 - exactly four clips, alternating speakers
 - each clip is whole sentences from one turn of one speaker
-- each clip is within the hard length bounds
+- each clip is within the hard length bounds (6–30 s)
 - no two clips overlap
 - each clip links to a claim by its own speaker, and a speaker's two clips link to different claims
 - a clip only answers an earlier clip, by the other speaker
