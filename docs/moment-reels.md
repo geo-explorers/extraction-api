@@ -13,7 +13,7 @@ Both tasks run on Claude, using the `moments_claude_*` settings. They write an a
 
 **Budgets.** Both count against the `claude` spend-guard key that the news Claude paths use, so one hourly budget covers every Claude call. They draw on the `claude_global` per-minute rate limit at one unit per call the run can make (2 for punctuate, 3 for pick), as the news tasks reserve. They run one at a time (`concurrency=1`), so a backfill can't starve news.
 
-**Asking again.** Each task checks the answer. Problems go back to Claude in the same conversation: punctuate gets 2 answers, pick gets 3. The first answer with no problems wins. An answer with only soft problems is kept if the later ones get worse. The system prompt and the transcript are prompt-cached, so a send-back rereads them from cache.
+**Asking again.** Each task checks the answer. Problems go back to Claude in the same conversation: punctuate gets 2 answers, pick gets 3. The first answer with no problems wins. An answer with only soft problems is kept if the later ones get worse. The system prompt and the transcript are prompt-cached, so a send-back rereads them from cache. Soft problems go back only once an answer has no hard ones, so the model isn't pulled in two directions at once.
 
 **Failures.** A failed request (network, rate limit, overload) is retryable, and Hatchet runs the task again. These are final (`FinalDecisionError`, a `NonRetryableException`), because running again cannot help:
 - no acceptable answer
@@ -55,7 +55,7 @@ A turn's last word always ends a sentence. If the model leaves it out, the task 
 - the two speakers, with their sides
 - the transcript as sentences: speaker, turn, start and end in ms, text
 - the claims, with the caller's index and the speaker
-- the clip length bounds, which default to 6–25 s hard and 10–18 s target
+- the clip length bounds, which default to 6–30 s hard and 10–18 s target
 
 **Output:** a one-sentence `story` and exactly four `moments` in play order. Each moment has:
 - `speaker`
@@ -70,10 +70,12 @@ A turn's last word always ends a sentence. If the model leaves it out, the task 
 The task checks each of these rules before answering:
 - exactly four clips, alternating speakers
 - each clip is whole sentences from one turn of one speaker
-- each clip is within the hard length bounds
+- each clip is within the hard length bounds (6–30 s)
 - no two clips overlap
 - each clip links to a claim by its own speaker, and a speaker's two clips link to different claims
 - a clip only answers an earlier clip, by the other speaker
+
+A clip over the hard limit that spans several sentences is shortened from its start until it fits, and not onto a sentence that opens on a dangling word when a cleaner start fits. The payoff at its end stays. The reported `start_sentence` and `start_ms` are the trimmed ones, and `trimmed_from_sentence` says where the model's own pick started. A trim is final: it isn't sent back (a model content with it would only send the same pick again), and a trimmed clip's opener isn't held against it, since the model didn't choose that start. A clip that can't be trimmed into the limits is reported at the length the model picked.
 
 A broken answer goes back to Claude with its problems listed, up to three answers in all. If no answer passes, the run fails with a retryable error, and the caller falls back to its own picker.
 

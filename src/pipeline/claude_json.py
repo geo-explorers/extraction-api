@@ -135,7 +135,9 @@ async def ask_json(
             best = (value, attempt)
             if not soft:
                 return value, model, attempt
-        problems = hard + soft
+        # Hard problems alone while there are any: soft nudges sent with them pull the answer
+        # in more directions at once (an earlier opener makes a clip longer).
+        problems = hard or soft
         if attempt < attempts:
             logger.warning(f"{task}: answer {attempt}/{attempts} sent back: {problems}")
             messages += [

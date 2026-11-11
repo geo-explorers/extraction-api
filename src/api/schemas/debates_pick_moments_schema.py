@@ -67,7 +67,7 @@ class DebatesPickMomentsInput(OverridesMixin):
     claims: List[MomentClaim] = Field(min_length=2, max_length=MAX_CLAIMS)
     # A clip's length bounds, first sentence's start to last sentence's end.
     clip_min_ms: int = Field(default=6_000, ge=1_000)
-    clip_max_ms: int = Field(default=25_000, ge=2_000)
+    clip_max_ms: int = Field(default=30_000, ge=2_000)
     # What to aim for. The reel aims at about four times the middle of this range.
     target_min_ms: int = Field(default=10_000, ge=1_000)
     target_max_ms: int = Field(default=18_000, ge=2_000)
@@ -108,6 +108,12 @@ class PickedMoment(BaseModel):
         default=None, description="Position in `moments` of the earlier clip this one answers, or null."
     )
     why: str
+    trimmed_from_sentence: Optional[int] = Field(
+        default=None,
+        description="The model picked this clip from an earlier sentence, over the hard limit; it "
+        "was shortened from its start to fit. claim, claim_fit, role and why were given for the "
+        "longer clip. The model is not asked again about a trim.",
+    )
 
 
 class DebatesPickMomentsResult(BaseModel):

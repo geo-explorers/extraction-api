@@ -191,9 +191,9 @@ def test_pick_shows_the_motion_sides_lengths_claims_and_numbered_sentences_by_tu
     shown = pick.render(_debate())
     assert "Motion: Voter ID should be required nationwide" in shown
     assert "Speaker 2 (Nico): Agree with the motion" in shown
-    assert "Target clip length: 10.0-18.0 s. Hard limits: 6.0-25.0 s." in shown
+    assert "Target clip length: 10.0-18.0 s. Hard limits: 6.0-30.0 s." in shown
     assert "[9] Speaker 2: Every president tips the scales" in shown
-    assert "## Turn 1: Speaker 2 (Nico)\n[3] 15.0-19.8 s: Point 1.0." in shown
+    assert "## Turn 1: Speaker 2 (Nico)\n[3] 15.0-19.8 s (4.8 s): Point 1.0." in shown
 
 
 def test_pick_accepts_four_alternating_clips_and_times_them_from_their_sentences():
@@ -255,6 +255,101 @@ def test_a_check_that_cannot_read_the_answer_sends_it_back():
     client = _FakeClaude({"x": 1}, {"missing": "ok"})
     value, _, attempts = asyncio.run(ask_json("s", "u", unreadable, task="t", attempts=2, client=client))
     assert (value, attempts) == ("ok", 2)
+
+
+def test_a_clip_too_long_is_trimmed_from_its_start_to_fit():
+    debate = _debate()
+    for k, sentence in enumerate(debate.sentences[0:3]):
+        sentence.start_ms, sentence.end_ms = k * 12_000, k * 12_000 + 11_800  # 0-35.8 s in all
+    for k, sentence in enumerate(debate.sentences[3:], start=3):
+        sentence.start_ms, sentence.end_ms = 36_000 + (k - 3) * 5_000, 36_000 + (k - 3) * 5_000 + 4_800
+    (_, moments), problems, _ = pick.check(debate, GOOD)
+    assert problems == []
+    # Sentence 0 is dropped: 1-2 is 23.8 s and keeps the clip's ending.
+    assert (moments[0].start_sentence, moments[0].end_sentence, moments[0].start_ms) == (1, 2, 12_000)
+
+
+def _long_first_turn(debate, lengths, texts=None):
+    """Re-time turn 0 (sentences 0-2) to `lengths` seconds back to back, then the rest after it."""
+    at = 0
+    for k, seconds in enumerate(lengths):
+        sentence = debate.sentences[k]
+        sentence.start_ms, sentence.end_ms = at, at + int(seconds * 1000)
+        if texts:
+            sentence.text = texts[k]
+        at += int(seconds * 1000)
+    for k, sentence in enumerate(debate.sentences[3:], start=3):
+        sentence.start_ms, sentence.end_ms = at + (k - 3) * 5_000, at + (k - 3) * 5_000 + 4_800
+
+
+def test_a_trim_is_marked_on_the_clip_and_costs_no_extra_call():
+    debate = _debate()
+    _long_first_turn(debate, [12, 12, 11.8])  # 35.8 s
+    (_, moments), problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and soft == []
+    assert (moments[0].start_sentence, moments[0].trimmed_from_sentence) == (1, 0)
+    # A clip that was not trimmed says so.
+    assert moments[1].trimmed_from_sentence is None
+    # The trimmed reel is the answer: one call, not a send-back for each trim.
+    client = _FakeClaude(GOOD, GOOD, GOOD)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 1 and len(client.calls) == 1
+
+
+def test_a_trim_that_can_only_land_on_a_dangling_opener_is_not_nudged():
+    debate = _debate()
+    # 0-2 is 34 s; every start that fits (1 or 2) opens on a dangling word, so the trim takes 1.
+    _long_first_turn(debate, [10, 12, 12], ["One.", "And that.", "But so."])
+    (_, moments), problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and moments[0].start_sentence == 1
+    # Starting earlier would only be trimmed back: the model is not told to.
+    assert soft == []
+
+
+def test_a_trim_that_would_go_below_the_minimum_reports_the_real_length():
+    debate = _debate()
+    _long_first_turn(debate, [27, 2, 3])  # 32 s; dropping sentence 0 leaves 5 s
+    _, problems, _ = pick.check(debate, GOOD)
+    assert any("Clip 0 lasts 32.0 s" in p for p in problems), problems
+
+
+def test_a_trim_steps_past_a_dangling_opener_when_a_clean_start_fits():
+    debate = _debate()
+    # 0-2 is 34 s. Dropping sentence 0 lands on "And", so the trim steps on to sentence 2.
+    _long_first_turn(debate, [10, 12, 12], ["One.", "And that is why.", "So it holds."])
+    (_, moments), problems, soft = pick.check(debate, GOOD)
+    assert problems == []
+    assert moments[0].start_sentence == 2
+    assert not any('opens on "and"' in p for p in soft), soft
+
+
+def test_a_soft_answer_between_hard_ones_is_kept_and_its_nudge_sent_once():
+    debate = _debate()
+    debate.sentences[3].text = "And it is a federal problem."
+    broken = {"moments": GOOD["moments"][:3]}
+    client = _FakeClaude(broken, GOOD, broken)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 2 and len(result.moments) == 4
+    conversation = client.calls[-1]["messages"]
+    first, second = conversation[2]["content"], conversation[4]["content"]
+    assert "exactly 4" in first and 'opens on "and"' not in first
+    assert 'opens on "and"' in second
+
+
+def test_one_sentence_too_long_is_still_refused():
+    debate = _debate()
+    debate.sentences[2].end_ms = debate.sentences[2].start_ms + 31_000
+    _, problems, _ = pick.check(debate, _with(0, start_sentence=2, end_sentence=2))
+    assert any("lasts 31.0 s" in p for p in problems), problems
+
+
+def test_hard_problems_are_sent_back_without_the_soft_ones():
+    debate = _debate()
+    debate.sentences[3].text = "And it is a federal problem."
+    client = _FakeClaude({"moments": GOOD["moments"][:3]}, GOOD, GOOD)
+    asyncio.run(pick.pick_moments(debate, client=client))
+    first_send_back = client.calls[1]["messages"][2]["content"]
+    assert "exactly 4" in first_send_back and 'opens on "and"' not in first_send_back
 
 
 def test_pick_refuses_overlapping_clips():
