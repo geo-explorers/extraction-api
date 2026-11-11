@@ -61,7 +61,7 @@ A turn's last word always ends a sentence. If the model leaves it out, the task 
 
 Claude offers up to three candidate reels in one answer. Each is checked on its own. When more than one passes, a second call judges them the way a viewer meets them: the motion, who speaks for which side, and each clip's words and length, with no transcript and no claims. It picks the reel a newcomer can follow to the end. Reels with no soft problems are judged ahead of ones with them. If the judge can't answer, the first reel is taken.
 
-**Output:** a one-sentence `story`, exactly four `moments` in play order, `candidates` (how many reels were judged between) and `judge_why`. Any "Speaker N" left in the story becomes that speaker's first name. Each moment has:
+**Output:** a one-sentence `story`, exactly four `moments` in play order, `candidates` (how many reels were judged between) and `judge_why`. Any "Speaker N" left in the story becomes that speaker's short name: the first word of their name past any title, or the full name when both speakers share it. Each moment has:
 - `speaker`
 - `start_sentence` and `end_sentence` (inclusive)
 - `start_ms` and `end_ms` (from those sentences)
@@ -81,7 +81,7 @@ The task checks each of these rules before answering:
 
 A clip over the hard limit that spans several sentences is shortened from its start until it fits, and not onto a sentence that opens on a dangling word when a cleaner start fits. The payoff at its end stays. The reported `start_sentence` and `start_ms` are the trimmed ones, and `trimmed_from_sentence` says where the model's own pick started. A trim is final: it isn't sent back (a model content with it would only send the same pick again), and a trimmed clip's opener isn't held against it, since the model didn't choose that start. A clip that can't be trimmed into the limits is reported at the length the model picked.
 
-Two rules are soft: a clip that opens on a dangling word ("and", "so", "but"...), and a reel over 70 s in all. An answer whose every passing reel breaks a soft rule is sent back once more, and the last acceptable one is kept.
+Two rules are soft: a clip that opens on a dangling word ("and", "so", "but"...), and a reel longer than four clips at the top of the target (72 s by default). When only one reel passes and it breaks a soft rule, the answer is sent back once more and the last acceptable one is kept. When two or more pass, the judge weighs them as they are.
 
 An answer goes back to Claude with its problems listed only when no candidate passes, up to three answers in all. If no answer passes, the run fails with a retryable error, and the caller falls back to its own picker.
 
@@ -91,6 +91,6 @@ The order doesn't have to follow the order things were said, but an answer alway
 
 ## Evidence
 
-11 Nov 2026: the first 93 live story reels, graded against their transcripts, averaged 2.5/5. Most often a clearly better moment was skipped (65 reels), a clip opened mid-thought (63), a clip ran over 20 s (59), or a clip leaned on something the viewer never heard (56). Reels over 80 s graded worst. The moment-first prompt, the judge, the 22 s limit and the 70 s reel rule answer those.
+11 Nov 2026: the first 93 live story reels, graded against their transcripts, averaged 2.5/5. Most often a clearly better moment was skipped (65 reels), a clip opened mid-thought (63), a clip ran over 20 s (59), or a clip leaned on something the viewer never heard (56). Reels over 80 s graded worst. The moment-first prompt, the judge, the 22 s limit and the reel length rule answer those.
 
 10 Nov 2026 prototype: 12 debates whose current reels had three clips. Every answer was four valid alternating clips, and a blind judge preferred the new reel in all 12 (story 7.6 vs 4.4, clean starts and ends 6.0 vs 3.3). The remaining flaws were mid-sentence cuts, which came from cutting on subtitle chunks. That's why this task works in whole punctuated sentences.

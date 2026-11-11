@@ -29,7 +29,7 @@ Work in this order.
 
 Each clip:
 - Is a contiguous run of whole sentences from one turn of one speaker: start_sentence to end_sentence, inclusive.
-- Lasts within the target length you are given, from its first sentence's start to its last sentence's end, and never outside the hard limits. Shorter is better: one sharp sentence beats three that wander. The four clips together should run under 70 seconds.
+- Lasts within the target length you are given, from its first sentence's start to its last sentence's end, and never outside the hard limits. Shorter is better: one sharp sentence beats three that wander. The four together stay under the reel length you are given.
 - Starts where a thought starts. Never open on a connective ("and", "so", "but", "because", "that's why"), on filler ("yeah", "okay", "um", "I mean"), or on an example before its point ("for example", "like when").
 - Ends just after its point lands. Never stop before the payoff.
 - Stands alone. A viewer who has seen only the clips before it in the reel must understand it. Never use a clip that answers something the viewer didn't hear ("like you said", "that point", "your argument"), or that names "he", "she", "they" or "it" when the viewer can't tell who or what that is.

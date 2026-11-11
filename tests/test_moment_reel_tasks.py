@@ -191,7 +191,7 @@ def test_pick_shows_the_motion_sides_lengths_claims_and_numbered_sentences_by_tu
     shown = pick.render(_debate())
     assert "Motion: Voter ID should be required nationwide" in shown
     assert "Speaker 2 (Nico): Agree with the motion" in shown
-    assert "Target clip length: 10.0-18.0 s. Hard limits: 6.0-22.0 s." in shown
+    assert "Target clip length: 10.0-18.0 s. Hard limits: 6.0-22.0 s. The whole reel: under 72.0 s." in shown
     assert "[9] Speaker 2: Every president tips the scales" in shown
     assert "## Turn 1: Speaker 2 (Nico)\n[3] 15.0-19.8 s (4.8 s): Point 1.0." in shown
 
@@ -526,20 +526,52 @@ def test_a_clip_opening_on_so_is_a_soft_problem():
     assert problems == [] and any('opens on "so"' in p for p in soft), soft
 
 
-def test_a_reel_over_seventy_seconds_is_asked_to_shorten():
+def _clips_of(debate, seconds):
+    """Re-time every sentence so each GOOD clip (three sentences) runs `seconds`."""
+    sentence_ms = int(seconds * 1000 / 3)
+    for k, sentence in enumerate(debate.sentences):
+        sentence.start_ms, sentence.end_ms = k * sentence_ms, (k + 1) * sentence_ms
+
+
+def test_a_reel_over_four_clips_at_the_target_is_asked_to_shorten():
     debate = _debate()
     debate.clip_max_ms = 30_000
-    for k, sentence in enumerate(debate.sentences):
-        sentence.start_ms, sentence.end_ms = k * 6_200, k * 6_200 + 6_000  # 18.4 s clips, 73.6 s reel
+    _clips_of(debate, 18.3)  # 73.2 s, over 4 x 18 s
     _, problems, soft = pick.check(debate, GOOD)
-    assert problems == [] and any("The reel runs 73.6 s" in p for p in soft), soft
-    debate.sentences[11].end_ms -= 4_000  # 69.6 s
+    assert problems == [] and any("keep the four clips under 72.0 s" in p for p in soft), soft
+    # Four clips inside the 10-18 s target are never told to shorten: 70.8 s.
+    _clips_of(debate, 17.7)
     assert pick.check(debate, GOOD)[2] == []
+    # The limit follows the target the caller sends.
+    debate.target_max_ms = 17_000
+    assert any("under 68.0 s" in p for p in pick.check(debate, GOOD)[2])
 
 
-def test_a_story_calls_the_speakers_by_first_name():
+def test_reels_that_pass_go_to_the_judge_as_they_are_not_back_for_a_nudge():
+    debate = _debate()
+    debate.sentences[0].text = "So it is a state matter."  # both reels have a clip opening on it
+    passed, problems, soft = pick.check_reels(debate, {"reels": [GOOD, OTHER]})
+    assert problems == [] and soft == [] and len(passed) == 2
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "x"})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert (result.attempts, result.candidates, len(client.calls)) == (1, 2, 2)
+    # One passing reel with a soft problem is still sent back once.
+    _, _, soft = pick.check_reels(debate, {"reels": [GOOD, BROKEN]})
+    assert any(p.startswith('Reel 0: Clip 0 opens on "so"') for p in soft), soft
+
+
+def test_a_story_calls_the_speakers_by_short_name():
     (story, _), _, _ = pick.check(_debate(), {**GOOD, "story": "Speaker 1 says states; Speaker 2 disagrees."})
     assert story == "Dahmmy says states; Nico disagrees."
     debate = _debate()
     debate.speakers[0].name = "Dahmmy Hilfigger (@nsddahmmy)"
-    assert pick.named(debate, "Speaker 1 and Speaker 3") == "Dahmmy and Speaker 3"
+    debate.speakers[1].name = "Dr. Nico Lagan"
+    assert pick.named(debate, "Speaker 1, Speaker 2 and Speaker 3") == "Dahmmy, Nico and Speaker 3"
+
+
+def test_speakers_who_share_a_first_name_keep_their_full_names_in_the_story_and_for_the_judge():
+    debate = _debate()
+    debate.speakers[0].name, debate.speakers[1].name = "Alex Chen", "Alex Park"
+    assert pick.named(debate, "Speaker 1 v Speaker 2") == "Alex Chen v Alex Park"
+    judged = pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
+    assert "Clip 1, Alex Chen," in judged and "Clip 2, Alex Park," in judged

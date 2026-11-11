@@ -17,7 +17,7 @@ from hatchet_sdk import Context
 from src.api.schemas.debates_pick_moments_schema import DebatesPickMomentsInput, DebatesPickMomentsResult
 from src.infrastructure.logger import get_logger
 from src.pipeline.claude_json import execution_timeout_s
-from src.pipeline.debates_pick_moments_core import CALLS, TASK, pick_moments
+from src.pipeline.debates_pick_moments_core import CALLS, TASK, pick_moments, reel_ms
 from src.tasks.base import TaskSpec
 
 logger = get_logger(__name__)
@@ -27,7 +27,7 @@ DEBATES_PICK_MOMENTS_MAX_PAYLOAD_BYTES = 1024 * 1024
 
 async def _handle(input: DebatesPickMomentsInput, ctx: Context) -> DebatesPickMomentsResult:
     result = await pick_moments(input)
-    total = sum(m.end_ms - m.start_ms for m in result.moments) / 1000
+    total = reel_ms(result.moments) / 1000
     logger.info(
         f"{TASK}: 4 moments, {total:.1f} s, {result.attempts} answer(s), "
         f"judged from {result.candidates} reel(s) ({result.model_used})"

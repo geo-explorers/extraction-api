@@ -18,7 +18,7 @@ marked trimmed_from_sentence, rather than refused.
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.api.schemas.debates_pick_moments_schema import (
     MOMENTS,
@@ -42,8 +42,8 @@ JUDGE_ATTEMPTS = 2
 CALLS = ATTEMPTS + JUDGE_ATTEMPTS
 # Candidate reels asked for in one answer; more are ignored.
 CANDIDATES = 3
-# A reel longer than this is improvable (a soft rule): reels past 80 s graded worst on 11 Nov.
-REEL_TARGET_MAX_MS = 70_000
+# Titles a speaker's short name skips: "Dr. Jane Smith" is Jane.
+TITLES = {"dr", "mr", "mrs", "ms", "mx", "prof", "sir"}
 ROLES = ("opening", "answer", "rebuttal", "closing")
 # A clip opening on one of these leans on something the viewer did not hear, or on filler. The
 # prompt forbids it; the check asks again (a soft rule: the last answer is kept regardless).
@@ -57,16 +57,44 @@ def _seconds(ms: int) -> str:
     return f"{ms / 1000:.1f}"
 
 
+def reel_ms(moments: List[PickedMoment]) -> int:
+    """How long a reel plays: its clips back to back."""
+    return sum(m.end_ms - m.start_ms for m in moments)
+
+
+def reel_max_ms(input: DebatesPickMomentsInput) -> int:
+    """The longest a reel should run: every clip at the top of its target (a soft rule). Reels
+    past 80 s graded worst on 11 Nov."""
+    return MOMENTS * input.target_max_ms
+
+
+def _side(speaker) -> str:
+    return f": {speaker.side} with the motion" if speaker.side else ""
+
+
+def short_names(input: DebatesPickMomentsInput) -> Dict[int, str]:
+    """What a story and the judge call each speaker: the first word of their name past any title,
+    or their full name when that would not tell the two apart."""
+
+    def short(name: str) -> str:
+        words = [w for w in name.split() if w.lower().rstrip(".") not in TITLES]
+        return (words or name.split() or [name])[0]
+
+    shorts = {s.slot: short(s.name) for s in input.speakers}
+    if len(set(shorts.values())) < len(shorts):
+        return {s.slot: s.name for s in input.speakers}
+    return shorts
+
+
 def render(input: DebatesPickMomentsInput) -> str:
     names = {s.slot: s.name for s in input.speakers}
     lines = [f"Motion: {input.title}", ""]
-    for s in input.speakers:
-        side = f": {s.side} with the motion" if s.side else ""
-        lines.append(f"Speaker {s.slot} ({s.name}){side}")
+    lines += [f"Speaker {s.slot} ({s.name}){_side(s)}" for s in input.speakers]
     lines += [
         "",
         f"Target clip length: {_seconds(input.target_min_ms)}-{_seconds(input.target_max_ms)} s. "
-        f"Hard limits: {_seconds(input.clip_min_ms)}-{_seconds(input.clip_max_ms)} s.",
+        f"Hard limits: {_seconds(input.clip_min_ms)}-{_seconds(input.clip_max_ms)} s. "
+        f"The whole reel: under {_seconds(reel_max_ms(input))} s.",
         "",
         "Claims:",
     ]
@@ -215,25 +243,18 @@ def check(
         for a in input.avoid:
             if m.start_sentence <= a.end_sentence and a.start_sentence <= m.end_sentence:
                 problems.append(f"Clip {i} uses sentences {a.start_sentence}-{a.end_sentence}, which you were told to avoid ({a.reason}).")
-    if not problems:
-        total = sum(m.end_ms - m.start_ms for m in moments)
-        if total > REEL_TARGET_MAX_MS:
-            soft.append(
-                f"The reel runs {_seconds(total)} s; keep the four clips under "
-                f"{_seconds(REEL_TARGET_MAX_MS)} s together. Shorten the longest clips."
-            )
+    if not problems and reel_ms(moments) > reel_max_ms(input):
+        soft.append(
+            f"The reel runs {_seconds(reel_ms(moments))} s; keep the four clips under "
+            f"{_seconds(reel_max_ms(input))} s together. Shorten the longest clips."
+        )
     story = answer.get("story") if isinstance(answer.get("story"), str) else ""
     return ((named(input, story), moments) if not problems else None), problems, soft
 
 
-def first_name(name: str) -> str:
-    """A speaker's first name, as a story calls them: the display name's first word."""
-    return (name.split() or [name])[0]
-
-
 def named(input: DebatesPickMomentsInput, story: str) -> str:
-    """`story` with any "Speaker N" left in it replaced by that speaker's first name."""
-    names = {s.slot: first_name(s.name) for s in input.speakers}
+    """`story` with any "Speaker N" left in it replaced by that speaker's short name."""
+    names = short_names(input)
     return re.sub(
         r"\bSpeaker (\d+)\b",
         lambda m: names.get(int(m.group(1)), m.group(0)),
@@ -248,7 +269,9 @@ def check_reels(
     input: DebatesPickMomentsInput, answer: Any
 ) -> Tuple[Optional[List[Tuple[Reel, List[str]]]], List[str], List[str]]:
     """The candidate reels that keep every hard rule, each with its soft problems; the answer's
-    problems when none does; and its soft problems, when no candidate is free of them.
+    problems when none does; and its soft problems when only one reel passed and it has some.
+    With two or more passing, the judge weighs them as they are: sending them back for a soft
+    nudge could return fewer.
 
     A single reel (an answer in the old shape, {"moments": ...}) is one candidate."""
     if isinstance(answer, dict) and isinstance(answer.get("reels"), list):
@@ -272,25 +295,20 @@ def check_reels(
         softs += [label + p for p in soft]
     if not passed:
         return None, problems, []
-    clean = any(not soft for _, soft in passed)
-    return passed, [], ([] if clean else softs)
+    return passed, [], (softs if len(passed) == 1 else [])
 
 
 def render_for_judge(input: DebatesPickMomentsInput, reels: List[Reel]) -> str:
     """The reels as a viewer meets them: the motion, who speaks for which side, and each clip's
     words and length. No transcript, no claims, no story: the judge sees what the viewer sees."""
-    speakers = {s.slot: s for s in input.speakers}
+    names = short_names(input)
     lines = [f"Motion: {input.title}", ""]
-    for s in input.speakers:
-        side = f" ({s.side} with the motion)" if s.side else ""
-        lines.append(f"{first_name(s.name)}{side}")
+    lines += [f"{names[s.slot]}{_side(s)}" for s in input.speakers]
     for number, (_, moments) in enumerate(reels):
-        total = sum(m.end_ms - m.start_ms for m in moments)
-        lines += ["", f"## Reel {number} ({_seconds(total)} s)"]
+        lines += ["", f"## Reel {number} ({_seconds(reel_ms(moments))} s)"]
         for position, m in enumerate(moments):
             words = " ".join(s.text.strip() for s in input.sentences[m.start_sentence : m.end_sentence + 1])
-            name = first_name(speakers[m.speaker].name)
-            lines.append(f"Clip {position + 1}, {name}, {_seconds(m.end_ms - m.start_ms)} s: {words}")
+            lines.append(f"Clip {position + 1}, {names[m.speaker]}, {_seconds(m.end_ms - m.start_ms)} s: {words}")
     return "\n".join(lines)
 
 
@@ -350,4 +368,4 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
     )
 
 
-__all__ = ["CALLS", "TASK", "check", "check_reels", "judge", "pick_moments", "render", "render_for_judge"]
+__all__ = ["CALLS", "TASK", "check", "check_reels", "judge", "pick_moments", "reel_ms", "render", "render_for_judge"]
