@@ -574,8 +574,23 @@ def test_the_story_is_written_with_speaker_numbers_for_the_names_to_be_filled_in
     from src.config.prompts.debates_pick_moments_prompt import DEBATES_PICK_MOMENTS_SYSTEM
 
     # named() picks names that tell the speakers apart; a name Claude wrote itself could not.
-    assert 'call the speakers "Speaker 1" and "Speaker 2"' in DEBATES_PICK_MOMENTS_SYSTEM
+    assert 'call each speaker "Speaker N" with their number as given above' in DEBATES_PICK_MOMENTS_SYSTEM
     assert "first name" not in DEBATES_PICK_MOMENTS_SYSTEM
+    # Not slots 1 and 2 by name: the input takes any two, and a story told "Speaker 2" for a
+    # speaker numbered 0 would misname them.
+    assert '"Speaker 1" and "Speaker 2"' not in DEBATES_PICK_MOMENTS_SYSTEM
+
+
+def test_names_are_filled_in_for_whatever_numbers_the_speakers_have():
+    data = _debate().model_dump()
+    swap = {1: 3, 2: 7}
+    for speaker in data["speakers"]:
+        speaker["slot"] = swap[speaker["slot"]]
+    for row in data["sentences"] + data["claims"]:
+        row["speaker"] = swap[row["speaker"]]
+    debate = DebatesPickMomentsInput(**data)
+    assert "Speaker 7 (Nico): Agree with the motion" in pick.render(debate)
+    assert pick.named(debate, "Speaker 3 opens; Speaker 7 answers.") == "Dahmmy opens; Nico answers."
 
 
 def test_speakers_who_share_a_first_name_keep_their_full_names_in_the_story_and_for_the_judge():
