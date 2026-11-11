@@ -12,6 +12,7 @@ from src.config.overrides import llm, prompts
 from src.api.services.claim_anchor_enforce import enforce_anchors
 from src.api.services.claim_anchor_guard import calendar_block, describe_published, source_anchors
 from src.config.settings import settings
+from src.infrastructure.claude import claude_text as _claude_text
 from src.infrastructure.gemini_ladder import GeminiClient
 from src.infrastructure.logger import get_logger
 from src.api.services.news_debate_claim_service import (
@@ -237,15 +238,6 @@ def extract_news_claims_claude(
   )
   return result
 
-
-def _claude_text(message) -> str:
-  """Concatenate the text blocks of an Anthropic Messages response."""
-  parts = [
-    block.text
-    for block in message.content
-    if getattr(block, "type", None) == "text"
-  ]
-  return "".join(parts)
 
 
 def _parse_llm_response(raw_response: str) -> dict:

@@ -53,6 +53,8 @@ from src.tasks.claims_extract import (
 from src.tasks.geo_fetch_entities import GEO_FETCH_ENTITIES_SPEC
 from src.tasks.claims_judge_equivalence import CLAIMS_JUDGE_EQUIVALENCE_SPEC
 from src.tasks.claims_score_clips import CLAIMS_SCORE_CLIPS_SPEC
+from src.tasks.debates_pick_moments import DEBATES_PICK_MOMENTS_SPEC
+from src.tasks.transcript_punctuate import TRANSCRIPT_PUNCTUATE_SPEC
 from src.tasks.claims_score_highlights import CLAIMS_SCORE_HIGHLIGHTS_SPEC
 from src.tasks.geo_resolve_entities import GEO_RESOLVE_ENTITIES_SPEC
 from src.tasks.sheets_export_table import SHEETS_EXPORT_TABLE_SPEC
@@ -92,6 +94,8 @@ _STANDALONE_SPECS: list[TaskSpec] = [
     CLAIMS_JUDGE_EQUIVALENCE_SPEC,
     CLAIMS_SCORE_HIGHLIGHTS_SPEC,
     CLAIMS_SCORE_CLIPS_SPEC,
+    TRANSCRIPT_PUNCTUATE_SPEC,
+    DEBATES_PICK_MOMENTS_SPEC,
     NEWS_REVIEW_COLLECTIONS_SPEC,
 ]
 

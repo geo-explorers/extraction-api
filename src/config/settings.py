@@ -302,6 +302,24 @@ class Settings(BaseSettings):
         description="Max output tokens for the Claude news-claim fallback (dense multi-source stories can produce many claims)."
     )
 
+    # Debate moment reels (GEO-3638): transcript.punctuate and debates.pick_moments
+    # write, rather than choose, so they run on Claude, not the decision model.
+    # Same account and rate limit (claude_global) as the news Claude path.
+    moments_claude_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Anthropic Claude model for transcript.punctuate and debates.pick_moments (GEO-3638)."
+    )
+    moments_claude_temperature: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Sampling temperature for transcript.punctuate and debates.pick_moments."
+    )
+    moments_claude_max_tokens: int = Field(
+        default=16000,
+        description="Max output tokens per call for transcript.punctuate and debates.pick_moments. Both answer in indices; punctuate's grows with the transcript (~7k compact at the 15,000-word cap)."
+    )
+
     # Generalized claim extraction (claims.extract DAG) — one pipeline for any
     # text media: debate transcripts, research papers, news articles, podcasts,
     # talks, generic documents. Deliberately separate from gemini_premium_model
