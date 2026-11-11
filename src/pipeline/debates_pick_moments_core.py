@@ -61,7 +61,7 @@ def render(input: DebatesPickMomentsInput) -> str:
         if s.turn != turn:
             turn = s.turn
             lines.append(f"\n## Turn {s.turn}: Speaker {s.speaker} ({names[s.speaker]})")
-        lines.append(f"[{i}] {_seconds(s.start_ms)}-{_seconds(s.end_ms)} s: {s.text.strip()}")
+        lines.append(f"[{i}] {_seconds(s.start_ms)}-{_seconds(s.end_ms)} s ({_seconds(s.end_ms - s.start_ms)} s): {s.text.strip()}")
     return "\n".join(lines)
 
 
@@ -103,6 +103,12 @@ def check(
         if len({s.turn for s in run}) != 1:
             problems.append(f"{name}: sentences {start}-{end} span more than one turn.")
             continue
+        # Too long but more than one sentence: drop sentences from the start until it fits, so
+        # the payoff at the end is kept. A clip slightly over the limit is the most common miss,
+        # and asking again rarely shortens it without breaking something else.
+        while start < end and sentences[end].end_ms - sentences[start].start_ms > input.clip_max_ms:
+            start += 1
+        run = sentences[start : end + 1]
         first_word = re.sub(r"[^a-z']", "", (run[0].text.split() or [""])[0].lower().replace("’", "'"))
         if first_word in DANGLING_OPENERS:
             soft.append(
