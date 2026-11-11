@@ -127,7 +127,9 @@ async def ask_json(
             raise FinalDecisionError(f"{task}: the answer was cut off at the token limit")
         try:
             value, hard, soft = check(parse_json(raw))
-        except (ValueError, TypeError) as e:  # JSONDecodeError is a ValueError
+        except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
+            # Not JSON (JSONDecodeError is a ValueError), or JSON a check could not read: either
+            # way the answer is refused and sent back, never a crash Hatchet would rerun.
             value, hard, soft = None, [f"The answer is not valid JSON in the asked shape ({e})."], []
         if not hard:
             best = (value, attempt)

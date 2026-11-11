@@ -235,6 +235,28 @@ def test_pick_refuses_a_reel_that_breaks_a_rule(answer, problem):
     assert any(problem in p for p in problems), problems
 
 
+def test_a_one_based_answers_is_refused_not_a_crash():
+    # Claude numbering the clips from 1: the last clip "answers" clip 4, which does not exist.
+    accepted, problems, _ = pick.check(_debate(), _with(3, answers=4))
+    assert accepted is None
+    assert any("answers clip 4" in p for p in problems), problems
+    # And sent back like any refused answer, not raised for Hatchet to rerun.
+    client = _FakeClaude(_with(3, answers=4), GOOD)
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert result.attempts == 2
+
+
+def test_a_check_that_cannot_read_the_answer_sends_it_back():
+    from src.pipeline.claude_json import ask_json
+
+    def unreadable(answer):
+        return answer["missing"], [], []
+
+    client = _FakeClaude({"x": 1}, {"missing": "ok"})
+    value, _, attempts = asyncio.run(ask_json("s", "u", unreadable, task="t", attempts=2, client=client))
+    assert (value, attempts) == ("ok", 2)
+
+
 def test_pick_refuses_overlapping_clips():
     debate = _debate()
     # Two speaker-1 clips over the same turn-0 sentences.

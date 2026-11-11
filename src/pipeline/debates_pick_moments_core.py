@@ -154,7 +154,8 @@ def check(
                 elif a.speaker == b.speaker and a.claim_index == b.claim_index:
                     problems.append(f"Clips {i} and {j} are the same speaker's and link the same claim.")
         for i, m in enumerate(moments):
-            if m.answers is not None and moments[m.answers].speaker == m.speaker:
+            # An out-of-range `answers` is already a problem above; only an earlier clip is read.
+            if m.answers is not None and 0 <= m.answers < i and moments[m.answers].speaker == m.speaker:
                 problems.append(f"Clip {i} answers its own speaker's clip; it can only answer the other speaker.")
     for i, m in enumerate(moments):
         for a in input.avoid:
