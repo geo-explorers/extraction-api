@@ -191,7 +191,7 @@ def test_pick_shows_the_motion_sides_lengths_claims_and_numbered_sentences_by_tu
     shown = pick.render(_debate())
     assert "Motion: Voter ID should be required nationwide" in shown
     assert "Speaker 2 (Nico): Agree with the motion" in shown
-    assert "Target clip length: 10.0-18.0 s. Hard limits: 6.0-30.0 s." in shown
+    assert "Target clip length: 10.0-18.0 s. Hard limits: 6.0-22.0 s. The whole reel: under 72.0 s." in shown
     assert "[9] Speaker 2: Every president tips the scales" in shown
     assert "## Turn 1: Speaker 2 (Nico)\n[3] 15.0-19.8 s (4.8 s): Point 1.0." in shown
 
@@ -259,6 +259,7 @@ def test_a_check_that_cannot_read_the_answer_sends_it_back():
 
 def test_a_clip_too_long_is_trimmed_from_its_start_to_fit():
     debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
     for k, sentence in enumerate(debate.sentences[0:3]):
         sentence.start_ms, sentence.end_ms = k * 12_000, k * 12_000 + 11_800  # 0-35.8 s in all
     for k, sentence in enumerate(debate.sentences[3:], start=3):
@@ -284,6 +285,7 @@ def _long_first_turn(debate, lengths, texts=None):
 
 def test_a_trim_is_marked_on_the_clip_and_costs_no_extra_call():
     debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
     _long_first_turn(debate, [12, 12, 11.8])  # 35.8 s
     (_, moments), problems, soft = pick.check(debate, GOOD)
     assert problems == [] and soft == []
@@ -298,6 +300,7 @@ def test_a_trim_is_marked_on_the_clip_and_costs_no_extra_call():
 
 def test_a_trim_that_can_only_land_on_a_dangling_opener_is_not_nudged():
     debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
     # 0-2 is 34 s; every start that fits (1 or 2) opens on a dangling word, so the trim takes 1.
     _long_first_turn(debate, [10, 12, 12], ["One.", "And that.", "But so."])
     (_, moments), problems, soft = pick.check(debate, GOOD)
@@ -308,6 +311,7 @@ def test_a_trim_that_can_only_land_on_a_dangling_opener_is_not_nudged():
 
 def test_a_trim_that_would_go_below_the_minimum_reports_the_real_length():
     debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
     _long_first_turn(debate, [27, 2, 3])  # 32 s; dropping sentence 0 leaves 5 s
     _, problems, _ = pick.check(debate, GOOD)
     assert any("Clip 0 lasts 32.0 s" in p for p in problems), problems
@@ -315,8 +319,9 @@ def test_a_trim_that_would_go_below_the_minimum_reports_the_real_length():
 
 def test_a_trim_steps_past_a_dangling_opener_when_a_clean_start_fits():
     debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
     # 0-2 is 34 s. Dropping sentence 0 lands on "And", so the trim steps on to sentence 2.
-    _long_first_turn(debate, [10, 12, 12], ["One.", "And that is why.", "So it holds."])
+    _long_first_turn(debate, [10, 12, 12], ["One.", "And that is why.", "It holds."])
     (_, moments), problems, soft = pick.check(debate, GOOD)
     assert problems == []
     assert moments[0].start_sentence == 2
@@ -439,8 +444,158 @@ def test_both_tasks_are_registered_with_their_contracts_on_the_claude_budget():
 
     from src.pipeline.claude_json import REQUEST_TIMEOUT_S
 
-    for spec, attempts in ((DEBATES_PICK_MOMENTS_SPEC, pick.ATTEMPTS), (TRANSCRIPT_PUNCTUATE_SPEC, punct.ATTEMPTS)):
+    for spec, attempts in ((DEBATES_PICK_MOMENTS_SPEC, pick.CALLS), (TRANSCRIPT_PUNCTUATE_SPEC, punct.ATTEMPTS)):
         assert spec.rate_limit_key == "claude_global" and spec.concurrency == 1
         # One rate unit per Claude call the run can make, and time for every one of them.
         assert spec.rate_limit_units == attempts
         assert spec.execution_timeout.total_seconds() >= attempts * REQUEST_TIMEOUT_S
+
+
+# --- candidate reels and the judge (11 Nov grading) -------------------------------------
+
+# A second valid reel: speaker 2 opens, then the same exchange the other way round.
+OTHER = {
+    "story": "Speaker 2 opens on federal rules; Speaker 1 answers.",
+    "moments": [
+        _moment(2, 3, 5, 5, role="opening"),
+        _moment(1, 0, 2, 0, answers=0),
+        _moment(2, 9, 11, 9, answers=1, role="rebuttal"),
+        _moment(1, 6, 8, 8, answers=2, role="closing"),
+    ],
+}
+BROKEN = {"moments": GOOD["moments"][:3]}
+
+
+def test_candidate_reels_that_pass_are_kept_and_a_broken_one_is_dropped():
+    passed, problems, soft = pick.check_reels(_debate(), {"reels": [BROKEN, GOOD, OTHER]})
+    assert problems == [] and soft == []
+    assert [moments[0].speaker for (_, moments), _ in passed] == [1, 2]
+
+
+def test_an_answer_is_sent_back_only_when_no_candidate_passes():
+    passed, problems, _ = pick.check_reels(_debate(), {"reels": [BROKEN, BROKEN]})
+    assert passed is None
+    assert any(p.startswith("Reel 0: ") and "exactly 4" in p for p in problems), problems
+    assert any(p.startswith("Reel 1: ") for p in problems), problems
+
+
+def test_the_judge_picks_between_passing_reels_from_the_clips_alone():
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "Nico opens stronger."})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert [m.speaker for m in result.moments] == [2, 1, 2, 1]
+    assert (result.candidates, result.judge_why) == (2, "Nico opens stronger.")
+    judged = client.calls[1]["messages"][0]["content"][0]["text"]
+    # The viewer's view: who speaks and what they say, not the claims or the numbered transcript.
+    assert "Clip 1, Nico, 14.8 s: Point 1.0. Point 1.1. Point 1.2." in judged
+    assert "Claims:" not in judged and "[3]" not in judged and "Federal elections need" not in judged
+    assert "## Reel 1 (59.2 s)" in judged
+
+
+def test_one_passing_reel_needs_no_judge():
+    client = _FakeClaude({"reels": [GOOD, BROKEN]})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert len(client.calls) == 1 and result.candidates == 1 and result.judge_why is None
+
+
+def test_a_judge_that_cannot_answer_keeps_the_first_reel():
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 7}, {"best": "x"})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert [m.speaker for m in result.moments] == [1, 2, 1, 2] and len(client.calls) == 3
+
+
+def test_a_judge_request_that_fails_keeps_the_first_reel():
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, RuntimeError("overloaded"))
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert [m.speaker for m in result.moments] == [1, 2, 1, 2]
+
+
+def test_a_clean_reel_is_taken_over_one_with_soft_problems_without_a_judge():
+    debate = _debate()
+    debate.sentences[0].text = "So it is a state matter."  # GOOD opens on "so"
+    clean = json.loads(json.dumps(OTHER))
+    clean["moments"][1]["start_sentence"] = 1  # starts past it
+    client = _FakeClaude({"reels": [GOOD, clean]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert [m.speaker for m in result.moments] == [2, 1, 2, 1] and len(client.calls) == 1
+
+
+def test_a_clip_opening_on_so_is_a_soft_problem():
+    debate = _debate()
+    debate.sentences[3].text = "So it is a federal problem."
+    _, problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and any('opens on "so"' in p for p in soft), soft
+
+
+def _clips_of(debate, seconds):
+    """Re-time every sentence so each GOOD clip (three sentences) runs `seconds`."""
+    sentence_ms = int(seconds * 1000 / 3)
+    for k, sentence in enumerate(debate.sentences):
+        sentence.start_ms, sentence.end_ms = k * sentence_ms, (k + 1) * sentence_ms
+
+
+def test_a_reel_over_four_clips_at_the_target_is_asked_to_shorten():
+    debate = _debate()
+    debate.clip_max_ms = 30_000
+    _clips_of(debate, 18.3)  # 73.2 s, over 4 x 18 s
+    _, problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and any("keep the four clips under 72.0 s" in p for p in soft), soft
+    # Four clips inside the 10-18 s target are never told to shorten: 70.8 s.
+    _clips_of(debate, 17.7)
+    assert pick.check(debate, GOOD)[2] == []
+    # The limit follows the target the caller sends.
+    debate.target_max_ms = 17_000
+    assert any("under 68.0 s" in p for p in pick.check(debate, GOOD)[2])
+
+
+def test_reels_that_pass_go_to_the_judge_as_they_are_not_back_for_a_nudge():
+    debate = _debate()
+    debate.sentences[0].text = "So it is a state matter."  # both reels have a clip opening on it
+    passed, problems, soft = pick.check_reels(debate, {"reels": [GOOD, OTHER]})
+    assert problems == [] and soft == [] and len(passed) == 2
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "x"})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert (result.attempts, result.candidates, len(client.calls)) == (1, 2, 2)
+    # One passing reel with a soft problem is sent back, with the other reels' problems too.
+    _, _, soft = pick.check_reels(debate, {"reels": [GOOD, BROKEN]})
+    assert any(p.startswith('Reel 0: Clip 0 opens on "so"') for p in soft), soft
+    assert any(p.startswith("Reel 1: ") and "exactly 4" in p for p in soft), soft
+
+
+def test_a_story_calls_the_speakers_by_short_name():
+    (story, _), _, _ = pick.check(_debate(), {**GOOD, "story": "Speaker 1 says states; Speaker 2 disagrees."})
+    assert story == "Dahmmy says states; Nico disagrees."
+    debate = _debate()
+    debate.speakers[0].name = "Dahmmy Hilfigger (@nsddahmmy)"
+    debate.speakers[1].name = "Dr. Nico Lagan"
+    assert pick.named(debate, "Speaker 1, Speaker 2 and Speaker 3") == "Dahmmy, Nico and Speaker 3"
+
+
+def test_the_story_is_written_with_speaker_numbers_for_the_names_to_be_filled_in():
+    from src.config.prompts.debates_pick_moments_prompt import DEBATES_PICK_MOMENTS_SYSTEM
+
+    # named() picks names that tell the speakers apart; a name Claude wrote itself could not.
+    assert 'call each speaker "Speaker N" with their number as given above' in DEBATES_PICK_MOMENTS_SYSTEM
+    assert "first name" not in DEBATES_PICK_MOMENTS_SYSTEM
+    # Not slots 1 and 2 by name: the input takes any two, and a story told "Speaker 2" for a
+    # speaker numbered 0 would misname them.
+    assert '"Speaker 1" and "Speaker 2"' not in DEBATES_PICK_MOMENTS_SYSTEM
+
+
+def test_names_are_filled_in_for_whatever_numbers_the_speakers_have():
+    data = _debate().model_dump()
+    swap = {1: 3, 2: 7}
+    for speaker in data["speakers"]:
+        speaker["slot"] = swap[speaker["slot"]]
+    for row in data["sentences"] + data["claims"]:
+        row["speaker"] = swap[row["speaker"]]
+    debate = DebatesPickMomentsInput(**data)
+    assert "Speaker 7 (Nico): Agree with the motion" in pick.render(debate)
+    assert pick.named(debate, "Speaker 3 opens; Speaker 7 answers.") == "Dahmmy opens; Nico answers."
+
+
+def test_speakers_who_share_a_first_name_keep_their_full_names_in_the_story_and_for_the_judge():
+    debate = _debate()
+    debate.speakers[0].name, debate.speakers[1].name = "Alex Chen", "Alex Park"
+    assert pick.named(debate, "Speaker 1 v Speaker 2") == "Alex Chen v Alex Park"
+    judged = pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
+    assert "Clip 1, Alex Chen," in judged and "Clip 2, Alex Park," in judged
