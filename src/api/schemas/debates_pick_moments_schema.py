@@ -126,5 +126,5 @@ class DebatesPickMomentsResult(BaseModel):
     provider: str
     model_used: str
     attempts: int = Field(description="How many answers were asked for before one passed every rule.")
-    candidates: int = Field(default=1, description="How many candidate reels passed and were judged between.")
+    candidates: int = Field(default=1, description="How many reels the pick was made from: those with no soft problem when any passed, else all that passed. More than one means the judge picked.")
     judge_why: Optional[str] = Field(default=None, description="Why the judge picked this reel, when it judged.")

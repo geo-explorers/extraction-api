@@ -45,14 +45,14 @@ Return JSON only:
 {
   "reels": [
     {
-      "story": "One sentence: the arc these four clips tell, in play order, naming the speakers by first name.",
+      "story": "One sentence: the arc these four clips tell, in play order, calling the speakers Speaker 1 and Speaker 2.",
       "moments": [
         {"speaker": 1, "start_sentence": 12, "end_sentence": 13, "claim": 3, "claim_fit": 0.9, "role": "opening", "answers": null, "why": "Short reason for this clip in this place."}
       ]
     }
   ]
 }
-speaker is the speaker's number. role is one of opening, answer, rebuttal, closing. answers is the position (0-3), in that reel's list, of the earlier clip this one responds to, or null. In "story", call each speaker by their first name, never "Speaker 1" or "Speaker 2"."""
+speaker is the speaker's number. role is one of opening, answer, rebuttal, closing. answers is the position (0-3), in that reel's list, of the earlier clip this one responds to, or null. In "story", call the speakers "Speaker 1" and "Speaker 2"; their names are filled in for you."""
 
 
 DEBATES_PICK_MOMENTS_JUDGE_SYSTEM = """You judge highlight reels of a recorded two-person debate, as the viewer will meet them: someone scrolling a feed who never saw the debate. Each reel is four short clips played back to back, then the viewer votes on the motion. You see only what that viewer sees: the motion, who is speaking and their side, and the words of each clip.

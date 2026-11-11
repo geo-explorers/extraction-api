@@ -269,7 +269,8 @@ def check_reels(
     input: DebatesPickMomentsInput, answer: Any
 ) -> Tuple[Optional[List[Tuple[Reel, List[str]]]], List[str], List[str]]:
     """The candidate reels that keep every hard rule, each with its soft problems; the answer's
-    problems when none does; and its soft problems when only one reel passed and it has some.
+    problems when none does; and, when only one reel passed and it has soft problems, those and
+    the other reels' problems.
     With two or more passing, the judge weighs them as they are: sending them back for a soft
     nudge could return fewer.
 
@@ -295,7 +296,9 @@ def check_reels(
         softs += [label + p for p in soft]
     if not passed:
         return None, problems, []
-    return passed, [], (softs if len(passed) == 1 else [])
+    # One reel passed with a soft problem: it goes back with the others' problems too, so the next
+    # answer can fix them as well as improve it.
+    return passed, [], (softs + problems if len(passed) == 1 and softs else [])
 
 
 def render_for_judge(input: DebatesPickMomentsInput, reels: List[Reel]) -> str:

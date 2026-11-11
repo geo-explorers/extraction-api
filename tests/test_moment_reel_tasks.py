@@ -555,9 +555,10 @@ def test_reels_that_pass_go_to_the_judge_as_they_are_not_back_for_a_nudge():
     client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "x"})
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert (result.attempts, result.candidates, len(client.calls)) == (1, 2, 2)
-    # One passing reel with a soft problem is still sent back once.
+    # One passing reel with a soft problem is sent back, with the other reels' problems too.
     _, _, soft = pick.check_reels(debate, {"reels": [GOOD, BROKEN]})
     assert any(p.startswith('Reel 0: Clip 0 opens on "so"') for p in soft), soft
+    assert any(p.startswith("Reel 1: ") and "exactly 4" in p for p in soft), soft
 
 
 def test_a_story_calls_the_speakers_by_short_name():
@@ -567,6 +568,14 @@ def test_a_story_calls_the_speakers_by_short_name():
     debate.speakers[0].name = "Dahmmy Hilfigger (@nsddahmmy)"
     debate.speakers[1].name = "Dr. Nico Lagan"
     assert pick.named(debate, "Speaker 1, Speaker 2 and Speaker 3") == "Dahmmy, Nico and Speaker 3"
+
+
+def test_the_story_is_written_with_speaker_numbers_for_the_names_to_be_filled_in():
+    from src.config.prompts.debates_pick_moments_prompt import DEBATES_PICK_MOMENTS_SYSTEM
+
+    # named() picks names that tell the speakers apart; a name Claude wrote itself could not.
+    assert 'call the speakers "Speaker 1" and "Speaker 2"' in DEBATES_PICK_MOMENTS_SYSTEM
+    assert "first name" not in DEBATES_PICK_MOMENTS_SYSTEM
 
 
 def test_speakers_who_share_a_first_name_keep_their_full_names_in_the_story_and_for_the_judge():

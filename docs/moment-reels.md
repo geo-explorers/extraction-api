@@ -59,9 +59,9 @@ A turn's last word always ends a sentence. If the model leaves it out, the task 
 
 **How the reel is chosen:** the moments come first and the claims after. Claude finds each speaker's strongest moments in the transcript, whatever they are (a punchline, a question, a comeback), builds the reel from them, and only then links each clip to the claim of its speaker it best supports. Claims were extracted to fill the knowledge graph, so a reel built around them missed the lines that aren't claims.
 
-Claude offers up to three candidate reels in one answer. Each is checked on its own. When more than one passes, a second call judges them the way a viewer meets them: the motion, who speaks for which side, and each clip's words and length, with no transcript and no claims. It picks the reel a newcomer can follow to the end. Reels with no soft problems are judged ahead of ones with them. If the judge can't answer, the first reel is taken.
+Claude offers up to three candidate reels in one answer. Each is checked on its own. When more than one passes, a second call judges them the way a viewer meets them: the motion, who speaks for which side, and each clip's words and length, with no transcript and no claims. It picks the reel a newcomer can follow to the end. When any passing reel has no soft problem, only those are judged; otherwise all that passed are. If the judge can't answer, the first reel is taken.
 
-**Output:** a one-sentence `story`, exactly four `moments` in play order, `candidates` (how many reels were judged between) and `judge_why`. Any "Speaker N" left in the story becomes that speaker's short name: the first word of their name past any title, or the full name when both speakers share it. Each moment has:
+**Output:** a one-sentence `story`, exactly four `moments` in play order, `candidates` (how many reels the pick was made from) and `judge_why`. Claude writes the story with "Speaker 1" and "Speaker 2", and each becomes that speaker's short name: the first word of their name past any title, or the full name when both speakers share it. Each moment has:
 - `speaker`
 - `start_sentence` and `end_sentence` (inclusive)
 - `start_ms` and `end_ms` (from those sentences)
@@ -81,9 +81,9 @@ The task checks each of these rules before answering:
 
 A clip over the hard limit that spans several sentences is shortened from its start until it fits, and not onto a sentence that opens on a dangling word when a cleaner start fits. The payoff at its end stays. The reported `start_sentence` and `start_ms` are the trimmed ones, and `trimmed_from_sentence` says where the model's own pick started. A trim is final: it isn't sent back (a model content with it would only send the same pick again), and a trimmed clip's opener isn't held against it, since the model didn't choose that start. A clip that can't be trimmed into the limits is reported at the length the model picked.
 
-Two rules are soft: a clip that opens on a dangling word ("and", "so", "but"...), and a reel longer than four clips at the top of the target (72 s by default). When only one reel passes and it breaks a soft rule, the answer is sent back once more and the last acceptable one is kept. When two or more pass, the judge weighs them as they are.
+Two rules are soft: a clip that opens on a dangling word ("and", "so", "but"...), and a reel longer than four clips at the top of the target (72 s by default). When only one reel passes and it breaks a soft rule, the answer is sent back with that and the other reels' problems, within the three answers, and the last acceptable reel is kept. When two or more pass, nothing is sent back: the judge chooses.
 
-An answer goes back to Claude with its problems listed only when no candidate passes, up to three answers in all. If no answer passes, the run fails with a retryable error, and the caller falls back to its own picker.
+An answer goes back to Claude with its problems listed only when no candidate passes, up to three answers in all. If no answer passes, the run fails without a retry (`FinalDecisionError`), and the caller falls back to its own picker.
 
 The caller can pass `avoid`: sentence ranges an earlier reel used that the caller then refused, each with a reason. For example, a clip that `claims.score_clips` judged to argue the other side. No clip in the new reel may overlap them.
 
