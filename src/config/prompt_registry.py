@@ -25,6 +25,8 @@ from src.config.prompts import claim_keyword_extraction_prompt as _claim_keyword
 from src.config.prompts import claims_judge_equivalence_prompt as _judge
 from src.config.prompts import claims_link_entities_prompt as _link
 from src.config.prompts import claims_score_clips_prompt as _clips
+from src.config.prompts import debates_pick_moments_prompt as _pick_moments
+from src.config.prompts import transcript_punctuate_prompt as _punctuate
 from src.config.prompts import claims_score_highlights_prompt as _highlights
 from src.config.prompts import guest_extraction_prompt as _guest
 from src.config.prompts import host_extraction_prompt as _host
@@ -166,6 +168,10 @@ _register("claims_score_clips.debate.responds_to", _clips.DEBATE_RESPONDS_TO_INS
 _register("claims_score_clips.debate.responds_to.none", _clips.DEBATE_RESPONDS_TO_NONE, formatted=False, module=_clips)
 _register("claims_score_clips.debate.responds_to.elsewhere", _clips.DEBATE_RESPONDS_TO_ELSEWHERE, formatted=False, module=_clips)
 _register("claims_score_clips.debate.opener", _clips.DEBATE_OPENER_INSTRUCTIONS, formatted=False, module=_clips)
+
+# Debate moment reels (GEO-3638): Claude writes these answers.
+_register("transcript_punctuate.system", _punctuate.TRANSCRIPT_PUNCTUATE_SYSTEM, formatted=False, module=_punctuate)
+_register("debates_pick_moments.system", _pick_moments.DEBATES_PICK_MOMENTS_SYSTEM, formatted=False, module=_pick_moments)
 
 _register("claims_extract.role", _ce_sections.ROLE_SECTION, formatted=True, module=_ce_sections)
 _register("claims_extract.core", _ce_core.CORE_CLAIM_RULES, formatted=False, module=_ce_core)
