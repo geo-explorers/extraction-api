@@ -60,7 +60,7 @@ def test_punctuate_shows_every_word_numbered_within_its_turn():
 
 
 def test_punctuate_accepts_rising_ends_and_closes_a_turn_left_open():
-    turns, problems = punct.check(_turns(), {"turns": [{"turn": 0, "ends": [[8, "."], [12, "?"]]}, {"turn": 1, "ends": []}]})
+    turns, problems, _ = punct.check(_turns(), {"turns": [{"turn": 0, "ends": [[8, "."], [12, "?"]]}, {"turn": 1, "ends": []}]})
     assert problems == []
     assert [(e.word, e.mark) for e in turns[0].ends] == [(8, "."), (12, "?")]
     # A turn always ends a sentence, so the model need not say so.
@@ -76,13 +76,13 @@ def test_punctuate_accepts_rising_ends_and_closes_a_turn_left_open():
     ],
 )
 def test_punctuate_refuses_ends_out_of_order_out_of_range_or_badly_marked(ends, problem):
-    turns, problems = punct.check(_turns(), {"turns": [{"turn": 0, "ends": ends}, {"turn": 1, "ends": [[0, "."]]}]})
+    turns, problems, _ = punct.check(_turns(), {"turns": [{"turn": 0, "ends": ends}, {"turn": 1, "ends": [[0, "."]]}]})
     assert turns is None
     assert any(problem in p for p in problems), problems
 
 
 def test_punctuate_refuses_a_missing_turn():
-    _, problems = punct.check(_turns(), {"turns": [{"turn": 0, "ends": [[12, "."]]}]})
+    _, problems, _ = punct.check(_turns(), {"turns": [{"turn": 0, "ends": [[12, "."]]}]})
     assert problems == ["Turn 1 is missing."]
 
 
@@ -173,7 +173,7 @@ def test_pick_shows_the_motion_sides_lengths_claims_and_numbered_sentences_by_tu
 
 
 def test_pick_accepts_four_alternating_clips_and_times_them_from_their_sentences():
-    (story, moments), problems = pick.check(_debate(), GOOD)
+    (story, moments), problems, soft = pick.check(_debate(), GOOD)
     assert problems == []
     assert [(m.speaker, m.start_ms, m.end_ms, m.claim_index) for m in moments] == [
         (1, 0, 14_800, 0),
@@ -206,7 +206,7 @@ def _with(position, **changes):
     ],
 )
 def test_pick_refuses_a_reel_that_breaks_a_rule(answer, problem):
-    accepted, problems = pick.check(_debate(), answer)
+    accepted, problems, _ = pick.check(_debate(), answer)
     assert accepted is None
     assert any(problem in p for p in problems), problems
 
@@ -215,7 +215,7 @@ def test_pick_refuses_overlapping_clips():
     debate = _debate()
     # Two speaker-1 clips over the same turn-0 sentences.
     answer = {"moments": [_moment(1, 0, 2, 0), _moment(2, 3, 5, 5), _moment(1, 0, 2, 8), _moment(2, 9, 11, 9)]}
-    _, problems = pick.check(debate, answer)
+    _, problems, _ = pick.check(debate, answer)
     assert any("overlap" in p for p in problems), problems
 
 
@@ -223,7 +223,7 @@ def test_pick_refuses_a_clip_across_two_turns_of_one_speaker():
     debate = _debate()
     for s in debate.sentences[3:6]:
         s.speaker = 1  # turn 1 is now speaker 1 too, so 2-3 is one speaker over two turns
-    _, problems = pick.check(debate, _with(0, start_sentence=2, end_sentence=3))
+    _, problems, _ = pick.check(debate, _with(0, start_sentence=2, end_sentence=3))
     assert any("span more than one turn" in p for p in problems), problems
 
 
@@ -234,13 +234,26 @@ def test_pick_sends_a_broken_reel_back_and_returns_the_fixed_one():
     assert "exactly 4" in client.calls[1]["messages"][2]["content"]
 
 
+def test_a_clip_opening_on_a_connective_is_asked_again_but_kept_on_the_last_answer():
+    debate = _debate()
+    debate.sentences[3].text = "So it is a federal problem."
+    accepted, problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and accepted is not None
+    assert any('opens on "so"' in p for p in soft), soft
+    # Asked again while attempts remain; the last answer is kept with it.
+    client = _FakeClaude(GOOD, GOOD, GOOD)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 3 and len(client.calls) == 3
+    assert 'opens on "so"' in client.calls[1]["messages"][2]["content"]
+
+
 def test_pick_avoids_refused_stretches():
     from src.api.schemas.debates_pick_moments_schema import AvoidRange
 
     debate = _debate()
     debate.avoid = [AvoidRange(start_sentence=7, end_sentence=7, reason="argues the other side")]
     assert "- sentences 7-7: argues the other side" in pick.render(debate)
-    _, problems = pick.check(debate, GOOD)
+    _, problems, _ = pick.check(debate, GOOD)
     assert any("told to avoid" in p for p in problems), problems
 
 

@@ -30,8 +30,10 @@ REQUEST_TIMEOUT_S = 180
 
 T = TypeVar("T")
 
-# Parses Claude's answer. Returns (value, problems): an accepted answer has no problems.
-Check = Callable[[Any], Tuple[Optional[T], List[str]]]
+# Parses Claude's answer. Returns (value, problems, soft problems). An answer with problems is
+# refused. One with only soft problems is sent back while attempts remain, and accepted as it is on
+# the last: a rule worth asking about again, but not worth losing the whole answer over.
+Check = Callable[[Any], Tuple[Optional[T], List[str], List[str]]]
 
 
 def parse_json(raw: str) -> Any:
@@ -99,11 +101,12 @@ async def ask_json(
             problems = ["The answer was cut off at the token limit. Answer more briefly."]
         else:
             try:
-                value, problems = check(parse_json(raw))
+                value, hard, soft = check(parse_json(raw))
             except (json.JSONDecodeError, TypeError, ValueError) as e:
-                value, problems = None, [f"The answer is not valid JSON in the asked shape ({e})."]
-            if not problems:
+                value, hard, soft = None, [f"The answer is not valid JSON in the asked shape ({e})."], []
+            if not hard and (not soft or attempt == attempts):
                 return value, model, attempt
+            problems = hard + soft
         logger.warning(f"{task}: answer {attempt}/{attempts} refused: {problems}")
         messages += [{"role": "assistant", "content": raw or "(empty)"}, {"role": "user", "content": _retry_message(problems)}]
     raise DecisionError(f"{task}: no acceptable answer after {attempts} attempts: {problems}", retryable=True)

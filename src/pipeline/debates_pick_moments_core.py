@@ -10,6 +10,7 @@ problems (claude_json.ask_json), so Claude fixes it rather than the run failing.
 
 from __future__ import annotations
 
+import re
 from typing import Any, List, Optional, Tuple
 
 from src.api.schemas.debates_pick_moments_schema import (
@@ -23,6 +24,12 @@ from src.pipeline.claude_json import PROVIDER, ask_json
 
 TASK = "debates.pick_moments"
 ROLES = ("opening", "answer", "rebuttal", "closing")
+# A clip opening on one of these leans on something the viewer did not hear, or on filler. The
+# prompt forbids it; the check asks again (a soft rule: the last answer is kept regardless).
+DANGLING_OPENERS = (
+    "and", "so", "but", "also", "because", "yeah", "yes", "okay", "ok", "um", "uh", "like",
+    "that", "this", "they", "it's", "which", "then", "plus", "or",
+)
 
 
 def _seconds(ms: int) -> str:
@@ -60,12 +67,15 @@ def _int(value: Any) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def check(input: DebatesPickMomentsInput, answer: Any) -> Tuple[Optional[Tuple[str, List[PickedMoment]]], List[str]]:
-    """The answer as (story, moments), or every problem with it."""
+def check(
+    input: DebatesPickMomentsInput, answer: Any
+) -> Tuple[Optional[Tuple[str, List[PickedMoment]]], List[str], List[str]]:
+    """The answer as (story, moments), its problems, and its soft problems."""
     if not isinstance(answer, dict) or not isinstance(answer.get("moments"), list):
-        return None, ['The answer needs a "moments" list.']
+        return None, ['The answer needs a "moments" list.'], []
     rows = answer["moments"]
     problems: List[str] = []
+    soft: List[str] = []
     if len(rows) != MOMENTS:
         problems.append(f"There are {len(rows)} clips; there must be exactly {MOMENTS}.")
     claims = {c.index: c for c in input.claims}
@@ -91,6 +101,12 @@ def check(input: DebatesPickMomentsInput, answer: Any) -> Tuple[Optional[Tuple[s
         if len({s.turn for s in run}) != 1:
             problems.append(f"{name}: sentences {start}-{end} span more than one turn.")
             continue
+        first_word = re.sub(r"[^a-z']", "", (run[0].text.split() or [""])[0].lower())
+        if first_word in DANGLING_OPENERS:
+            soft.append(
+                f'{name} opens on "{first_word}", which leans on what came before or is filler. '
+                "Start it on a sentence that opens a thought."
+            )
         start_ms, end_ms = run[0].start_ms, run[-1].end_ms
         length = end_ms - start_ms
         if not input.clip_min_ms <= length <= input.clip_max_ms:
@@ -143,7 +159,7 @@ def check(input: DebatesPickMomentsInput, answer: Any) -> Tuple[Optional[Tuple[s
             if m.start_sentence <= a.end_sentence and a.start_sentence <= m.end_sentence:
                 problems.append(f"Clip {i} uses sentences {a.start_sentence}-{a.end_sentence}, which you were told to avoid ({a.reason}).")
     story = answer.get("story") if isinstance(answer.get("story"), str) else ""
-    return ((story, moments) if not problems else None), problems
+    return ((story, moments) if not problems else None), problems, soft
 
 
 async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) -> DebatesPickMomentsResult:

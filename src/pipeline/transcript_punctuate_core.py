@@ -34,12 +34,12 @@ def render(input: TranscriptPunctuateInput) -> str:
     return "\n".join(lines)
 
 
-def check(input: TranscriptPunctuateInput, answer: Any) -> Tuple[Optional[List[PunctuatedTurn]], List[str]]:
+def check(input: TranscriptPunctuateInput, answer: Any) -> Tuple[Optional[List[PunctuatedTurn]], List[str], List[str]]:
     """The answer as each turn's ends, or the problems with it."""
     problems: List[str] = []
     rows = answer.get("turns") if isinstance(answer, dict) else None
     if not isinstance(rows, list):
-        return None, ['The answer needs a "turns" list.']
+        return None, ['The answer needs a "turns" list.'], []
     by_turn = {}
     for row in rows:
         if isinstance(row, dict) and isinstance(row.get("turn"), int):
@@ -69,7 +69,7 @@ def check(input: TranscriptPunctuateInput, answer: Any) -> Tuple[Optional[List[P
             if not parsed or parsed[-1].word != last:
                 parsed.append(SentenceEnd(word=last, mark="."))
             out.append(PunctuatedTurn(ends=parsed))
-    return (out if not problems else None), problems
+    return (out if not problems else None), problems, []
 
 
 async def punctuate(input: TranscriptPunctuateInput, *, client: Any = None) -> TranscriptPunctuateResult:
