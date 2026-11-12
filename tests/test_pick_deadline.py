@@ -103,6 +103,54 @@ def test_the_judge_runs_with_time_left_and_its_request_is_capped_too():
     assert [call["timeout"] for call in client.calls] == [250, 150]
 
 
+def _reel_0_worse(monkeypatch):
+    """A debate where both GOOD and OTHER pass with a soft problem (clips opening on sentence 9's
+    "But"), and reel 0 is given one more, so the top-ranked reel is reel 1 (OTHER, Nico first)."""
+    real = pick.check_reels
+
+    def check(input, answer):
+        passed, hard, soft = real(input, answer)
+        if passed:
+            passed = [(reel, problems + ["one more"] if i == 0 else problems) for i, (reel, problems) in enumerate(passed)]
+        return passed, hard, soft
+
+    monkeypatch.setattr(pick, "check_reels", check)
+    debate = _debate()
+    debate.sentences[9].text = "But it is a federal problem."
+    return debate
+
+
+def test_a_judge_cut_off_at_the_deadline_keeps_the_top_ranked_reel(monkeypatch):
+    debate = _reel_0_worse(monkeypatch)
+    clock = _Clock()
+    reels = {"reels": [GOOD, OTHER]}
+
+    class _JudgeRunsOut(_SlowClaude):
+        async def create(self, **kwargs):
+            if "best" in str(self.replies[0]):  # the judge: takes all its time and is cut off
+                self.calls.append(kwargs)
+                self.clock.now += kwargs["timeout"]
+                raise TimeoutError()
+            return await super().create(**kwargs)
+
+    # Three soft answers leave 90 s: the judge starts, then runs out at the deadline.
+    client = _JudgeRunsOut(clock, 270, reels, reels, reels, {"best": 0, "why": "never read"})
+    deadline = _deadline(clock, 900)
+    result = asyncio.run(pick.pick_moments(debate, client=client, deadline=deadline))
+    assert len(client.calls) == 4 and client.calls[-1]["timeout"] == 90 and deadline.left() == 0
+    # The reel a skipped judge keeps, not reel 0 with its extra problem.
+    assert [m.speaker for m in result.moments] == [2, 1, 2, 1] and result.judge_why is None
+
+
+def test_a_judge_skipped_at_the_deadline_keeps_the_same_reel(monkeypatch):
+    debate = _reel_0_worse(monkeypatch)
+    clock = _Clock()
+    reels = {"reels": [GOOD, OTHER]}
+    client = _SlowClaude(clock, 290, reels, reels, reels, {"best": 0, "why": "never asked"})
+    result = asyncio.run(pick.pick_moments(debate, client=client, deadline=_deadline(clock, 900)))
+    assert len(client.calls) == 3 and [m.speaker for m in result.moments] == [2, 1, 2, 1]
+
+
 # --- request timeouts ---------------------------------------------------------------------
 
 

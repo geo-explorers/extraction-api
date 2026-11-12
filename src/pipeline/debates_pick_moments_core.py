@@ -34,7 +34,8 @@ alone (`REELS_SCHEMA`, `JUDGE_SCHEMA`).
 
 Under a deadline (GEO-3697, deadline.Deadline), the run returns before geo-chat stops
 waiting: ask_json sends no more answers back once too little time is left and keeps
-the best held, and the judge is skipped for the top-ranked passing reel (`top_ranked`).
+the best held, and the judge is skipped for the top-ranked passing reel (`top_ranked`), the
+same reel a judge that gives no pick keeps.
 """
 
 from __future__ import annotations
@@ -799,10 +800,16 @@ def judge_check(count: int):
 
 
 async def judge(
-    input: DebatesPickMomentsInput, reels: List[Reel], *, client: Any = None, deadline: Optional[Deadline] = None
+    input: DebatesPickMomentsInput,
+    reels: List[Reel],
+    *,
+    client: Any = None,
+    deadline: Optional[Deadline] = None,
+    fallback: int = 0,
 ) -> Tuple[int, str]:
     """The reel a viewer would watch through and understand, by a second call that sees only the
-    clips. When the judge cannot answer, the first reel: the picker put its best first."""
+    clips. When the judge cannot answer (including a request cut off at the deadline), reel
+    `fallback`: the first by default, as the picker put its best first."""
     try:
         (best, why), _, _ = await ask_json(
             prompts.get("debates_pick_moments.judge_system"),
@@ -817,8 +824,8 @@ async def judge(
         )
         return best, why
     except DecisionError as e:
-        logger.warning(f"{TASK}: the judge gave no pick; keeping the first reel: {e}")
-        return 0, ""
+        logger.warning(f"{TASK}: the judge gave no pick; keeping reel {fallback}: {e}")
+        return fallback, ""
 
 
 async def pick_moments(
@@ -851,7 +858,11 @@ async def pick_moments(
             f"kept reel {best} of {len(candidates)}, the one with the fewest problems"
         )
     elif len(candidates) > 1:
-        best, why = await judge(input, [reel for reel, _ in candidates], client=client, deadline=deadline)
+        # Without a pick (a failed judge, or one cut off at the deadline), the same reel a skipped
+        # judge keeps: for clean candidates that is the first.
+        best, why = await judge(
+            input, [reel for reel, _ in candidates], client=client, deadline=deadline, fallback=top_ranked(candidates)
+        )
     (story, moments), _ = candidates[best]
     # A kept reel's first clip either keeps its rules or this is a last resort that breaks them.
     first = moments[0]
