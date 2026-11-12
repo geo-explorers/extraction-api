@@ -4,8 +4,9 @@ its reels must keep, how the best reel is judged, and how it becomes four moment
 Claude offers up to three candidate reels in one answer. Each is checked on its own
 (`check`); the answer is sent back when none passes the hard rules, or when every reel
 that passes has a soft problem (`check_reels`). When more than one passes, a second call
-judges them as a viewer meets them, the clips' words alone with the problems found in
-how they play, and its pick is returned (`judge`).
+judges them all as a viewer meets them, the clips' words alone with the problems found in
+how they play, and its pick is returned (`judge`), with every candidate and the judge's
+choice on the result (`candidate_reels`, `judge_pick`) so the choice can be graded.
 
 Every rule the prompt states that can be checked mechanically is checked here:
 four clips, alternating speakers, whole sentences from one turn, length bounds,
@@ -21,9 +22,13 @@ reel. A clip it cannot link gets its speaker's unused claim with the most words 
 common (`closest_claims`), so a reel is never lost to its links. "in_pick" is the
 picker as before: shown the claims, it links them in its own answer. A broken answer is sent back with its
 problems (claude_json.ask_json), so Claude fixes it rather than the run failing.
-A clip over the hard limit is sent back with how long it runs to each sentence
-(over_limit_problem); cut to fit, from its end first (fit_to_limit), its reel is a
-last resort.
+Each clip names its payoff sentence, the line that makes it worth showing (GEO-3696). A
+clip over the hard limit is fitted around it (fit_around_payoff): it keeps the payoff, ends
+at or just after it and starts on the earliest sentence that opens a thought and fits.
+Only a clip that cannot be fitted so is sent back with how long it runs to each sentence
+(over_limit_problem); cut to fit, from its end first (fit_to_limit), its reel is a last
+resort. How each clip ends is a soft rule (ending_problems): not mid-thought, not on a
+fragment.
 
 The first clip has hard rules of its own (`first_clip_problems`): it starts a sentence
 and a thought, not mid-sentence, on a connective or on filler. Later clips keep the same
@@ -50,6 +55,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.api.schemas.debates_pick_moments_schema import (
     MOMENTS,
+    CandidateReel,
     DebatesPickMomentsInput,
     DebatesPickMomentsResult,
     PickedMoment,
@@ -144,6 +150,10 @@ THAT_CLAUSE_NEXT = (
 # ("…legal immigration is a."), so the next sentence of its turn is its second half. Not one ending on
 # a question or exclamation mark: "What if?" and "Oh my!" were finished as said.
 OPEN_ENDS = ("a", "an", "the", "and", "or", "but", "my", "your", "our", "their", "because", "if", "than", "whether")
+# A clip's last sentence (after its first) shorter than this many words that opens on a dangling
+# word or is all filler ends the clip on a fragment ("But like beyond that.", GEO-3696). Short alone
+# is no flaw: "Conviction means conviction." is a close graders wanted.
+FRAGMENT_WORDS = 5
 # A transcript is cased (Whisper's is) when at least this share of its sentences opens on a capital.
 # Only then does a sentence opening on a lowercase letter say it starts mid-sentence.
 CASED_SHARE = 0.5
@@ -186,10 +196,15 @@ REELS_SCHEMA = {
     "required": ["reels"],
     "additionalProperties": False,
 }
+# The "after" picker's clip: no claim, and its payoff sentence (GEO-3696), which "in_pick" keeps out
+# so that picker stays as it was.
 _STORY_MOMENT_SCHEMA = {
     **_MOMENT_SCHEMA,
-    "properties": {k: v for k, v in _MOMENT_SCHEMA["properties"].items() if k not in ("claim", "claim_fit")},
-    "required": [k for k in _MOMENT_SCHEMA["required"] if k not in ("claim", "claim_fit")],
+    "properties": {
+        **{k: v for k, v in _MOMENT_SCHEMA["properties"].items() if k not in ("claim", "claim_fit")},
+        "payoff_sentence": {"type": "integer"},
+    },
+    "required": [k for k in _MOMENT_SCHEMA["required"] if k not in ("claim", "claim_fit")] + ["payoff_sentence"],
 }
 STORY_REELS_SCHEMA = {
     **REELS_SCHEMA,
@@ -410,6 +425,17 @@ def _ends_on(text: str, marks: Tuple[str, ...]) -> bool:
     return text.rstrip("\"'”’)").endswith(marks)
 
 
+def _open_end(words: List[str]) -> bool:
+    """Whether a sentence of `words` stops mid-phrase (OPEN_ENDS: "…legal immigration is a."), not
+    on a question or exclamation mark ("What if?") nor a capitalised word ("Plan A.")."""
+    last = words[-1]
+    return (
+        _bare(last) in OPEN_ENDS
+        and not _ends_on(last, ("?", "!"))
+        and (len(words) == 1 or not any(c.isupper() for c in last))
+    )
+
+
 def split_start(input: DebatesPickMomentsInput, k: int, words: List[str]) -> bool:
     """Whether sentence `k`, opening on `words`, looks like the second half of a sentence the
     transcript broke in two: the sentence before it in its turn ends mid-phrase (OPEN_ENDS), or
@@ -428,12 +454,7 @@ def split_start(input: DebatesPickMomentsInput, k: int, words: List[str]) -> boo
         j -= 1
     if j < 0 or sentences[j].turn != sentences[k].turn:
         return False
-    last = before[-1]
-    if (
-        _bare(last) in OPEN_ENDS
-        and not _ends_on(last, ("?", "!"))
-        and (len(before) == 1 or not any(c.isupper() for c in last))
-    ):
+    if _open_end(before):
         return True
     if _ends_on(sentences[k].text.strip(), ("?",)):
         return False
@@ -536,6 +557,76 @@ def later_clip_problems(input: DebatesPickMomentsInput, position: int, start: in
     return problems
 
 
+def ends_mid_thought(input: DebatesPickMomentsInput, end: int) -> bool:
+    """Whether a clip ending on sentence `end` stops before its thought does: the sentence stops
+    mid-phrase (_open_end: "…is a."), or the next sentence of its turn is its second half
+    (continues). The second is the guess split_start makes, so this is only ever a soft problem."""
+    sentences = input.sentences
+    words = sentences[end].text.split()
+    if words and _open_end(words):
+        return True
+    following = end + 1
+    return following < len(sentences) and sentences[following].turn == sentences[end].turn and continues(input, following)
+
+
+def _last_sentence(text: str) -> Tuple[str, bool]:
+    """The last sentence of `text` as the speaker said it, and whether anything comes before it.
+    A sentence of the transcript can hold more than one of the speaker's: the punctuate step marks
+    the ends it adds, but the words keep Whisper's own marks ("…they could work on. But like
+    beyond that.")."""
+    parts = re.split(r"(?<=[.?!…])\s+", text.strip())
+    return parts[-1], len(parts) > 1
+
+
+def ends_on_fragment(input: DebatesPickMomentsInput, start: int, end: int) -> bool:
+    """Whether a clip of sentences `start`-`end` ends on a fragment: its last sentence, after
+    others (_last_sentence, so one inside the transcript's last sentence counts), is shorter than
+    FRAGMENT_WORDS and opens on a dangling word or is nothing but filler ("But like beyond that.",
+    "So yeah.", "And stuff."). Both signals, so a short sentence that states something
+    ("Conviction means conviction.", "It's that simple.", the "Smith." of "Mr. Smith.") is no
+    fragment."""
+    last, after_others = _last_sentence(input.sentences[end].text)
+    if not (after_others or end > start):
+        return False
+    words = last.split()
+    if len(words) >= FRAGMENT_WORDS:
+        return False
+    # Read as said: geo-chat cuts filler only where a clip starts, so "And stuff." plays whole.
+    opener = _opener(words)
+    return opener is not None and opener not in FIRST_CLIP_SOFT_OPENERS
+
+
+def ending_flaws(input: DebatesPickMomentsInput, start: int, end: int) -> List[str]:
+    """How a clip of sentences `start`-`end` ends badly, in the judge's words (clip_flaws):
+    mid-thought (ends_mid_thought) or on a fragment (ends_on_fragment). Structural signals only: a
+    hedge or a concession has no reliable shape in the words, so the prompt and the judge weigh
+    those (GEO-3696)."""
+    flaws = []
+    if ends_mid_thought(input, end):
+        flaws.append("ends mid-thought, before its sentence does")
+    if ends_on_fragment(input, start, end):
+        flaws.append("ends on a fragment")
+    return flaws
+
+
+def ending_problems(input: DebatesPickMomentsInput, position: int, start: int, end: int) -> List[str]:
+    """ending_flaws as soft problems for clip `position`, sent back with how to fix them. Soft:
+    the reel is still judged with them shown, and kept over none."""
+    name = f"Clip {position}"
+    problems = []
+    if ends_mid_thought(input, end):
+        problems.append(
+            f"{name} ends mid-thought: sentence {end} stops mid-phrase or runs on into the next one. "
+            "End it on a whole sentence where its point lands."
+        )
+    if ends_on_fragment(input, start, end):
+        problems.append(
+            f'{name} ends on a fragment ("{_last_sentence(input.sentences[end].text)[0]}"). End it on the sentence '
+            "that lands its point."
+        )
+    return problems
+
+
 def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optional[int]:
     """Where a clip over the hard limit should start so it fits: sentences dropped from its start
     (the payoff at its end stays), and past any whose heard words open on a dangling word or
@@ -581,17 +672,64 @@ def fit_to_limit(input: DebatesPickMomentsInput, start: int, end: int) -> Option
     return (start, ends[0]) if ends else None
 
 
-def over_limit_problem(input: DebatesPickMomentsInput, name: str, start: int, end: int) -> str:
+def _clean_start(input: DebatesPickMomentsInput, position: int, start: int, end: int, is_cased: bool) -> bool:
+    """Whether a clip of sentences `start`-`end` at `position` opens with no opener problem at all,
+    hard (first_clip_problems) or soft (later_clip_problems), as it plays."""
+    if position == 0 and first_clip_problems(input, start, end, start):
+        return False
+    return not later_clip_problems(input, position, start, end, is_cased)
+
+
+def fit_around_payoff(
+    input: DebatesPickMomentsInput, position: int, start: int, end: int, payoff: int
+) -> Optional[Tuple[int, int]]:
+    """The sentences a clip of `start`-`end` at `position`, over the hard limit, keeps once fitted
+    around its payoff sentence (GEO-3696): it ends at the payoff or the first sentence after it
+    that ends cleanly (no ending_flaws), and starts on the earliest sentence that opens a thought
+    (_clean_start) and still fits, so it keeps as much of its setup as fits. The model's own start
+    and end count as clean: a fit never adds a flaw its pick did not have. `None` when nothing
+    keeps the payoff within the limits, and the clip is sent back. A clip within the limit is left
+    as it is.
+
+    Before, a long clip was sent back whole, and the next answer swapped its moment for another
+    rather than shortening it: 13 of the 30 moments graders missed in the 12 Nov run (#76) were in
+    the picker's first answer, 4 of them its planned close."""
+    sentences = input.sentences
+
+    def length(first: int, last: int) -> int:
+        return sentences[last].end_ms - sentences[first].start_ms
+
+    if length(start, end) <= input.clip_max_ms:
+        return start, end
+    is_cased = cased(input)
+    for last in range(payoff, end + 1):
+        if last != end and ending_flaws(input, start, last):
+            continue
+        for first in range(start, payoff + 1):
+            if not input.clip_min_ms <= length(first, last) <= input.clip_max_ms:
+                continue
+            if first == start or _clean_start(input, position, first, last, is_cased):
+                return first, last
+    return None
+
+
+def over_limit_problem(input: DebatesPickMomentsInput, name: str, start: int, end: int, payoff: Optional[int] = None) -> str:
     """What a clip over the hard limit is sent back with: how long it runs to each of its
-    sentences, so the next pick can end (or start) where it fits."""
+    sentences, so the next pick can end (or start) where it fits; and, when it named a payoff
+    (fit_around_payoff found no fit), that no clean fit keeps it."""
     sentences = input.sentences
     runs = ", ".join(
         f"{_seconds(sentences[last].end_ms - sentences[start].start_ms)} s to sentence {last}"
         for last in range(start, end + 1)
     )
+    around = (
+        f" No start that opens a thought and end at or just after its payoff (sentence {payoff}) fit within the limit."
+        if payoff is not None
+        else ""
+    )
     return (
         f"{name}, sentences {start}-{end}, runs {_seconds(sentences[end].end_ms - sentences[start].start_ms)} s, "
-        f"over the {_seconds(input.clip_max_ms)} s limit. From sentence {start} it runs {runs}. End it "
+        f"over the {_seconds(input.clip_max_ms)} s limit.{around} From sentence {start} it runs {runs}. End it "
         "earlier, after a sentence where its point has landed, or start it later on a sentence that "
         f"opens a thought, to run {_seconds(input.clip_min_ms)}-{_seconds(input.clip_max_ms)} s."
     )
@@ -644,22 +782,35 @@ def check(
         if len({s.turn for s in run}) != 1:
             problems.append(f"{name}: sentences {start}-{end} span more than one turn.")
             continue
-        # A clip over the limit is sent back with how long it runs to each sentence, so the model
-        # picks the stretch itself; the 12 Nov preview's trims from the start lost the setup. Cut
-        # to fit (fit_to_limit, recorded on the moment), the reel is a last resort. One that
-        # cannot be cut to fit is reported at the length the model picked.
+        # The payoff the picker named must be inside its clip. An answer without one (the shape
+        # before GEO-3696) is fitted as before.
+        payoff = _int(row.get("payoff_sentence"))
+        if payoff is not None and not start <= payoff <= end:
+            problems.append(f"{name}: its payoff_sentence {payoff} is not one of its sentences {start}-{end}.")
+            continue
+        # A clip over the limit is fitted around its payoff (GEO-3696): the moment the picker
+        # chose is kept, not swapped for another on a send-back. Only one that cannot be fitted
+        # that way is sent back with how long it runs to each sentence, so the model picks the
+        # stretch itself; cut to fit (fit_to_limit, recorded on the moment), its reel is a last
+        # resort. One that cannot be cut to fit is reported at the length the model picked.
         picked_start, picked_end = start, end
-        fit = fit_to_limit(input, start, end)
-        if fit is not None and fit != (start, end):
-            fixable.append(over_limit_problem(input, name, start, end))
-            start, end = fit
+        around = fit_around_payoff(input, position, start, end, payoff) if payoff is not None else None
+        fitted = around is not None and around != (start, end)
+        if fitted:
+            start, end = around
+        else:
+            fit = fit_to_limit(input, start, end)
+            if fit is not None and fit != (start, end):
+                fixable.append(over_limit_problem(input, name, start, end, payoff))
+                start, end = fit
         run = sentences[start : end + 1]
         # Every opener rule reads the clip as it plays, cut to fit or not, past the filler geo-chat
         # cuts: the first clip's are hard (a newcomer meets the debate there), the rest soft, and
-        # a split mark soft on every clip.
+        # a split mark soft on every clip. How it ends is soft on every clip.
         if position == 0:
             fixable += first_clip_problems(input, start, end, picked_start)
         soft += later_clip_problems(input, position, start, end, is_cased)
+        soft += ending_problems(input, position, start, end)
         start_ms, end_ms = run[0].start_ms, run[-1].end_ms
         length = end_ms - start_ms
         if not input.clip_min_ms <= length <= input.clip_max_ms:
@@ -693,6 +844,8 @@ def check(
                 role=role,
                 answers=answers,
                 why=str(row.get("why") or "")[:500],
+                payoff_sentence=payoff if payoff is not None and start <= payoff <= end else None,
+                fitted_around_payoff=fitted,
                 trimmed_from_sentence=picked_start if start != picked_start else None,
                 trimmed_to_sentence=picked_end if end != picked_end else None,
             )
@@ -752,7 +905,8 @@ def check_reels(
     problems when none does; and, when every reel that passed has a soft problem, all of those and
     the other reels' problems.
 
-    A reel with no soft problem is taken without a send-back (pick_moments judges only those). When
+    A reel with no soft problem is taken without a send-back (pick_moments then judges it with every
+    other reel that passed, their problems shown). When
     every passing reel has one (a later clip opening on "But…", a reel over its length), the answer
     is sent back to fix them, however many passed: in the 12 Nov preview about 17 clips past the
     first opened mid-thought, and reels that passed together were never asked again. ask_json
@@ -807,8 +961,9 @@ def answer_rank(candidates: List[Candidate]) -> int:
 
 def clip_flaws(input: DebatesPickMomentsInput, position: int, moment: PickedMoment, is_cased: bool) -> List[str]:
     """What the checks found wrong with a clip at `position`, as the viewer hears it: the soft
-    problems (later_clip_problems) and the hard ones a last resort keeps (first_clip_problems, a
-    cut to fit), in the judge's words. Each is how the clip plays, not what the picker meant."""
+    problems (later_clip_problems, ending_problems) and the hard ones a last resort keeps
+    (first_clip_problems, a cut to fit), in the judge's words. Each is how the clip plays, not
+    what the picker meant."""
     mid, split, opener = _opening(input, moment.start_sentence, moment.end_sentence, is_cased, later=position > 0)
     flaws = []
     if mid:
@@ -817,10 +972,13 @@ def clip_flaws(input: DebatesPickMomentsInput, position: int, moment: PickedMome
         flaws.append("may start halfway through a sentence")
     if opener:
         flaws.append(f'opens on "{opener}", which leans on something the viewer did not hear or is filler')
-    if moment.trimmed_from_sentence is not None:
+    # A clip fitted around its payoff keeps the payoff and opens on a thought: no flaw to name,
+    # and the judge reads its words as they play. A last resort's cut may have lost either.
+    if moment.trimmed_from_sentence is not None and not moment.fitted_around_payoff:
         flaws.append("its opening was cut to fit the length limit, so it may lack its setup")
-    if moment.trimmed_to_sentence is not None:
+    if moment.trimmed_to_sentence is not None and not moment.fitted_around_payoff:
         flaws.append("its ending was cut to fit the length limit, so it may stop before its point lands")
+    flaws += ending_flaws(input, moment.start_sentence, moment.end_sentence)
     return flaws
 
 
@@ -1060,22 +1218,30 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
         cut_off_retries=CUT_OFF_RETRIES,
         rank=answer_rank,
     )
-    # Judged among the reels with no soft problem when there are any, else among all that passed,
-    # with their problems shown (render_for_judge). (Last-resort reels all carry their fixable
-    # problems, so they are judged among themselves.)
-    clean = [(reel, soft) for reel, soft in passed if not soft]
-    candidates = clean or passed
-    best, why = (0, "")
-    if len(candidates) > 1:
+    # Every reel that passed is judged, its problems shown (render_for_judge), so a stronger reel
+    # with one soft flaw is weighed against a clean one rather than dropped first (GEO-3696: the
+    # judge ran in only 10 of 20 debates). (Last-resort reels all carry their fixable problems,
+    # so they are judged among themselves.) The cleanest go first: the picker's order among equals,
+    # and what is kept when the judge gives no pick.
+    candidates = judge_order(passed)
+    best, why, judged = 0, "", len(candidates) > 1
+    if judged:
         best, why = await judge(input, [reel for reel, _ in candidates], client=client)
     (story, moments), _ = candidates[best]
+    fitted = [i for i, m in enumerate(moments) if m.fitted_around_payoff]
+    if fitted:
+        logger.info(f"{TASK}: clips {fitted} fitted around their payoff to keep within the limit")
     # A kept reel's first clip either keeps its rules or this is a last resort that breaks them.
     first = moments[0]
     picked = first.start_sentence if first.trimmed_from_sentence is None else first.trimmed_from_sentence
     broken = first_clip_problems(input, first.start_sentence, first.end_sentence, picked)
     if broken:
         logger.warning(f"{TASK}: no reel kept the first clip's rules; kept one that breaks them: {broken}")
-    cut = [i for i, m in enumerate(moments) if m.trimmed_from_sentence is not None or m.trimmed_to_sentence is not None]
+    cut = [
+        i
+        for i, m in enumerate(moments)
+        if not m.fitted_around_payoff and (m.trimmed_from_sentence is not None or m.trimmed_to_sentence is not None)
+    ]
     if cut:
         logger.warning(f"{TASK}: no reel kept every clip within the limit; kept one with clips {cut} cut to fit")
     if not in_pick:
@@ -1089,7 +1255,16 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
         candidates=len(candidates),
         judge_why=why or None,
         first_clip_problems=broken,
+        candidate_reels=[CandidateReel(story=s, moments=m, problems=p) for (s, m), p in candidates],
+        judge_pick=best if judged else None,
     )
+
+
+def judge_order(passed: List[Candidate]) -> List[Candidate]:
+    """The reels the judge picks from, in the order it sees them: the fewest problems first, the
+    picker's order among equals (it put its best first). So a clean reel leads, and the judge's
+    fallback (the first reel) is the cleanest."""
+    return sorted(passed, key=lambda candidate: len(candidate[1]))
 
 
 __all__ = [
@@ -1107,11 +1282,15 @@ __all__ = [
     "closest_claims",
     "continues",
     "filler_lead",
+    "ending_flaws",
+    "ending_problems",
     "first_clip_problems",
+    "fit_around_payoff",
     "fit_to_limit",
     "heard_start",
     "heard_text",
     "judge",
+    "judge_order",
     "later_clip_problems",
     "link_claims",
     "pick_moments",
