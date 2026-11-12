@@ -113,8 +113,12 @@ THAT_CLAUSE_NEXT = (
 )
 # "To the, like, to the idea of…": "to" before a noun phrase, not "To be fair" or "To me".
 TO_PHRASE_NEXT = ("the", "a", "an")
+# ...unless the noun phrase is an idiom that opens a sentence of its own: "To the extent states run
+# their rolls…", "To the best of my knowledge…", "To a certain extent…", "To the contrary…".
+TO_IDIOM_NEXT = ("extent", "best", "contrary", "certain", "large", "great")
 # The other half of the same mistake: a sentence that ends on one of these words stopped mid-phrase
-# ("…legal immigration is a."), so the next sentence of its turn is its second half.
+# ("…legal immigration is a."), so the next sentence of its turn is its second half. Not one ending on
+# a question or exclamation mark: "What if?" and "Oh my!" were finished as said.
 OPEN_ENDS = ("a", "an", "the", "and", "or", "but", "my", "your", "our", "their", "because", "if", "than", "whether")
 # A transcript is cased (Whisper's is) when at least this share of its sentences opens on a capital.
 # Only then does a sentence opening on a lowercase letter say it starts mid-sentence.
@@ -339,16 +343,20 @@ def split_start(input: DebatesPickMomentsInput, k: int, words: List[str]) -> boo
     broke in two: the sentence before it in its turn ends mid-phrase (OPEN_ENDS), or `words` open
     as a clause of the sentence before ("Where corporations argued…", "That the border security
     can serve…", "To the idea of…"). A clip that starts there starts mid-sentence, though the
-    transcript gave it a capital."""
+    transcript gave it a capital. A turn's first sentence is never one: it cannot be the second half
+    of the other speaker's sentence."""
     sentences = input.sentences
-    if k > 0 and sentences[k - 1].turn == sentences[k].turn:
-        last = sentences[k - 1].text.split()[-1:]
-        if last and _bare(last[0]) in OPEN_ENDS:
-            return True
-    first, following = (_bare(w) for w in (words + ["", ""])[:2])
+    if k == 0 or sentences[k - 1].turn != sentences[k].turn:
+        return False
+    last = sentences[k - 1].text.split()[-1:]
+    if last and _bare(last[0]) in OPEN_ENDS and not last[0].rstrip("\"'”’)").endswith(("?", "!")):
+        return True
+    first, following, third = (_bare(w) for w in (words + ["", "", ""])[:3])
     if first == "where":
         return following not in WHERE_QUESTION_NEXT
-    return (first == "that" and following in THAT_CLAUSE_NEXT) or (first == "to" and following in TO_PHRASE_NEXT)
+    if first == "to":
+        return following in TO_PHRASE_NEXT and third not in TO_IDIOM_NEXT
+    return first == "that" and following in THAT_CLAUSE_NEXT
 
 
 def continues(input: DebatesPickMomentsInput, k: int) -> bool:

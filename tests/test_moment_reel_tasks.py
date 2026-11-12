@@ -1287,8 +1287,19 @@ def test_a_sentence_the_transcript_split_off_the_one_before_is_marked_and_not_st
         ("Policy got us here.", "To be fair, states run it well."),
         ("Policy got us here.", "To me, it is federal."),
         ("Policy got us here.", "Federal rules win."),
-        # Only within a turn: the other speaker's "the." is not this sentence's first half.
+        # Idioms that open a sentence of their own.
+        ("Policy got us here.", "To the extent states run rolls, they run them well."),
+        ("Policy got us here.", "To the best of my knowledge, states do fine."),
+        ("Policy got us here.", "To a certain extent, I agree with the states."),
+        # A question or an exclamation was finished as said, whatever word it ends on.
+        ("What if?", "States ran every roll themselves."),
+        ("Oh my!", "States ran every roll themselves."),
+        # Only within a turn: the other speaker's "the." is not this sentence's first half, and a
+        # turn's first sentence is no clause of the other speaker's.
         (None, "Federal rules win."),
+        (None, "That the states run their rolls well is plain."),
+        (None, "To the question of rolls, states answer it."),
+        (None, "Where corporations argued for sugar, states pushed back."),
     ],
 )
 def test_a_sentence_that_opens_a_thought_is_not_marked_split(before, text):
