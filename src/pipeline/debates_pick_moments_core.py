@@ -254,6 +254,17 @@ def heard_start(input: DebatesPickMomentsInput, start: int, end: int) -> Tuple[i
     return end, sentences[end].text.split()
 
 
+def heard_text(input: DebatesPickMomentsInput, start: int, end: int) -> str:
+    """The words of a clip of sentences `start`-`end` as the viewer hears them (heard_start), the
+    first heard word capitalised once filler is cut: geo-chat's story_moments::without_lead."""
+    k, words = heard_start(input, start, end)
+    text = " ".join(words)
+    if k != start or len(words) < len(input.sentences[k].text.split()):
+        text = text.lstrip(", ")
+        text = text[:1].upper() + text[1:]
+    return " ".join([text] + [s.text.strip() for s in input.sentences[k + 1 : end + 1]])
+
+
 def _opener(words: List[str]) -> Optional[str]:
     """The dangling word or filler `words` open on (DANGLING_OPENERS, DANGLING_PAIRS), or None."""
     pair = tuple(_bare(w) for w in words[:2])
@@ -532,14 +543,15 @@ def check_reels(
 
 def render_for_judge(input: DebatesPickMomentsInput, reels: List[Reel]) -> str:
     """The reels as a viewer meets them: the motion, who speaks for which side, and each clip's
-    words and length. No transcript, no claims, no story: the judge sees what the viewer sees."""
+    words as heard, past the filler geo-chat cuts (heard_text), and its length as picked. No
+    transcript, no claims, no story: the judge sees what the viewer sees."""
     names = short_names(input)
     lines = [f"Motion: {input.title}", ""]
     lines += [f"{names[s.slot]}{_side(s)}" for s in input.speakers]
     for number, (_, moments) in enumerate(reels):
         lines += ["", f"## Reel {number} ({_seconds(reel_ms(moments))} s)"]
         for position, m in enumerate(moments):
-            words = " ".join(s.text.strip() for s in input.sentences[m.start_sentence : m.end_sentence + 1])
+            words = heard_text(input, m.start_sentence, m.end_sentence)
             lines.append(f"Clip {position + 1}, {names[m.speaker]}, {_seconds(m.end_ms - m.start_ms)} s: {words}")
     return "\n".join(lines)
 
@@ -622,6 +634,7 @@ __all__ = [
     "filler_lead",
     "first_clip_problems",
     "heard_start",
+    "heard_text",
     "judge",
     "pick_moments",
     "reel_ms",

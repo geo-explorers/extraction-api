@@ -626,6 +626,21 @@ def test_speakers_who_share_a_first_name_keep_their_full_names_in_the_story_and_
     assert "Clip 1, Alex Chen," in judged and "Clip 2, Alex Park," in judged
 
 
+def test_the_judge_reads_each_clip_as_the_viewer_hears_it():
+    # geo-chat cuts the filler before the clip plays and capitalises what is left (without_lead),
+    # so the judge reads "Voter ID…", as the opener rules do (heard_start).
+    debate = _debate()
+    debate.sentences[0].text = "Um, so voter ID is a state matter."
+    debate.sentences[3].text = "Uh. And federal rules win."
+    judged = pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
+    assert "Clip 1, Dahmmy, 14.8 s: Voter ID is a state matter. Point 0.1. Point 0.2." in judged
+    assert "Clip 2, Nico, 14.8 s: Federal rules win. Point 1.1. Point 1.2." in judged
+    # Filler geo-chat keeps, to stay over the minimum length, is read as said.
+    debate.clip_min_ms = debate.target_min_ms = 14_000
+    judged = pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
+    assert "Clip 1, Dahmmy, 14.8 s: Um, so voter ID is a state matter. Point 0.1." in judged
+
+
 def test_the_first_clip_is_chosen_for_the_context_not_for_strength():
     from src.config.prompts.debates_pick_moments_prompt import (
         DEBATES_PICK_MOMENTS_JUDGE_SYSTEM as judge,
@@ -1059,6 +1074,11 @@ def test_filler_stays_when_cutting_it_would_leave_the_clip_under_the_minimum():
     # Long enough without it: cut, as before.
     debate.sentences[2].end_ms = 8_000
     assert pick.heard_start(debate, 0, 2) == (1, ["We", "need"])
+    # The line itself is geo-chat's "< CLIP_MIN_MS": exactly 6.0 s past "Um." cuts it, a millisecond less keeps it.
+    debate.sentences[2].end_ms = 7_100
+    assert pick.heard_start(debate, 0, 2) == (1, ["We", "need"])
+    debate.sentences[2].end_ms = 7_099
+    assert pick.heard_start(debate, 0, 2) == (0, ["Um."])
     # Filler inside a sentence is timed as its share of the words: "And" is a quarter of a 6.4 s
     # sentence, 1.6 s, leaving 4.8 s, so it stays; at 9.6 s it would leave 7.2 s and is cut.
     debate = _debate()
