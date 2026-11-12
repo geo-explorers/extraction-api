@@ -42,7 +42,18 @@ timeout is capped at the time left. With nothing held at that point, or when a
 request fails with too little time left, the run fails as final: a rerun would
 have no time to answer in. Each such stop is logged as "shortened by the deadline".
 
-The model and its knobs are the `moments_claude_*` settings, overridable per run.
+The model and its knobs are settings, overridable per run, named by the caller's
+`config`: PUNCTUATE (`moments_claude_*`) for transcript.punctuate, PICK
+(`moments_pick_claude_*`, GEO-3702) for every call of debates.pick_moments. A
+temperature goes only to a model that takes one (`takes_temperature`): Claude
+Sonnet 5.x and the other newer models reject it. An effort, where the config has
+one set, goes in `output_config.effort`, beside a schema's `format`. A model that
+thinks may answer with thinking blocks before its text; the answer is read from its
+text blocks alone, and only that text is sent back with a refused answer.
+
+An answer Claude declines (stop reason "refusal") is logged with its category and
+ends the conversation: the answer held is kept, else the run fails as final, as
+asking the same again would be declined again.
 The system prompt and the first message are marked for prompt caching, so a send
 back or an engine retry within minutes reads the transcript from cache.
 """
@@ -50,6 +61,7 @@ back or an engine retry within minutes reads the transcript from cache.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import Any, Callable, List, Optional, Tuple, TypeVar
 
 from hatchet_sdk.exceptions import NonRetryableException
@@ -79,6 +91,57 @@ REQUEST_TIMEOUT_S = 300
 RETRYABLE_4XX = {408, 409, 429}
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class ClaudeConfig:
+    """The names of the settings one kind of call runs on, read through overrides.llm so a run
+    may override them. `effort` is None for a config that never sends one."""
+
+    model: str
+    temperature: str
+    max_tokens: str
+    effort: Optional[str] = None
+
+
+# transcript.punctuate: claude-sonnet-4-6 at temperature 0.2, as since GEO-3638.
+PUNCTUATE = ClaudeConfig("moments_claude_model", "moments_claude_temperature", "moments_claude_max_tokens")
+# debates.pick_moments, its judge and its claim-link call (GEO-3702).
+PICK = ClaudeConfig(
+    "moments_pick_claude_model",
+    "moments_pick_claude_temperature",
+    "moments_pick_claude_max_tokens",
+    effort="moments_pick_claude_effort",
+)
+
+# The model families that take a sampling temperature. Claude Sonnet 5 and 5.5, Opus 4.7 and
+# later, Haiku 5.5, Fable and Mythos reject a non-default one with a 400, and a model this list
+# does not know is taken to be as new.
+_TAKES_TEMPERATURE = ("claude-3", "claude-sonnet-4", "claude-haiku-4", "claude-opus-4")
+_TAKES_NO_TEMPERATURE = ("claude-opus-4-7", "claude-opus-4-8")
+
+
+def takes_temperature(model: str) -> bool:
+    """Whether `model` accepts a sampling temperature."""
+    return model.startswith(_TAKES_TEMPERATURE) and not model.startswith(_TAKES_NO_TEMPERATURE)
+
+
+def _request(config: ClaudeConfig, schema: Optional[dict]) -> dict:
+    """The model and its knobs for one request, from `config`'s settings: a temperature only for
+    a model that takes one, an effort only when one is set (beside a schema's format)."""
+    model = llm.get(config.model)
+    request: dict = {"model": model, "max_tokens": llm.get(config.max_tokens)}
+    if takes_temperature(model):
+        request["temperature"] = llm.get(config.temperature)
+    output_config: dict = {}
+    if schema:
+        output_config["format"] = {"type": "json_schema", "schema": schema}
+    effort = llm.get(config.effort) if config.effort else None
+    if effort:
+        output_config["effort"] = effort
+    if output_config:
+        request["output_config"] = output_config
+    return request
 
 # Parses Claude's answer: (value, hard problems, soft problems).
 Check = Callable[[Any], Tuple[Optional[T], List[str], List[str]]]
@@ -137,6 +200,7 @@ async def ask_json(
     *,
     task: str,
     attempts: int,
+    config: ClaudeConfig,
     client: Any = None,
     schema: Optional[dict] = None,
     cut_off_retries: int = 0,
@@ -144,7 +208,8 @@ async def ask_json(
     deadline: Optional[Deadline] = None,
 ) -> Tuple[T, str, int]:
     """Ask until an answer has no problems, or `attempts` run out. Returns (value, model, answers
-    asked for); the value is the best answer seen (see the module doc). `schema`, a JSON schema,
+    asked for); the value is the best answer seen (see the module doc). `config` names the
+    settings the requests run on (PUNCTUATE or PICK). `schema`, a JSON schema,
     constrains the reply to it (structured outputs); `cut_off_retries` is how many answers cut off
     at the token limit are sent back to be answered shorter, within `attempts`. `rank` (lower is
     better) chooses among answers with only soft problems, and among last resorts; without it the
@@ -154,10 +219,11 @@ async def ask_json(
     def no_worse(value: T, held: Optional[Tuple[Any, ...]]) -> bool:
         return held is None or rank is None or rank(value) <= rank(held[0])
 
-    model = llm.get("moments_claude_model")
+    # Read once, so every answer in the conversation is asked of the same model the same way.
+    shape = _request(config, schema)
+    model = shape["model"]
     client = client or _client()
     messages: List[dict] = [{"role": "user", "content": _cached(user)}]
-    shape = {"output_config": {"format": {"type": "json_schema", "schema": schema}}} if schema else {}
     best: Optional[Tuple[T, int]] = None
     # The last resort kept, with the problems it was refused for (logged if it is returned).
     last_resort: Optional[Tuple[T, int, List[str]]] = None
@@ -189,9 +255,6 @@ async def ask_json(
         timeout = deadline.request_timeout(REQUEST_TIMEOUT_S) if deadline is not None else None
         try:
             request = client.messages.create(
-                model=model,
-                max_tokens=llm.get("moments_claude_max_tokens"),
-                temperature=llm.get("moments_claude_temperature"),
                 system=_cached(system),
                 messages=messages,
                 **shape,
@@ -214,8 +277,14 @@ async def ask_json(
             if _rejected(e):
                 raise FinalDecisionError(f"{task}: Claude rejected the request: {e}") from e
             raise DecisionError(f"{task}: Claude request failed: {e}", retryable=True) from e
-        _log_usage(task, attempt, message)
+        _log_usage(task, attempt, model, message)
         raw = claude_text(message)
+        if getattr(message, "stop_reason", None) == "refusal":
+            category = getattr(getattr(message, "stop_details", None), "category", None)
+            logger.warning(f"{task}: answer {attempt}/{attempts} declined by Claude (category {category})")
+            if best is not None or last_resort is not None:
+                break
+            raise FinalDecisionError(f"{task}: Claude declined to answer (category {category})")
         if getattr(message, "stop_reason", None) == "max_tokens":
             logger.warning(
                 f"{task}: answer {attempt}/{attempts} cut off at the token limit after "
@@ -274,8 +343,10 @@ def _rejected(e: Exception) -> bool:
     return isinstance(e, anthropic.APIStatusError) and 400 <= e.status_code < 500 and e.status_code not in RETRYABLE_4XX
 
 
-def _log_usage(task: str, attempt: int, message: Any) -> None:
-    """One line per answer with its token counts, so what a run costs can be read from its logs."""
+def _log_usage(task: str, attempt: int, model: str, message: Any) -> None:
+    """One line per answer with its model and token counts, so what a run costs can be read from
+    its logs (output tokens count a thinking model's thinking too). The model is named because a
+    debate's punctuation and its pick run on different ones, priced differently."""
     usage = getattr(message, "usage", None)
     if usage is None:
         return
@@ -284,14 +355,18 @@ def _log_usage(task: str, attempt: int, message: Any) -> None:
         for name in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens")
         if isinstance(getattr(usage, name, None), int)
     )
-    logger.info(f"{task}: answer {attempt} used {counts}")
+    logger.info(f"{task}: answer {attempt} ({model}) used {counts}")
 
 
 __all__ = [
     "PROVIDER",
     "SPEND_KEY",
+    "PICK",
+    "PUNCTUATE",
+    "ClaudeConfig",
     "FinalDecisionError",
     "ask_json",
     "execution_timeout_s",
     "parse_json",
+    "takes_temperature",
 ]

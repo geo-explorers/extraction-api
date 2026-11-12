@@ -10,8 +10,12 @@ Usage:
     print(settings.database_url)
 """
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Anthropic output_config.effort levels; "" sends none (the model's default).
+EFFORT_LEVELS = ("", "low", "medium", "high", "xhigh", "max")
 
 
 class Settings(BaseSettings):
@@ -305,20 +309,54 @@ class Settings(BaseSettings):
     # Debate moment reels (GEO-3638): transcript.punctuate and debates.pick_moments
     # write, rather than choose, so they run on Claude, not the decision model.
     # Same account and rate limit (claude_global) as the news Claude path.
+    # moments_claude_* is transcript.punctuate's; debates.pick_moments (the pick, its judge
+    # and the claim-link call) has its own moments_pick_claude_* since GEO-3702.
     moments_claude_model: str = Field(
         default="claude-sonnet-4-6",
-        description="Anthropic Claude model for transcript.punctuate and debates.pick_moments (GEO-3638)."
+        description="Anthropic Claude model for transcript.punctuate (GEO-3638)."
     )
     moments_claude_temperature: float = Field(
         default=0.2,
         ge=0.0,
         le=1.0,
-        description="Sampling temperature for transcript.punctuate and debates.pick_moments."
+        description="Sampling temperature for transcript.punctuate, sent only to a model that takes one (claude_json.takes_temperature)."
     )
     moments_claude_max_tokens: int = Field(
         default=16000,
-        description="Max output tokens per call for transcript.punctuate and debates.pick_moments. Both answer in indices; punctuate's grows with the transcript (~7k compact at the 15,000-word cap), and pick's three reels, under a JSON schema, run about 2k."
+        description="Max output tokens per transcript.punctuate call. It answers in indices, growing with the transcript (~7k compact at the 15,000-word cap)."
     )
+    # claude-sonnet-5-5 at effort low since GEO-3702: on the 20-debate offline set (12 Nov) its
+    # reels were preferred 10 vs 6 over claude-sonnet-4-6's, at $0.80-0.89 vs $1.46 for the 20 and
+    # ~22 s a reel. To restore the earlier picker: MOMENTS_PICK_CLAUDE_MODEL=claude-sonnet-4-6,
+    # MOMENTS_PICK_CLAUDE_EFFORT= (empty) and MOMENTS_PICK_CLAUDE_MAX_TOKENS=16000.
+    moments_pick_claude_model: str = Field(
+        default="claude-sonnet-5-5",
+        description="Anthropic Claude model for debates.pick_moments: the pick, its judge and the claim-link call (GEO-3702)."
+    )
+    moments_pick_claude_effort: str = Field(
+        default="low",
+        description="output_config.effort for debates.pick_moments: low|medium|high|xhigh|max. Empty sends none (the model's default; what claude-sonnet-4-6 ran with)."
+    )
+    moments_pick_claude_temperature: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Sampling temperature for debates.pick_moments, sent only to a model that takes one (claude_json.takes_temperature): claude-sonnet-5-5 rejects it."
+    )
+    moments_pick_claude_max_tokens: int = Field(
+        default=32000,
+        description="Max output tokens per debates.pick_moments call, thinking included: three reels under a JSON schema run about 2k, and the rest leaves room for the model's thinking (16000 under claude-sonnet-4-6, which did not think)."
+    )
+
+    @field_validator("moments_pick_claude_effort")
+    @classmethod
+    def _known_effort(cls, value: str) -> str:
+        # A typo would be a 400 on every pick (the reel falling back to geo-chat's picker), so it
+        # fails at startup instead.
+        effort = value.strip().lower()
+        if effort not in EFFORT_LEVELS:
+            raise ValueError(f"effort must be one of {list(EFFORT_LEVELS)} (empty sends none), not {value!r}")
+        return effort
 
     # Generalized claim extraction (claims.extract DAG) — one pipeline for any
     # text media: debate transcripts, research papers, news articles, podcasts,

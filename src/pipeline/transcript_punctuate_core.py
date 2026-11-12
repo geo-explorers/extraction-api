@@ -33,7 +33,7 @@ from src.api.schemas.transcript_punctuate_schema import (
     TranscriptPunctuateResult,
 )
 from src.config.overrides import prompts
-from src.pipeline.claude_json import PROVIDER, ask_json
+from src.pipeline.claude_json import PROVIDER, PUNCTUATE, ask_json
 
 TASK = "transcript.punctuate"
 # Answers asked for per run: the first, and one sent back with its problems.
@@ -179,6 +179,7 @@ async def punctuate(input: TranscriptPunctuateInput, *, client: Any = None) -> T
         lambda answer: check(input, answer),
         task=TASK,
         attempts=ATTEMPTS,
+        config=PUNCTUATE,
         client=client,
     )
     return TranscriptPunctuateResult(

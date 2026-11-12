@@ -65,7 +65,7 @@ from src.config.overrides import prompts
 from src.decisions.base import DecisionError
 from src.pipeline.deadline import Deadline
 from src.infrastructure.logger import get_logger
-from src.pipeline.claude_json import PROVIDER, FinalDecisionError, ask_json
+from src.pipeline.claude_json import PICK, PROVIDER, FinalDecisionError, ask_json
 
 logger = get_logger(__name__)
 
@@ -892,6 +892,7 @@ async def judge(
             judge_check(len(reels)),
             task=f"{TASK} judge",
             attempts=JUDGE_ATTEMPTS,
+            config=PICK,
             client=client,
             schema=JUDGE_SCHEMA,
             cut_off_retries=CUT_OFF_RETRIES,
@@ -1069,6 +1070,7 @@ async def link_claims(
             link_check(input, moments),
             task=f"{TASK} link",
             attempts=LINK_ATTEMPTS,
+            config=PICK,
             client=client,
             schema=LINK_SCHEMA,
             cut_off_retries=CUT_OFF_RETRIES,
@@ -1098,6 +1100,7 @@ async def pick_moments(
         lambda answer: check_reels(input, answer),
         task=TASK,
         attempts=ATTEMPTS,
+        config=PICK,
         client=client,
         schema=REELS_SCHEMA if in_pick else STORY_REELS_SCHEMA,
         cut_off_retries=CUT_OFF_RETRIES,

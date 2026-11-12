@@ -423,13 +423,13 @@ def test_a_one_based_answers_is_refused_not_a_crash():
 
 
 def test_a_check_that_cannot_read_the_answer_sends_it_back():
-    from src.pipeline.claude_json import ask_json
+    from src.pipeline.claude_json import PUNCTUATE, ask_json
 
     def unreadable(answer):
         return answer["missing"], [], []
 
     client = _FakeClaude({"x": 1}, {"missing": "ok"})
-    value, _, attempts = asyncio.run(ask_json("s", "u", unreadable, task="t", attempts=2, client=client))
+    value, _, attempts = asyncio.run(ask_json("s", "u", unreadable, task="t", attempts=2, config=PUNCTUATE, client=client))
     assert (value, attempts) == ("ok", 2)
 
 
@@ -692,8 +692,8 @@ def test_the_judge_picks_between_passing_reels_from_the_clips_alone():
     assert "Claims:" not in judged and "[3]" not in judged and "Federal elections need" not in judged
     assert "## Reel 1 (59.2 s)" in judged
     # Both calls answer under their JSON schema: the reply is the JSON alone.
-    assert client.calls[0]["output_config"] == {"format": {"type": "json_schema", "schema": pick.REELS_SCHEMA}}
-    assert client.calls[1]["output_config"] == {"format": {"type": "json_schema", "schema": pick.JUDGE_SCHEMA}}
+    assert client.calls[0]["output_config"]["format"] == {"type": "json_schema", "schema": pick.REELS_SCHEMA}
+    assert client.calls[1]["output_config"]["format"] == {"type": "json_schema", "schema": pick.JUDGE_SCHEMA}
 
 
 def test_one_passing_reel_needs_no_judge():
@@ -1187,15 +1187,15 @@ def test_a_send_back_whose_request_fails_keeps_an_acceptable_answer():
     assert len(client.calls) == 2 and result.attempts == 1 and result.first_clip_problems == []
 
 
-def test_each_answer_logs_its_token_counts(monkeypatch):
+def test_each_answer_logs_its_model_and_token_counts(monkeypatch):
     from src.pipeline import claude_json
 
     lines = []
     monkeypatch.setattr(claude_json.logger, "info", lines.append)
     usage = SimpleNamespace(input_tokens=10, cache_read_input_tokens=900, cache_creation_input_tokens=None, output_tokens=40)
     message = SimpleNamespace(content=[], usage=usage)
-    claude_json._log_usage("t", 2, message)
-    assert lines == ["t: answer 2 used input_tokens 10, cache_read_input_tokens 900, output_tokens 40"]
+    claude_json._log_usage("t", 2, "claude-sonnet-5-5", message)
+    assert lines == ["t: answer 2 (claude-sonnet-5-5) used input_tokens 10, cache_read_input_tokens 900, output_tokens 40"]
 
 
 # --- round 3: clip openers as the viewer hears them, past the filler geo-chat cuts ----------
@@ -1830,7 +1830,7 @@ def test_the_picker_is_never_shown_a_claim_after_the_pick():
     asyncio.run(pick.pick_moments(debate, client=client))
     picked = client.calls[0]
     assert picked["system"][0]["text"] == story
-    assert picked["output_config"] == {"format": {"type": "json_schema", "schema": pick.STORY_REELS_SCHEMA}}
+    assert picked["output_config"]["format"] == {"type": "json_schema", "schema": pick.STORY_REELS_SCHEMA}
     assert "claim" not in picked["messages"][0]["content"][0]["text"].lower()
 
 
@@ -1859,7 +1859,7 @@ def test_each_picked_clip_is_linked_to_a_claim_of_its_own_speaker_by_a_second_ca
     assert len(client.calls) == 2 and result.attempts == 1
     linked = client.calls[1]
     assert linked["system"][0]["text"] == pick.prompts.get("debates_pick_moments.link_system")
-    assert linked["output_config"] == {"format": {"type": "json_schema", "schema": pick.LINK_SCHEMA}}
+    assert linked["output_config"]["format"] == {"type": "json_schema", "schema": pick.LINK_SCHEMA}
     shown = linked["messages"][0]["content"][0]["text"]
     # Each speaker's claims under them, and the clips as the viewer hears them.
     assert "Speaker 1's claims:\n[0] States manage voter ID fine\n[8] This president would abuse it" in shown
@@ -1986,7 +1986,7 @@ def test_the_picker_that_links_claims_itself_is_unchanged():
     result = asyncio.run(pick.pick_moments(_debate(), client=client))
     assert len(client.calls) == 1
     assert client.calls[0]["system"][0]["text"] == system
-    assert client.calls[0]["output_config"] == {"format": {"type": "json_schema", "schema": pick.REELS_SCHEMA}}
+    assert client.calls[0]["output_config"]["format"] == {"type": "json_schema", "schema": pick.REELS_SCHEMA}
     assert "Claims:\n[0] Speaker 1: States manage voter ID fine" in client.calls[0]["messages"][0]["content"][0]["text"]
     assert [(m.claim_index, m.claim_fit) for m in result.moments] == [(0, 0.8), (5, 0.8), (8, 0.8), (9, 0.8)]
 
@@ -2003,3 +2003,216 @@ def test_the_two_picker_prompts_differ_only_in_the_claims():
 
 def test_the_link_call_is_on_the_runs_budget():
     assert pick.CALLS == pick.ATTEMPTS + pick.JUDGE_ATTEMPTS + pick.LINK_ATTEMPTS
+
+
+# --- the models the calls run on (GEO-3702) ----------------------------------------------------
+
+# What a request carries besides the conversation: the model and its knobs.
+_KNOBS = ("model", "max_tokens", "temperature", "output_config")
+
+
+def _knobs(call):
+    return {k: call[k] for k in _KNOBS if k in call}
+
+
+def test_the_reel_and_punctuation_settings_default_to_their_models(monkeypatch):
+    from src.config.settings import Settings
+
+    for name in ("MODEL", "EFFORT", "TEMPERATURE", "MAX_TOKENS"):
+        monkeypatch.delenv(f"MOMENTS_CLAUDE_{name}", raising=False)
+        monkeypatch.delenv(f"MOMENTS_PICK_CLAUDE_{name}", raising=False)
+    fresh = Settings(_env_file=None)
+    assert (fresh.moments_pick_claude_model, fresh.moments_pick_claude_effort) == ("claude-sonnet-5-5", "low")
+    assert fresh.moments_pick_claude_max_tokens == 32000
+    # Punctuation is unchanged.
+    assert (fresh.moments_claude_model, fresh.moments_claude_temperature, fresh.moments_claude_max_tokens) == (
+        "claude-sonnet-4-6",
+        0.2,
+        16000,
+    )
+
+
+def test_the_reel_effort_is_checked_at_startup(monkeypatch):
+    from pydantic import ValidationError
+
+    from src.config.settings import Settings
+
+    monkeypatch.setenv("MOMENTS_PICK_CLAUDE_EFFORT", "")
+    assert Settings(_env_file=None).moments_pick_claude_effort == ""
+    monkeypatch.setenv("MOMENTS_PICK_CLAUDE_EFFORT", " Medium ")
+    assert Settings(_env_file=None).moments_pick_claude_effort == "medium"
+    monkeypatch.setenv("MOMENTS_PICK_CLAUDE_EFFORT", "lo")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_a_reel_effort_override_is_validated():
+    from src.config.overrides import validate_llm_overrides
+
+    assert validate_llm_overrides({"moments_pick_claude_effort": " High "}) == {"moments_pick_claude_effort": "high"}
+    assert validate_llm_overrides({"moments_pick_claude_effort": ""}) == {"moments_pick_claude_effort": ""}
+    for bad in ("lo", 1, None):
+        with pytest.raises(ValueError):
+            validate_llm_overrides({"moments_pick_claude_effort": bad})
+
+
+@pytest.mark.parametrize(
+    "model, takes",
+    [
+        ("claude-sonnet-4-6", True),
+        ("claude-sonnet-4-5", True),
+        ("claude-haiku-4-5", True),
+        ("claude-opus-4-6", True),
+        ("claude-sonnet-5-5", False),
+        ("claude-sonnet-5", False),
+        ("claude-opus-4-7", False),
+        ("claude-opus-4-8", False),
+        ("claude-opus-5-5", False),
+        ("claude-haiku-5-5", False),
+        ("claude-fable-5-1", False),
+    ],
+)
+def test_a_temperature_goes_only_to_a_model_that_takes_one(model, takes):
+    from src.pipeline.claude_json import takes_temperature
+
+    assert takes_temperature(model) is takes
+
+
+def test_the_pick_its_judge_and_its_link_call_run_on_sonnet_5_5_at_low_effort():
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "Nico opens stronger."})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert result.model_used == "claude-sonnet-5-5"
+    client2 = _FakeClaude({"reels": [STORY]}, _links(8, 9, 0, 5))
+    asyncio.run(pick.pick_moments(_debate("after"), client=client2))
+    picked, judged, linked = client.calls[0], client.calls[1], client2.calls[1]
+    for call, schema in ((picked, pick.REELS_SCHEMA), (judged, pick.JUDGE_SCHEMA), (linked, pick.LINK_SCHEMA)):
+        # No temperature: Sonnet 5.5 rejects one. The effort sits beside the schema's format.
+        assert _knobs(call) == {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 32000,
+            "output_config": {"format": {"type": "json_schema", "schema": schema}, "effort": "low"},
+        }
+
+
+def test_punctuation_still_runs_on_sonnet_4_6_at_temperature_0_2():
+    good = {"turns": [{"turn": 0, "ends": [[12, "."]]}, {"turn": 1, "ends": []}]}
+    client = _FakeClaude(good)
+    result = asyncio.run(punct.punctuate(_turns(), client=client))
+    assert result.model_used == "claude-sonnet-4-6"
+    assert _knobs(client.calls[0]) == {"model": "claude-sonnet-4-6", "max_tokens": 16000, "temperature": 0.2}
+
+
+def test_the_earlier_picker_is_restored_by_configuration_alone(monkeypatch):
+    from src.config.settings import settings
+
+    monkeypatch.setattr(settings, "moments_pick_claude_model", "claude-sonnet-4-6")
+    monkeypatch.setattr(settings, "moments_pick_claude_effort", "")
+    monkeypatch.setattr(settings, "moments_pick_claude_max_tokens", 16000)
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "Nico opens stronger."})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert result.model_used == "claude-sonnet-4-6"
+    # The request before GEO-3702, exactly: 4.6, 16000 tokens, temperature 0.2, no effort.
+    for call, schema in zip(client.calls, (pick.REELS_SCHEMA, pick.JUDGE_SCHEMA)):
+        assert _knobs(call) == {
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 16000,
+            "temperature": 0.2,
+            "output_config": {"format": {"type": "json_schema", "schema": schema}},
+        }
+
+
+def test_a_run_may_override_the_reel_model_and_effort():
+    from src.config.overrides import activate
+
+    client = _FakeClaude({"reels": [STORY]}, _links(8, 9, 0, 5))
+    with activate(llm_overrides={"moments_pick_claude_effort": "medium"}):
+        asyncio.run(pick.pick_moments(_debate("after"), client=client))
+    assert [c["output_config"]["effort"] for c in client.calls] == ["medium", "medium"]
+    # One run back on the earlier picker: the temperature follows the overridden model.
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "Nico opens stronger."})
+    restore = {
+        "moments_pick_claude_model": "claude-sonnet-4-6",
+        "moments_pick_claude_effort": "",
+        "moments_pick_claude_max_tokens": 16000,
+    }
+    with activate(llm_overrides=restore):
+        result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert result.model_used == "claude-sonnet-4-6"
+    for call, schema in zip(client.calls, (pick.REELS_SCHEMA, pick.JUDGE_SCHEMA), strict=True):
+        assert _knobs(call) == {
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 16000,
+            "temperature": 0.2,
+            "output_config": {"format": {"type": "json_schema", "schema": schema}},
+        }
+
+
+class _ThinkingClaude(_FakeClaude):
+    """Answers as a thinking model does: thinking blocks (empty under the default display) before
+    the text, which may come in more than one block."""
+
+    async def create(self, **kwargs):
+        message = await super().create(**kwargs)
+        text = message.content[0].text
+        half = len(text) // 2
+        message.content = [
+            SimpleNamespace(type="thinking", thinking="", signature="sig"),
+            SimpleNamespace(type="text", text=text[:half]),
+            SimpleNamespace(type="thinking", thinking="", signature="sig"),
+            SimpleNamespace(type="text", text=text[half:]),
+        ]
+        return message
+
+
+def test_an_answer_after_thinking_blocks_is_read_from_its_text():
+    refused = {"reels": [_with(3, answers=4)]}  # one-based "answers": refused and sent back
+    client = _ThinkingClaude(refused, {"reels": [GOOD]})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert [m.speaker for m in result.moments] == [1, 2, 1, 2] and result.attempts == 2
+    # The refused answer was read (its problem named), and sent back as its text alone.
+    assert client.calls[1]["messages"][1] == {"role": "assistant", "content": json.dumps(refused)}
+    assert "answers clip 4" in client.calls[1]["messages"][2]["content"]
+
+
+def _declined(category):
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="thinking", thinking="", signature="sig")],
+        stop_reason="refusal",
+        stop_details=SimpleNamespace(type="refusal", category=category),
+    )
+
+
+class _DecliningClaude(_FakeClaude):
+    """Declines the request numbered `at` (from 0); answers the rest as _FakeClaude."""
+
+    def __init__(self, *replies, at):
+        super().__init__(*replies)
+        self.at = at
+
+    async def create(self, **kwargs):
+        if len(self.calls) == self.at:
+            self.calls.append(kwargs)
+            return _declined("general_harms")
+        return await super().create(**kwargs)
+
+
+def test_a_declined_answer_is_final_and_not_asked_again(monkeypatch):
+    from src.pipeline import claude_json
+
+    lines = []
+    monkeypatch.setattr(claude_json.logger, "warning", lines.append)
+    client = _DecliningClaude({"reels": [GOOD]}, at=0)
+    with pytest.raises(FinalDecisionError, match="declined"):
+        asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert len(client.calls) == 1
+    assert any("declined by Claude (category general_harms)" in line for line in lines), lines
+
+
+def test_a_declined_send_back_keeps_the_answer_held():
+    # The first answer passes with a soft problem; the send-back to improve it is declined.
+    debate = _debate()
+    debate.sentences[3].text = "Because it is a federal problem."  # GOOD's second clip opens on it
+    client = _DecliningClaude({"reels": [GOOD]}, at=1)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 2 and result.attempts == 1
+    assert [m.speaker for m in result.moments] == [1, 2, 1, 2]
