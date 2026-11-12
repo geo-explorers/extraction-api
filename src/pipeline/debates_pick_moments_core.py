@@ -31,6 +31,11 @@ breaks on the result (`first_clip_problems`) and its cut clips marked.
 
 Both calls answer under a JSON schema (structured outputs), so the reply is the JSON
 alone (`REELS_SCHEMA`, `JUDGE_SCHEMA`).
+
+Under a deadline (GEO-3697, deadline.Deadline), the run returns before geo-chat stops
+waiting: ask_json sends no more answers back once too little time is left and keeps
+the best held, and the judge is skipped for the top-ranked passing reel (`top_ranked`), the
+same reel a judge that gives no pick keeps.
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ from src.api.schemas.debates_pick_moments_schema import (
 )
 from src.config.overrides import prompts
 from src.decisions.base import DecisionError
+from src.pipeline.deadline import Deadline
 from src.infrastructure.logger import get_logger
 from src.pipeline.claude_json import PROVIDER, ask_json
 
@@ -733,6 +739,12 @@ def answer_rank(candidates: List[Candidate]) -> int:
     return min(len(problems) for _, problems in candidates)
 
 
+def top_ranked(candidates: List[Candidate]) -> int:
+    """The candidate with the fewest problems, the first among equals (the picker put its best
+    first): what a run takes when the deadline leaves no time to judge."""
+    return min(range(len(candidates)), key=lambda i: len(candidates[i][1]))
+
+
 def clip_flaws(input: DebatesPickMomentsInput, position: int, moment: PickedMoment, is_cased: bool) -> List[str]:
     """What the checks found wrong with a clip at `position`, as the viewer hears it: the soft
     problems (later_clip_problems) and the hard ones a last resort keeps (first_clip_problems, a
@@ -787,9 +799,17 @@ def judge_check(count: int):
     return check_pick
 
 
-async def judge(input: DebatesPickMomentsInput, reels: List[Reel], *, client: Any = None) -> Tuple[int, str]:
+async def judge(
+    input: DebatesPickMomentsInput,
+    reels: List[Reel],
+    *,
+    client: Any = None,
+    deadline: Optional[Deadline] = None,
+    fallback: int = 0,
+) -> Tuple[int, str]:
     """The reel a viewer would watch through and understand, by a second call that sees only the
-    clips. When the judge cannot answer, the first reel: the picker put its best first."""
+    clips. When the judge cannot answer (including a request cut off at the deadline), reel
+    `fallback`: the first by default, as the picker put its best first."""
     try:
         (best, why), _, _ = await ask_json(
             prompts.get("debates_pick_moments.judge_system"),
@@ -800,14 +820,19 @@ async def judge(input: DebatesPickMomentsInput, reels: List[Reel], *, client: An
             client=client,
             schema=JUDGE_SCHEMA,
             cut_off_retries=CUT_OFF_RETRIES,
+            deadline=deadline,
         )
         return best, why
     except DecisionError as e:
-        logger.warning(f"{TASK}: the judge gave no pick; keeping the first reel: {e}")
-        return 0, ""
+        logger.warning(f"{TASK}: the judge gave no pick; keeping reel {fallback}: {e}")
+        return fallback, ""
 
 
-async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) -> DebatesPickMomentsResult:
+async def pick_moments(
+    input: DebatesPickMomentsInput, *, client: Any = None, deadline: Optional[Deadline] = None
+) -> DebatesPickMomentsResult:
+    """The reel: picked, and judged among candidates. Under `deadline` the run is shortened rather
+    than overrun: no send-back or judge is started without the time for it (see the module doc)."""
     passed, model, attempts = await ask_json(
         prompts.get("debates_pick_moments.system"),
         render(input),
@@ -818,6 +843,7 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
         schema=REELS_SCHEMA,
         cut_off_retries=CUT_OFF_RETRIES,
         rank=answer_rank,
+        deadline=deadline,
     )
     # Judged among the reels with no soft problem when there are any, else among all that passed,
     # with their problems shown (render_for_judge). (Last-resort reels all carry their fixable
@@ -825,8 +851,18 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
     clean = [(reel, soft) for reel, soft in passed if not soft]
     candidates = clean or passed
     best, why = (0, "")
-    if len(candidates) > 1:
-        best, why = await judge(input, [reel for reel, _ in candidates], client=client)
+    if len(candidates) > 1 and deadline is not None and not deadline.allows_request():
+        best = top_ranked(candidates)
+        logger.warning(
+            f"{TASK}: shortened by the deadline: {deadline.left():.0f} s left, so the judge was skipped; "
+            f"kept reel {best} of {len(candidates)}, the one with the fewest problems"
+        )
+    elif len(candidates) > 1:
+        # Without a pick (a failed judge, or one cut off at the deadline), the same reel a skipped
+        # judge keeps: for clean candidates that is the first.
+        best, why = await judge(
+            input, [reel for reel, _ in candidates], client=client, deadline=deadline, fallback=top_ranked(candidates)
+        )
     (story, moments), _ = candidates[best]
     # A kept reel's first clip either keeps its rules or this is a last resort that breaks them.
     first = moments[0]
@@ -871,4 +907,5 @@ __all__ = [
     "render",
     "render_for_judge",
     "split_start",
+    "top_ranked",
 ]
