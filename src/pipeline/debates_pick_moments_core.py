@@ -13,6 +13,14 @@ answer playing after what it answers. A broken answer is sent back with its
 problems (claude_json.ask_json), so Claude fixes it rather than the run failing.
 A clip over the hard limit is first shortened from its start to fit (trim_to_fit) and
 marked trimmed_from_sentence, rather than refused.
+
+The first clip has hard rules of its own (`first_clip_problems`): it starts a sentence
+and a thought, not mid-sentence, on a connective or on filler. A reel that breaks only
+those is sent back like any other, but kept as a last resort when no answer has a reel
+that keeps every rule, with the rules it breaks on the result (`first_clip_problems`).
+
+Both calls answer under a JSON schema (structured outputs), so the reply is the JSON
+alone (`REELS_SCHEMA`, `JUDGE_SCHEMA`).
 """
 
 from __future__ import annotations
@@ -46,11 +54,64 @@ CANDIDATES = 3
 TITLES = {"dr", "mr", "mrs", "ms", "mx", "prof", "sir"}
 ROLES = ("opening", "answer", "rebuttal", "closing")
 # A clip opening on one of these leans on something the viewer did not hear, or on filler. The
-# prompt forbids it; the check asks again (a soft rule: the last answer is kept regardless).
+# prompt forbids it; the check asks again (a soft rule: the last answer is kept regardless). For
+# the first clip it is a hard rule (first_clip_problems).
 DANGLING_OPENERS = (
     "and", "but", "so", "also", "because", "yeah", "yes", "okay", "ok", "um", "uh", "like",
     "that's", "they", "it's", "which", "then", "plus", "or",
 )
+# Two-word filler openers, each with whether it counts only when set off by a comma, as geo-chat's
+# clip_ranges::filler_lead reads "you know": "You know, the data…" is filler, "you know nothing" a verb.
+DANGLING_PAIRS = {("i", "mean"): False, ("you", "know"): True}
+# A transcript is cased (Whisper's is) when at least this share of its sentences opens on a capital.
+# Only then does a sentence opening on a lowercase letter say it starts mid-sentence.
+CASED_SHARE = 0.5
+
+_ANSWERS = {"anyOf": [{"type": "integer"}, {"type": "null"}]}
+_MOMENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "speaker": {"type": "integer"},
+        "start_sentence": {"type": "integer"},
+        "end_sentence": {"type": "integer"},
+        "claim": {"type": "integer"},
+        "claim_fit": {"type": "number"},
+        "role": {"type": "string", "enum": list(ROLES)},
+        "answers": _ANSWERS,
+        "why": {"type": "string"},
+    },
+    "required": ["speaker", "start_sentence", "end_sentence", "claim", "claim_fit", "role", "answers", "why"],
+    "additionalProperties": False,
+}
+# The picker's answer, as the prompt asks for it. Counts (three reels, four clips) and ranges are
+# not expressible in structured outputs' schemas; `check` enforces them.
+REELS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reels": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "story": {"type": "string"},
+                    "moments": {"type": "array", "items": _MOMENT_SCHEMA},
+                },
+                "required": ["story", "moments"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["reels"],
+    "additionalProperties": False,
+}
+JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {"best": {"type": "integer"}, "why": {"type": "string"}},
+    "required": ["best", "why"],
+    "additionalProperties": False,
+}
+# Cut-off answers sent back to be answered shorter, per call.
+CUT_OFF_RETRIES = 1
 
 
 def _seconds(ms: int) -> str:
@@ -112,9 +173,60 @@ def render(input: DebatesPickMomentsInput) -> str:
     return "\n".join(lines)
 
 
+def _bare(word: str) -> str:
+    """`word` lowercased, letters and apostrophes only (curly ones straightened)."""
+    return re.sub(r"[^a-z']", "", word.lower().replace("’", "'"))
+
+
 def _first_word(sentence) -> str:
-    """A sentence's first word, lowercased, letters and apostrophes only (curly ones straightened)."""
-    return re.sub(r"[^a-z']", "", (sentence.text.split() or [""])[0].lower().replace("’", "'"))
+    """A sentence's first word, bare."""
+    return _bare((sentence.text.split() or [""])[0])
+
+
+def dangling_opener(sentence) -> Optional[str]:
+    """The dangling word or filler `sentence` opens on (DANGLING_OPENERS, DANGLING_PAIRS), or None."""
+    words = sentence.text.split()
+    pair = tuple(_bare(w) for w in words[:2])
+    if pair in DANGLING_PAIRS and (not DANGLING_PAIRS[pair] or words[1].endswith(",")):
+        return " ".join(pair)
+    first = _first_word(sentence)
+    return first if first in DANGLING_OPENERS else None
+
+
+def cased(input: DebatesPickMomentsInput) -> bool:
+    """Whether the transcript keeps capitals at sentence starts (CASED_SHARE)."""
+    firsts = [m.group(0) for m in (re.search(r"[A-Za-z]", s.text) for s in input.sentences) if m]
+    return bool(firsts) and sum(c.isupper() for c in firsts) >= CASED_SHARE * len(firsts)
+
+
+def opens_mid_sentence(sentence) -> bool:
+    """Whether `sentence` opens on a lowercase word ("and not just get…"): in a cased transcript, the
+    speech recogniser heard it run on from the words before, wherever the punctuation put its start.
+    A word cased inside ("iPhone") is a name, not a run-on; one with no letters ("50") says nothing."""
+    letters = re.sub(r"[^A-Za-z]", "", (sentence.text.split() or [""])[0])
+    return bool(letters) and letters.islower()
+
+
+def first_clip_problems(input: DebatesPickMomentsInput, start: int, picked_start: int) -> List[str]:
+    """Why a first clip starting at sentence `start` cannot open the reel: it starts mid-sentence,
+    or on a connective or filler. A newcomer meets the debate there. `picked_start` is where the
+    model started it, when a trim moved the start."""
+    sentence = input.sentences[start]
+    where = (
+        f"Clip 0, the reel's first clip, opens on sentence {start}"
+        + (f" (cut to fit from sentence {picked_start})" if start != picked_start else "")
+    )
+    fix = (
+        "The first clip is where a newcomer meets the debate: start it on a sentence that begins a "
+        "thought, or pick another first clip."
+    )
+    problems = []
+    if cased(input) and opens_mid_sentence(sentence):
+        problems.append(f"{where}, which starts mid-sentence (it opens on a lowercase word). {fix}")
+    opener = dangling_opener(sentence)
+    if opener:
+        problems.append(f'{where}, which opens on "{opener}", a connective or filler. {fix}')
+    return problems
 
 
 def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optional[int]:
@@ -134,7 +246,7 @@ def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optiona
     ]
     if not fitting:
         return None
-    clean = [first for first in fitting if _first_word(sentences[first]) not in DANGLING_OPENERS]
+    clean = [first for first in fitting if dangling_opener(sentences[first]) is None]
     return (clean or fitting)[0]
 
 
@@ -145,11 +257,14 @@ def _int(value: Any) -> Optional[int]:
 def check(
     input: DebatesPickMomentsInput, answer: Any
 ) -> Tuple[Optional[Tuple[str, List[PickedMoment]]], List[str], List[str]]:
-    """The answer as (story, moments), its problems, and its soft problems."""
+    """The answer as (story, moments), its problems, and its soft problems. A reel whose only
+    problems are its first clip's (first_clip_problems) comes back with them: refused, but usable
+    as a last resort."""
     if not isinstance(answer, dict) or not isinstance(answer.get("moments"), list):
         return None, ['The answer needs a "moments" list.'], []
     rows = answer["moments"]
     problems: List[str] = []
+    opening: List[str] = []
     soft: List[str] = []
     if len(rows) != MOMENTS:
         problems.append(f"There are {len(rows)} clips; there must be exactly {MOMENTS}.")
@@ -184,10 +299,13 @@ def check(
         trimmed = trim_to_fit(input, start, end)
         start = start if trimmed is None else trimmed
         run = sentences[start : end + 1]
-        first_word = _first_word(run[0])
-        if start == picked_start and first_word in DANGLING_OPENERS:
+        opener = dangling_opener(run[0])
+        if position == 0:
+            # Hard, trimmed or not: whoever chose the start, the newcomer hears it first.
+            opening = first_clip_problems(input, start, picked_start)
+        elif start == picked_start and opener:
             soft.append(
-                f'{name} opens on "{first_word}", which leans on what came before or is filler. '
+                f'{name} opens on "{opener}", which leans on what came before or is filler. '
                 "Start it on a sentence that opens a thought."
             )
         start_ms, end_ms = run[0].start_ms, run[-1].end_ms
@@ -249,7 +367,9 @@ def check(
             f"{_seconds(reel_max_ms(input))} s together. Shorten the longest clips."
         )
     story = answer.get("story") if isinstance(answer.get("story"), str) else ""
-    return ((named(input, story), moments) if not problems else None), problems, soft
+    if problems:
+        return None, problems + opening, soft
+    return (named(input, story), moments), opening, soft
 
 
 def named(input: DebatesPickMomentsInput, story: str) -> str:
@@ -263,16 +383,23 @@ def named(input: DebatesPickMomentsInput, story: str) -> str:
 
 
 Reel = Tuple[str, List[PickedMoment]]
+# A candidate reel that passed, with its soft problems; or, as a last resort, one that broke only
+# its first clip's rules, with those.
+Candidate = Tuple[Reel, List[str]]
 
 
 def check_reels(
     input: DebatesPickMomentsInput, answer: Any
-) -> Tuple[Optional[List[Tuple[Reel, List[str]]]], List[str], List[str]]:
+) -> Tuple[Optional[List[Candidate]], List[str], List[str]]:
     """The candidate reels that keep every hard rule, each with its soft problems; the answer's
     problems when none does; and, when only one reel passed and it has soft problems, those and
     the other reels' problems.
     With two or more passing, the judge weighs them as they are: sending them back for a soft
     nudge could return fewer.
+
+    When none passes, the reels that broke only their first clip's rules come back with the
+    problems, each with its first-clip problems: the answer is sent back, but they are a last
+    resort (claude_json.ask_json).
 
     A single reel (an answer in the old shape, {"moments": ...}) is one candidate."""
     if isinstance(answer, dict) and isinstance(answer.get("reels"), list):
@@ -283,7 +410,8 @@ def check_reels(
         return None, ['The answer needs a "reels" list.'], []
     if not reels:
         return None, ['The "reels" list is empty.'], []
-    passed: List[Tuple[Reel, List[str]]] = []
+    passed: List[Candidate] = []
+    last_resort: List[Candidate] = []
     problems: List[str] = []
     softs: List[str] = []
     for number, reel in enumerate(reels):
@@ -291,11 +419,13 @@ def check_reels(
         label = f"Reel {number}: " if len(reels) > 1 else ""
         if hard:
             problems += [label + p for p in hard]
+            if value is not None:
+                last_resort.append((value, hard))
             continue
         passed.append((value, soft))
         softs += [label + p for p in soft]
     if not passed:
-        return None, problems, []
+        return (last_resort or None), problems, []
     # One reel passed with a soft problem: it goes back with the others' problems too, so the next
     # answer can fix them as well as improve it.
     return passed, [], (softs + problems if len(passed) == 1 and softs else [])
@@ -337,6 +467,8 @@ async def judge(input: DebatesPickMomentsInput, reels: List[Reel], *, client: An
             task=f"{TASK} judge",
             attempts=JUDGE_ATTEMPTS,
             client=client,
+            schema=JUDGE_SCHEMA,
+            cut_off_retries=CUT_OFF_RETRIES,
         )
         return best, why
     except DecisionError as e:
@@ -352,23 +484,47 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
         task=TASK,
         attempts=ATTEMPTS,
         client=client,
+        schema=REELS_SCHEMA,
+        cut_off_retries=CUT_OFF_RETRIES,
     )
     # Judged among the reels with no soft problem when there are any, else among all that passed.
-    clean = [reel for reel, soft in passed if not soft]
-    reels = clean or [reel for reel, _ in passed]
+    # (Last-resort reels all carry their first-clip problems, so they are judged among themselves.)
+    clean = [(reel, soft) for reel, soft in passed if not soft]
+    candidates = clean or passed
     best, why = (0, "")
-    if len(reels) > 1:
-        best, why = await judge(input, reels, client=client)
-    story, moments = reels[best]
+    if len(candidates) > 1:
+        best, why = await judge(input, [reel for reel, _ in candidates], client=client)
+    (story, moments), _ = candidates[best]
+    # A kept reel's first clip either keeps its rules or this is a last resort that breaks them.
+    first = moments[0]
+    picked = first.start_sentence if first.trimmed_from_sentence is None else first.trimmed_from_sentence
+    broken = first_clip_problems(input, first.start_sentence, picked)
+    if broken:
+        logger.warning(f"{TASK}: no reel kept the first clip's rules; kept one that breaks them: {broken}")
     return DebatesPickMomentsResult(
         story=story,
         moments=moments,
         provider=PROVIDER,
         model_used=model,
         attempts=attempts,
-        candidates=len(reels),
+        candidates=len(candidates),
         judge_why=why or None,
+        first_clip_problems=broken,
     )
 
 
-__all__ = ["CALLS", "TASK", "check", "check_reels", "judge", "pick_moments", "reel_ms", "render", "render_for_judge"]
+__all__ = [
+    "CALLS",
+    "JUDGE_SCHEMA",
+    "REELS_SCHEMA",
+    "TASK",
+    "check",
+    "check_reels",
+    "dangling_opener",
+    "first_clip_problems",
+    "judge",
+    "pick_moments",
+    "reel_ms",
+    "render",
+    "render_for_judge",
+]

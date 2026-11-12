@@ -128,3 +128,9 @@ class DebatesPickMomentsResult(BaseModel):
     attempts: int = Field(description="How many answers were asked for before one passed every rule.")
     candidates: int = Field(default=1, description="How many reels the pick was made from: those with no soft problem when any passed, else all that passed. More than one means the judge picked.")
     judge_why: Optional[str] = Field(default=None, description="Why the judge picked this reel, when it judged.")
+    first_clip_problems: List[str] = Field(
+        default_factory=list,
+        description="Empty unless no answer had a reel whose first clip keeps its rules (it starts a "
+        "sentence and a thought, not on a connective or filler): then the reel was kept as a last "
+        "resort, and these are the rules its first clip breaks.",
+    )

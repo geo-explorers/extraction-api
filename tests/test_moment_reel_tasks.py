@@ -21,6 +21,13 @@ from src.pipeline.claude_json import FinalDecisionError, parse_json
 from hatchet_sdk.exceptions import NonRetryableException
 
 
+class _CutOff:
+    """A canned reply that stops at the token limit."""
+
+    def __init__(self, text):
+        self.text = text
+
+
 class _FakeClaude:
     """Answers each request with the next canned reply, and records the conversations."""
 
@@ -35,6 +42,8 @@ class _FakeClaude:
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
+        if isinstance(reply, _CutOff):
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text=reply.text)], stop_reason="max_tokens")
         text = reply if isinstance(reply, str) else json.dumps(reply)
         return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)], stop_reason=self.stop_reason)
 
@@ -114,6 +123,8 @@ def test_an_answer_cut_off_at_the_token_limit_is_final_and_not_asked_again():
         asyncio.run(punct.punctuate(_turns(), client=client))
     # Every end is required, so a second answer would be as long: it is not asked for.
     assert len(client.calls) == 1
+    # Nor is its answer shaped by a schema: punctuate keeps asking as it did.
+    assert "output_config" not in client.calls[0]
 
 
 def test_a_provider_failure_is_retryable():
@@ -303,10 +314,18 @@ def test_a_trim_that_can_only_land_on_a_dangling_opener_is_not_nudged():
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
     # 0-2 is 34 s; every start that fits (1 or 2) opens on a dangling word, so the trim takes 1.
     _long_first_turn(debate, [10, 12, 12], ["One.", "And that.", "But so."])
-    (_, moments), problems, soft = pick.check(debate, GOOD)
-    assert problems == [] and moments[0].start_sentence == 1
+    # Turn 0 is OTHER's second clip.
+    (_, moments), problems, soft = pick.check(debate, OTHER)
+    assert problems == [] and moments[1].start_sentence == 1
     # Starting earlier would only be trimmed back: the model is not told to.
     assert soft == []
+    # As the first clip it is refused all the same: a newcomer meets the debate on "And that."
+    _, problems, _ = pick.check(debate, GOOD)
+    assert problems == [
+        'Clip 0, the reel\'s first clip, opens on sentence 1 (cut to fit from sentence 0), which opens '
+        'on "and", a connective or filler. The first clip is where a newcomer meets the debate: start '
+        "it on a sentence that begins a thought, or pick another first clip."
+    ]
 
 
 def test_a_trim_that_would_go_below_the_minimum_reports_the_real_length():
@@ -492,6 +511,9 @@ def test_the_judge_picks_between_passing_reels_from_the_clips_alone():
     assert "Clip 1, Nico, 14.8 s: Point 1.0. Point 1.1. Point 1.2." in judged
     assert "Claims:" not in judged and "[3]" not in judged and "Federal elections need" not in judged
     assert "## Reel 1 (59.2 s)" in judged
+    # Both calls answer under their JSON schema: the reply is the JSON alone.
+    assert client.calls[0]["output_config"] == {"format": {"type": "json_schema", "schema": pick.REELS_SCHEMA}}
+    assert client.calls[1]["output_config"] == {"format": {"type": "json_schema", "schema": pick.JUDGE_SCHEMA}}
 
 
 def test_one_passing_reel_needs_no_judge():
@@ -514,9 +536,9 @@ def test_a_judge_request_that_fails_keeps_the_first_reel():
 
 def test_a_clean_reel_is_taken_over_one_with_soft_problems_without_a_judge():
     debate = _debate()
-    debate.sentences[0].text = "So it is a state matter."  # GOOD opens on "so"
+    debate.sentences[6].text = "So it is a state matter."  # GOOD's third clip opens on "so"
     clean = json.loads(json.dumps(OTHER))
-    clean["moments"][1]["start_sentence"] = 1  # starts past it
+    clean["moments"][3]["start_sentence"] = 7  # starts past it
     client = _FakeClaude({"reels": [GOOD, clean]})
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert [m.speaker for m in result.moments] == [2, 1, 2, 1] and len(client.calls) == 1
@@ -552,7 +574,7 @@ def test_a_reel_over_four_clips_at_the_target_is_asked_to_shorten():
 
 def test_reels_that_pass_go_to_the_judge_as_they_are_not_back_for_a_nudge():
     debate = _debate()
-    debate.sentences[0].text = "So it is a state matter."  # both reels have a clip opening on it
+    debate.sentences[6].text = "So it is a state matter."  # both reels have a later clip opening on it
     passed, problems, soft = pick.check_reels(debate, {"reels": [GOOD, OTHER]})
     assert problems == [] and soft == [] and len(passed) == 2
     client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "x"})
@@ -560,7 +582,7 @@ def test_reels_that_pass_go_to_the_judge_as_they_are_not_back_for_a_nudge():
     assert (result.attempts, result.candidates, len(client.calls)) == (1, 2, 2)
     # One passing reel with a soft problem is sent back, with the other reels' problems too.
     _, _, soft = pick.check_reels(debate, {"reels": [GOOD, BROKEN]})
-    assert any(p.startswith('Reel 0: Clip 0 opens on "so"') for p in soft), soft
+    assert any(p.startswith('Reel 0: Clip 2 opens on "so"') for p in soft), soft
     assert any(p.startswith("Reel 1: ") and "exactly 4" in p for p in soft), soft
 
 
@@ -625,5 +647,189 @@ def test_the_first_clip_is_chosen_for_the_context_not_for_strength():
     # ranked lower, a reel without it could win on the exchange before the context was weighed.
     follow, exchange = (judge.index(f"\n{n}. ") for n in (1, 2))
     assert follow < judge.index("The first clip provides the context") < exchange
+    assert follow < judge.index("Weigh this before anything else") < exchange
     assert "don't favor one for opening on its strongest line" in judge
 
+
+
+# --- answers cut off at the token limit (11 Nov: 8 of 20 pick runs) ---------------------
+
+
+def test_the_reel_schemas_keep_to_what_structured_outputs_accepts():
+    # Every object closed and every property required; no numeric or length constraints.
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "object":
+                assert node["additionalProperties"] is False
+                assert set(node["required"]) == set(node["properties"])
+            for key in ("minimum", "maximum", "minLength", "maxLength", "maxItems", "minItems"):
+                assert key not in node
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(pick.REELS_SCHEMA)
+    walk(pick.JUDGE_SCHEMA)
+    # The prompt's example clip has exactly the schema's fields.
+    assert set(_moment(1, 0, 2, 0)) == set(pick.REELS_SCHEMA["properties"]["reels"]["items"]["properties"]["moments"]["items"]["properties"])
+
+
+def test_a_cut_off_reel_answer_is_asked_again_once_shorter_and_the_answer_kept():
+    from src.pipeline.claude_json import CUT_OFF_MESSAGE
+
+    prose = "Let me read the transcript closely. " * 50
+    client = _FakeClaude(_CutOff(prose), {"reels": [GOOD]})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert result.attempts == 2 and len(client.calls) == 2
+    conversation = client.calls[1]["messages"]
+    assert conversation[1] == {"role": "assistant", "content": prose}
+    assert conversation[2] == {"role": "user", "content": CUT_OFF_MESSAGE}
+    assert "shorter" in CUT_OFF_MESSAGE and "nothing else" in CUT_OFF_MESSAGE
+
+
+def test_a_reel_answer_cut_off_twice_fails_without_an_engine_retry():
+    client = _FakeClaude(_CutOff("a"), _CutOff("b"), {"reels": [GOOD]})
+    with pytest.raises(FinalDecisionError, match="cut off at the token limit"):
+        asyncio.run(pick.pick_moments(_debate(), client=client))
+    # One send-back for a cut-off, not one per attempt left.
+    assert len(client.calls) == 2
+
+
+def test_a_cut_off_after_an_acceptable_answer_keeps_that_answer():
+    debate = _debate()
+    debate.sentences[3].text = "And it is a federal problem."  # a soft problem: asked again
+    client = _FakeClaude({"reels": [GOOD]}, _CutOff("..."), {"reels": [GOOD]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 1 and len(client.calls) == 2
+
+
+def test_a_cut_off_answer_logs_its_tail_not_the_whole_answer(monkeypatch):
+    from src.pipeline import claude_json
+
+    lines = []
+    monkeypatch.setattr(claude_json.logger, "warning", lines.append)
+    head = "TRANSCRIPT-HEAD " + "x" * 3000
+    client = _FakeClaude(_CutOff(head + "THE TAIL"), {"reels": [GOOD]})
+    asyncio.run(pick.pick_moments(_debate(), client=client))
+    cut = [line for line in lines if "cut off" in line]
+    assert len(cut) == 1 and "THE TAIL" in cut[0] and "TRANSCRIPT-HEAD" not in cut[0]
+    assert len(cut[0]) < claude_json.CUT_OFF_TAIL_CHARS + 200
+
+
+def test_a_cut_off_judge_answer_is_asked_again_too():
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, _CutOff("I think"), {"best": 1, "why": "x"})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert [m.speaker for m in result.moments] == [2, 1, 2, 1] and len(client.calls) == 3
+
+
+# --- the first clip's opening (11 Nov: 5 of 12 openers weak) -----------------------------
+
+
+@pytest.mark.parametrize(
+    "text, problem",
+    [
+        # The 11 Nov worst case: Whisper had "…models, and not just get completely overwhelmed…".
+        ("and not just get completely overwhelmed by a society.", "starts mid-sentence"),
+        ("not just get completely overwhelmed by a society.", "starts mid-sentence"),
+        ("And it is a state matter.", 'opens on "and"'),
+        ("So it is a state matter.", 'opens on "so"'),
+        ("But it is a state matter.", 'opens on "but"'),
+        ("Because it is a state matter.", 'opens on "because"'),
+        ("That's why it is a state matter.", 'opens on "that\'s"'),
+        ("Yeah, it is a state matter.", 'opens on "yeah"'),
+        ("Okay, it is a state matter.", 'opens on "okay"'),
+        ("Um, it is a state matter.", 'opens on "um"'),
+        ("I mean, it is a state matter.", 'opens on "i mean"'),
+        ("Like, it is a state matter.", 'opens on "like"'),
+        ("You know, it is a state matter.", 'opens on "you know"'),
+    ],
+)
+def test_a_first_clip_opening_mid_sentence_or_on_a_connective_is_refused(text, problem):
+    debate = _debate()
+    debate.sentences[0].text = text
+    value, problems, _ = pick.check(debate, GOOD)
+    assert any(p.startswith("Clip 0, the reel's first clip, opens on sentence 0") and problem in p for p in problems), problems
+    # Refused, but usable as a last resort: its only problems are the first clip's.
+    assert value is not None
+    # The same sentence opening a later clip is at most a soft problem.
+    value, problems, _ = pick.check(debate, OTHER)
+    assert problems == [] and value is not None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Voter ID is a state matter.",
+        "50 states already run their own rolls.",
+        "iPhone voters prove it.",
+        "You know nothing about the rolls.",
+        "I meant every word of it.",
+        "This is the number that matters.",
+    ],
+)
+def test_a_first_clip_opening_on_a_sentence_that_starts_a_thought_is_accepted(text):
+    debate = _debate()
+    debate.sentences[0].text = text
+    value, problems, soft = pick.check(debate, GOOD)
+    assert (problems, soft) == ([], []) and value is not None
+
+
+def test_a_lowercase_opener_says_nothing_in_a_transcript_without_capitals():
+    debate = _debate()
+    for sentence in debate.sentences:
+        sentence.text = sentence.text.lower()
+    debate.sentences[0].text = "voter id is a state matter."
+    assert pick.check(debate, GOOD)[1] == []
+
+
+def _past_sentence_0(reel):
+    """`reel` with its clip from turn 0 starting at sentence 1."""
+    reel = json.loads(json.dumps(reel))
+    for moment in reel["moments"]:
+        if moment["start_sentence"] == 0:
+            moment["start_sentence"] = 1
+    return reel
+
+
+def test_one_candidate_with_a_good_opener_is_taken_without_a_send_back():
+    debate = _debate()
+    debate.sentences[0].text = "And it is a state matter."  # GOOD opens on it; OTHER opens on sentence 3
+    client = _FakeClaude({"reels": [GOOD, _past_sentence_0(OTHER)]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 1 and result.candidates == 1
+    assert [m.speaker for m in result.moments] == [2, 1, 2, 1] and result.first_clip_problems == []
+
+
+def test_reels_that_break_only_the_first_clip_rules_are_sent_back_then_kept_as_a_last_resort():
+    debate = _debate()
+    debate.sentences[0].text = "And it is a state matter."  # GOOD's opener
+    debate.sentences[3].text = "but it is federal."  # OTHER's opener, mid-sentence too
+    answer = {"reels": [GOOD, OTHER]}
+    client = _FakeClaude(answer, answer, answer, {"best": 1, "why": "x"})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    # Sent back twice with the first clips' problems, then the last answer's reels judged.
+    assert len(client.calls) == 4 and result.attempts == 3 and result.candidates == 2
+    assert 'Reel 0: Clip 0, the reel\'s first clip, opens on sentence 0, which opens on "and"' in client.calls[1]["messages"][2]["content"]
+    assert [m.speaker for m in result.moments] == [2, 1, 2, 1]
+    assert any("starts mid-sentence" in p for p in result.first_clip_problems)
+    assert any('opens on "but"' in p for p in result.first_clip_problems)
+
+
+def test_a_reel_fixed_after_a_first_clip_send_back_wins_with_nothing_to_report():
+    debate = _debate()
+    debate.sentences[0].text = "And it is a state matter."
+    client = _FakeClaude({"reels": [GOOD]}, {"reels": [_past_sentence_0(OTHER)]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 2 and result.first_clip_problems == []
+
+
+def test_a_reel_with_other_hard_problems_is_no_last_resort():
+    debate = _debate()
+    debate.sentences[0].text = "And it is a state matter."
+    broken = {"moments": GOOD["moments"][:3]}  # opens on "and", and only three clips
+    value, problems, _ = pick.check(debate, broken)
+    assert value is None and any("exactly 4" in p for p in problems)
+    with pytest.raises(FinalDecisionError):
+        asyncio.run(pick.pick_moments(debate, client=_FakeClaude(broken, broken, broken)))
