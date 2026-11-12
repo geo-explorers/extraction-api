@@ -2128,6 +2128,23 @@ def test_a_run_may_override_the_reel_model_and_effort():
     with activate(llm_overrides={"moments_pick_claude_effort": "medium"}):
         asyncio.run(pick.pick_moments(_debate("after"), client=client))
     assert [c["output_config"]["effort"] for c in client.calls] == ["medium", "medium"]
+    # One run back on the earlier picker: the temperature follows the overridden model.
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "Nico opens stronger."})
+    restore = {
+        "moments_pick_claude_model": "claude-sonnet-4-6",
+        "moments_pick_claude_effort": "",
+        "moments_pick_claude_max_tokens": 16000,
+    }
+    with activate(llm_overrides=restore):
+        result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert result.model_used == "claude-sonnet-4-6"
+    for call, schema in zip(client.calls, (pick.REELS_SCHEMA, pick.JUDGE_SCHEMA), strict=True):
+        assert _knobs(call) == {
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 16000,
+            "temperature": 0.2,
+            "output_config": {"format": {"type": "json_schema", "schema": schema}},
+        }
 
 
 class _ThinkingClaude(_FakeClaude):
