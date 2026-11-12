@@ -50,9 +50,9 @@ from src.api.schemas.debates_pick_moments_schema import (
 )
 from src.config.overrides import prompts
 from src.decisions.base import DecisionError
+from src.pipeline.deadline import Deadline
 from src.infrastructure.logger import get_logger
 from src.pipeline.claude_json import PROVIDER, ask_json
-from src.pipeline.deadline import Deadline
 
 logger = get_logger(__name__)
 
@@ -738,6 +738,12 @@ def answer_rank(candidates: List[Candidate]) -> int:
     return min(len(problems) for _, problems in candidates)
 
 
+def top_ranked(candidates: List[Candidate]) -> int:
+    """The candidate with the fewest problems, the first among equals (the picker put its best
+    first): what a run takes when the deadline leaves no time to judge."""
+    return min(range(len(candidates)), key=lambda i: len(candidates[i][1]))
+
+
 def clip_flaws(input: DebatesPickMomentsInput, position: int, moment: PickedMoment, is_cased: bool) -> List[str]:
     """What the checks found wrong with a clip at `position`, as the viewer hears it: the soft
     problems (later_clip_problems) and the hard ones a last resort keeps (first_clip_problems, a
@@ -790,12 +796,6 @@ def judge_check(count: int):
         return (best, why[:500]), [], []
 
     return check_pick
-
-
-def top_ranked(candidates: List[Candidate]) -> int:
-    """The candidate with the fewest problems, the first among equals (the picker put its best
-    first): what a run takes when the deadline leaves no time to judge."""
-    return min(range(len(candidates)), key=lambda i: len(candidates[i][1]))
 
 
 async def judge(
