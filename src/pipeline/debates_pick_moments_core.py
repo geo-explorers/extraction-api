@@ -55,11 +55,14 @@ TITLES = {"dr", "mr", "mrs", "ms", "mx", "prof", "sir"}
 ROLES = ("opening", "answer", "rebuttal", "closing")
 # A clip opening on one of these leans on something the viewer did not hear, or on filler. The
 # prompt forbids it; the check asks again (a soft rule: the last answer is kept regardless). For
-# the first clip it is a hard rule (first_clip_problems).
+# the first clip it is a hard rule (first_clip_problems), except FIRST_CLIP_SOFT_OPENERS.
 DANGLING_OPENERS = (
     "and", "but", "so", "also", "because", "yeah", "yes", "okay", "ok", "um", "uh", "like",
     "that's", "they", "it's", "which", "then", "plus", "or",
 )
+# Openers that often state a position rather than lean on what came before ("It's time we…",
+# "Yes, voter ID should be federal"): soft on the first clip too, as on later ones.
+FIRST_CLIP_SOFT_OPENERS = ("it's", "yes")
 # Two-word filler openers, each with whether it counts only when set off by a comma, as geo-chat's
 # clip_ranges::filler_lead reads "you know": "You know, the data…" is filler, "you know nothing" a verb.
 DANGLING_PAIRS = {("i", "mean"): False, ("you", "know"): True}
@@ -178,9 +181,14 @@ def _bare(word: str) -> str:
     return re.sub(r"[^a-z']", "", word.lower().replace("’", "'"))
 
 
+def _head(sentence) -> str:
+    """A sentence's first word, as written."""
+    return (sentence.text.split() or [""])[0]
+
+
 def _first_word(sentence) -> str:
     """A sentence's first word, bare."""
-    return _bare((sentence.text.split() or [""])[0])
+    return _bare(_head(sentence))
 
 
 def dangling_opener(sentence) -> Optional[str]:
@@ -203,8 +211,14 @@ def opens_mid_sentence(sentence) -> bool:
     """Whether `sentence` opens on a lowercase word ("and not just get…"): in a cased transcript, the
     speech recogniser heard it run on from the words before, wherever the punctuation put its start.
     A word cased inside ("iPhone") is a name, not a run-on; one with no letters ("50") says nothing."""
-    letters = re.sub(r"[^A-Za-z]", "", (sentence.text.split() or [""])[0])
+    letters = re.sub(r"[^A-Za-z]", "", _head(sentence))
     return bool(letters) and letters.islower()
+
+
+def clean_start(sentence, is_cased: bool) -> bool:
+    """Whether `sentence` can open a clip: no dangling opener, and in a cased transcript not
+    mid-sentence. What a trim looks for, and what the first clip must keep."""
+    return dangling_opener(sentence) is None and not (is_cased and opens_mid_sentence(sentence))
 
 
 def first_clip_problems(input: DebatesPickMomentsInput, start: int, picked_start: int) -> List[str]:
@@ -224,15 +238,15 @@ def first_clip_problems(input: DebatesPickMomentsInput, start: int, picked_start
     if cased(input) and opens_mid_sentence(sentence):
         problems.append(f"{where}, which starts mid-sentence (it opens on a lowercase word). {fix}")
     opener = dangling_opener(sentence)
-    if opener:
+    if opener and opener not in FIRST_CLIP_SOFT_OPENERS:
         problems.append(f'{where}, which opens on "{opener}", a connective or filler. {fix}')
     return problems
 
 
 def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optional[int]:
     """Where a clip over the hard limit should start so it fits: sentences dropped from its start
-    (the payoff at its end stays), and past any that open on a dangling word, so the trim never
-    lands on "And ..." when a cleaner start fits. `None` when no start leaves it within the
+    (the payoff at its end stays), and past any that open on a dangling word or mid-sentence
+    (clean_start), so the trim never lands on "And ..." when a cleaner start fits. `None` when no start leaves it within the
     limits, so the clip is reported at the length the model picked. A clip within the limit is
     left where it starts."""
     sentences = input.sentences
@@ -246,7 +260,8 @@ def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optiona
     ]
     if not fitting:
         return None
-    clean = [first for first in fitting if dangling_opener(sentences[first]) is None]
+    is_cased = cased(input)
+    clean = [first for first in fitting if clean_start(sentences[first], is_cased)]
     return (clean or fitting)[0]
 
 
@@ -303,7 +318,7 @@ def check(
         if position == 0:
             # Hard, trimmed or not: whoever chose the start, the newcomer hears it first.
             opening = first_clip_problems(input, start, picked_start)
-        elif start == picked_start and opener:
+        if start == picked_start and opener and (position > 0 or opener in FIRST_CLIP_SOFT_OPENERS):
             soft.append(
                 f'{name} opens on "{opener}", which leans on what came before or is filler. '
                 "Start it on a sentence that opens a thought."

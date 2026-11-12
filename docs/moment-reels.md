@@ -82,7 +82,7 @@ The task checks each of these rules before answering:
 - no two clips overlap
 - each clip links to a claim by its own speaker, and a speaker's two clips link to different claims
 - a clip only answers an earlier clip, by the other speaker
-- the first clip opens on a sentence that starts a thought: not mid-sentence (in a transcript with capitals, a sentence opening on a lowercase word ran on from the words before it, as in "and not just get completely overwhelmed…"), and not on a connective or filler ("and", "so", "but", "because", "that's", "yeah", "okay", "um", "like", "I mean", "you know,"…: the same list as the soft rule below). This holds for a trimmed first clip too, since the viewer meets the debate there.
+- the first clip opens on a sentence that starts a thought: not mid-sentence (in a transcript with capitals, a sentence opening on a lowercase word ran on from the words before it, as in "and not just get completely overwhelmed…"), and not on a connective or filler ("and", "so", "but", "because", "that's", "yeah", "okay", "um", "like", "I mean", "you know,"…: the soft rule's list below, except "it's" and "yes", which often state a position ("It's time we…") and stay soft on the first clip too). This holds for a trimmed first clip too, since the viewer meets the debate there. A trim to fit prefers a start that keeps both rules.
 
 The first clip's rules are hard, but with a last resort: a reel that breaks only them is sent back like any other, and if no answer in the three has a reel that keeps every rule, the last answer's such reels are judged and one is kept, with the rules its first clip breaks in `first_clip_problems` (and a warning in the log). So the rule never fails a run that would have passed without it.
 

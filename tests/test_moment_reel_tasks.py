@@ -833,3 +833,27 @@ def test_a_reel_with_other_hard_problems_is_no_last_resort():
     assert value is None and any("exactly 4" in p for p in problems)
     with pytest.raises(FinalDecisionError):
         asyncio.run(pick.pick_moments(debate, client=_FakeClaude(broken, broken, broken)))
+
+
+@pytest.mark.parametrize(
+    "text, opener",
+    [
+        ("It's time we stopped pretending states can run federal elections.", "it's"),
+        ("Yes, voter ID should be federal.", "yes"),
+    ],
+)
+def test_a_first_clip_opening_on_its_or_yes_is_a_soft_problem_not_refused(text, opener):
+    debate = _debate()
+    debate.sentences[0].text = text
+    value, problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and value is not None
+    assert any(p.startswith(f'Clip 0 opens on "{opener}"') for p in soft), soft
+
+
+def test_a_trim_steps_past_a_mid_sentence_start_when_a_clean_start_fits():
+    debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
+    # 0-2 is 34 s. Dropping sentence 0 lands on a run-on, so the trim steps on to sentence 2.
+    _long_first_turn(debate, [10, 12, 12], ["One.", "not just get completely overwhelmed.", "We need rules."])
+    (_, moments), problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and moments[0].start_sentence == 2
