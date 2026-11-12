@@ -857,8 +857,8 @@ def test_reels_that_break_only_the_first_clip_rules_are_sent_back_then_kept_as_a
     assert len(client.calls) == 4 and result.attempts == 3 and result.candidates == 2
     assert 'Reel 0: Clip 0, the reel\'s first clip, opens on sentence 0, which opens on "but"' in client.calls[1]["messages"][2]["content"]
     assert [m.speaker for m in result.moments] == [2, 1, 2, 1]
-    assert any("starts mid-sentence" in p for p in result.first_clip_problems)
-    assert any('opens on "but"' in p for p in result.first_clip_problems)
+    # "but it is federal." is one flaw: mid-sentence, not also its "but".
+    assert len(result.first_clip_problems) == 1 and "starts mid-sentence" in result.first_clip_problems[0]
 
 
 def test_a_reel_fixed_after_a_first_clip_send_back_wins_with_nothing_to_report():
@@ -1111,7 +1111,7 @@ def test_a_filler_sentence_before_a_run_on_still_refuses_the_first_clip():
     debate = _debate()
     debate.sentences[0].text, debate.sentences[1].text = "Um.", "but it is a state matter."
     _, problems, _ = pick.check(debate, GOOD)
-    assert any("starts mid-sentence" in p for p in problems) and any('opens on "but"' in p for p in problems), problems
+    assert len(problems) == 1 and "starts mid-sentence" in problems[0], problems
 
 
 def test_a_first_clip_past_its_filler_keeps_the_soft_rule_for_what_is_heard():
@@ -1461,12 +1461,36 @@ def test_a_send_back_that_comes_back_worse_does_not_replace_the_better_answer():
 
 def test_a_last_resort_that_comes_back_worse_does_not_replace_the_better_one():
     debate = _debate()
-    debate.sentences[0].text = "but states run it."  # mid-sentence and on "but": two problems
-    debate.sentences[1].text = "But states run it well."  # on "but" alone: one
+    debate.sentences[0].text = "but states run it."  # GOOD's clip 1: mid-sentence (fixable)
+    debate.sentences[1].text = "But states run it well."  # better's clip 1: on "but" (fixable)
+    debate.sentences[9].text = "But every president tips it."  # GOOD's clip 4 also opens on "but" (soft)
     better = _with(0, start_sentence=1)
+    better["moments"][3].update(start_sentence=10)
     result = asyncio.run(pick.pick_moments(debate, client=_FakeClaude(better, GOOD, BROKEN)))
     assert result.attempts == 1 and result.moments[0].start_sentence == 1
     assert len(result.first_clip_problems) == 1
+
+
+def test_a_lowercase_opener_is_one_flaw_so_a_reel_with_two_bad_clips_does_not_win_the_tie():
+    # "but we need…" starts mid-sentence and on "but": one flaw, as "But we need…" is. Counted as
+    # two, an answer with two bad clips tied it and, being later, was kept (review of GEO-3691).
+    debate = _debate()
+    debate.sentences[3].text = "but we need federal rules here."
+    debate.sentences[6].text = "Because states do it well."
+    debate.sentences[9].text = "But every president tips it."
+    one_bad = json.loads(json.dumps(GOOD))
+    one_bad["moments"][2].update(start_sentence=7)
+    one_bad["moments"][3].update(start_sentence=10)
+    two_bad = _with(1, start_sentence=4)
+    _, _, soft = pick.check(debate, one_bad)
+    assert len(soft) == 1 and soft[0].startswith("Clip 1 starts mid-sentence"), soft
+    result = asyncio.run(pick.pick_moments(debate, client=_FakeClaude(one_bad, two_bad, BROKEN)))
+    assert result.attempts == 1 and result.moments[1].start_sentence == 3
+    # The judge reads one line for the clip, and the first clip one fixable problem.
+    judged = pick.render_for_judge(debate, [pick.check(debate, one_bad)[0]])
+    assert "- Clip 2 starts mid-sentence." in judged and 'Clip 2 opens on "but"' not in judged
+    debate.sentences[0].text = "but states run it."
+    assert len(pick.first_clip_problems(debate, 0, 2, 0)) == 1
 
 
 def test_the_last_resort_log_names_the_problems_of_the_answer_it_keeps(monkeypatch):
@@ -1479,7 +1503,9 @@ def test_the_last_resort_log_names_the_problems_of_the_answer_it_keeps(monkeypat
     debate = _debate()
     debate.sentences[0].text = "but states run it."
     debate.sentences[1].text = "But states run it well."
+    debate.sentences[9].text = "But every president tips it."
     better = _with(0, start_sentence=1)
+    better["moments"][3].update(start_sentence=10)
     asyncio.run(pick.pick_moments(debate, client=_FakeClaude(better, GOOD, BROKEN)))
     kept = [line for line in lines if "as a last resort" in line]
     assert len(kept) == 1 and "keeping answer 1" in kept[0]

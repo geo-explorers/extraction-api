@@ -396,18 +396,20 @@ def _opening(
     input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool, later: bool = False
 ) -> Tuple[bool, bool, Optional[str]]:
     """How a clip of sentences `start`-`end` opens, as the viewer hears it (heard_start): whether it
-    starts mid-sentence (in a cased transcript), the dangling word or filler it opens on, and
-    otherwise whether it starts on what looks like the second half of a split sentence
-    (split_start). Mid-sentence and the opener win over the split mark, which is only a guess, so
-    one flaw is not counted twice: "That the border security…" opens on "that", and "where
-    corporations argued…" starts mid-sentence, whether or not either is a split half. A `later` clip (not the first)
+    starts mid-sentence (in a cased transcript), otherwise the dangling word or filler it opens on,
+    and otherwise whether it starts on what looks like the second half of a split sentence
+    (split_start). One flaw per opening, the strongest: "but we need…" starts mid-sentence (not
+    also on "but"), "That the border security…" opens on "that", and "where corporations argued…"
+    starts mid-sentence, whether or not either is a split half. A `later` clip (not the first)
     may answer the one before it: "Yes, the rolls are clean." (ANSWER_OPENERS)."""
     k, words = heard_start(input, start, end)
     mid = is_cased and opens_mid_sentence(input.sentences[k])
-    opener = _opener(words)
+    # Mid-sentence wins over the opener too: "but we need…" is one flaw, not two (answer_rank
+    # counts problems). It is hard on the first clip whatever the word, so no rule gets weaker.
+    opener = None if mid else _opener(words)
     if later and opener in ANSWER_OPENERS and _answers_on(words):
         opener = None
-    return mid, not mid and opener is None and split_start(input, k, words), opener
+    return mid, opener is None and not mid and split_start(input, k, words), opener
 
 
 def _start_rank(input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool) -> int:
