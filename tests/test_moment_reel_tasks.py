@@ -3,6 +3,7 @@ shown, which answers are accepted, how a broken answer is sent back, and registr
 
 import asyncio
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -268,7 +269,7 @@ def test_a_check_that_cannot_read_the_answer_sends_it_back():
     assert (value, attempts) == ("ok", 2)
 
 
-def test_a_clip_too_long_is_trimmed_from_its_start_to_fit():
+def test_a_clip_too_long_is_sent_back_with_its_running_times_and_cut_from_its_end_as_a_last_resort():
     debate = _debate()
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
     for k, sentence in enumerate(debate.sentences[0:3]):
@@ -276,9 +277,16 @@ def test_a_clip_too_long_is_trimmed_from_its_start_to_fit():
     for k, sentence in enumerate(debate.sentences[3:], start=3):
         sentence.start_ms, sentence.end_ms = 36_000 + (k - 3) * 5_000, 36_000 + (k - 3) * 5_000 + 4_800
     (_, moments), problems, _ = pick.check(debate, GOOD)
-    assert problems == []
-    # Sentence 0 is dropped: 1-2 is 23.8 s and keeps the clip's ending.
-    assert (moments[0].start_sentence, moments[0].end_sentence, moments[0].start_ms) == (1, 2, 12_000)
+    # Refused, with how long it runs to each sentence so the next pick fits (12 Nov: the trims
+    # from the start cut the setup in 6 of 36 clips).
+    assert problems == [
+        "Clip 0, sentences 0-2, runs 35.8 s, over the 30.0 s limit. From sentence 0 it runs 11.8 s to "
+        "sentence 0, 23.8 s to sentence 1, 35.8 s to sentence 2. End it earlier, after a sentence where "
+        "its point has landed, or start it later on a sentence that opens a thought, to run 6.0-30.0 s."
+    ]
+    # As a last resort it is cut from its end: 0-1 is 23.8 s and keeps the clip's setup.
+    assert (moments[0].start_sentence, moments[0].end_sentence, moments[0].end_ms) == (0, 1, 23_800)
+    assert (moments[0].trimmed_to_sentence, moments[0].trimmed_from_sentence) == (2, None)
 
 
 def _long_first_turn(debate, lengths, texts=None):
@@ -294,34 +302,40 @@ def _long_first_turn(debate, lengths, texts=None):
         sentence.start_ms, sentence.end_ms = at + (k - 3) * 5_000, at + (k - 3) * 5_000 + 4_800
 
 
-def test_a_trim_is_marked_on_the_clip_and_costs_no_extra_call():
+def test_a_clip_over_the_limit_is_picked_again_and_cut_to_fit_only_as_a_last_resort():
     debate = _debate()
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
     _long_first_turn(debate, [12, 12, 11.8])  # 35.8 s
-    (_, moments), problems, soft = pick.check(debate, GOOD)
-    assert problems == [] and soft == []
-    assert (moments[0].start_sentence, moments[0].trimmed_from_sentence) == (1, 0)
-    # A clip that was not trimmed says so.
-    assert moments[1].trimmed_from_sentence is None
-    # The trimmed reel is the answer: one call, not a send-back for each trim.
+    # The model picks it again shorter: that answer wins, nothing cut.
+    client = _FakeClaude(GOOD, _with(0, end_sentence=1))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 2 and (result.moments[0].start_sentence, result.moments[0].end_sentence) == (0, 1)
+    assert result.moments[0].trimmed_to_sentence is None
+    assert "Clip 0, sentences 0-2, runs 35.8 s, over the 30.0 s limit" in client.calls[1]["messages"][2]["content"]
+    # Never picked shorter: the last answer's reel is kept, cut to fit, so the run still has a reel.
     client = _FakeClaude(GOOD, GOOD, GOOD)
     result = asyncio.run(pick.pick_moments(debate, client=client))
-    assert result.attempts == 1 and len(client.calls) == 1
+    assert result.attempts == 3 and len(client.calls) == 3
+    assert (result.moments[0].end_sentence, result.moments[0].trimmed_to_sentence) == (1, 2)
+    # A clip that was not cut says so.
+    assert result.moments[1].trimmed_to_sentence is None and result.moments[1].trimmed_from_sentence is None
 
 
-def test_a_trim_that_can_only_land_on_a_dangling_opener_is_not_nudged():
+def test_a_start_trim_that_can_only_land_on_a_dangling_opener_is_flagged_as_it_plays():
     debate = _debate()
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
-    # 0-2 is 34 s; every start that fits (1 or 2) opens on a dangling word, so the trim takes 1.
-    _long_first_turn(debate, [10, 12, 12], ["One.", "And that.", "But so."])
+    # 0-2 is 55 s and sentence 0 alone is over the limit, so no end fits; every start that fits
+    # (1 or 2) opens on a dangling word, so the trim takes 1.
+    _long_first_turn(debate, [31, 12, 12], ["One.", "And that.", "But so."])
     # Turn 0 is OTHER's second clip.
     (_, moments), problems, soft = pick.check(debate, OTHER)
-    assert problems == [] and moments[1].start_sentence == 1
-    # Starting earlier would only be trimmed back: the model is not told to.
-    assert soft == []
+    assert moments[1].start_sentence == 1 and moments[1].trimmed_from_sentence == 0
+    assert len(problems) == 1 and problems[0].startswith("Clip 1, sentences 0-2, runs 55.0 s")
+    # The opener of a clip cut to fit is held against it too: it is what the viewer hears.
+    assert soft == ['Clip 1 opens on "and", which leans on what came before or is filler. Start it on a sentence that opens a thought.']
     # As the first clip it is refused all the same: a newcomer meets the debate on "And that."
     _, problems, _ = pick.check(debate, GOOD)
-    assert problems == [
+    assert problems[1:] == [
         'Clip 0, the reel\'s first clip, opens on sentence 1 (cut to fit from sentence 0), which opens '
         'on "and", a connective or filler. The first clip is where a newcomer meets the debate: start '
         "it on a sentence that begins a thought, or pick another first clip."
@@ -331,18 +345,19 @@ def test_a_trim_that_can_only_land_on_a_dangling_opener_is_not_nudged():
 def test_a_trim_that_would_go_below_the_minimum_reports_the_real_length():
     debate = _debate()
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
-    _long_first_turn(debate, [27, 2, 3])  # 32 s; dropping sentence 0 leaves 5 s
-    _, problems, _ = pick.check(debate, GOOD)
-    assert any("Clip 0 lasts 32.0 s" in p for p in problems), problems
+    # 36 s; sentence 0 alone is over the limit, and dropping it leaves 5 s.
+    _long_first_turn(debate, [31, 2, 3])
+    value, problems, _ = pick.check(debate, GOOD)
+    assert value is None and any("Clip 0 lasts 36.0 s" in p for p in problems), problems
 
 
 def test_a_trim_steps_past_a_dangling_opener_when_a_clean_start_fits():
     debate = _debate()
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
-    # 0-2 is 34 s. Dropping sentence 0 lands on "But", so the trim steps on to sentence 2.
-    _long_first_turn(debate, [10, 12, 12], ["One.", "But that is why.", "It holds."])
+    # 0-2 is 55 s and no end fits. Dropping sentence 0 lands on "But", so the trim steps on to sentence 2.
+    _long_first_turn(debate, [31, 12, 12], ["One.", "But that is why.", "We hold."])
     (_, moments), problems, soft = pick.check(debate, GOOD)
-    assert problems == []
+    assert len(problems) == 1 and "over the 30.0 s limit" in problems[0]
     assert moments[0].start_sentence == 2
     assert not any('opens on "but"' in p for p in soft), soft
 
@@ -572,14 +587,18 @@ def test_a_reel_over_four_clips_at_the_target_is_asked_to_shorten():
     assert any("under 68.0 s" in p for p in pick.check(debate, GOOD)[2])
 
 
-def test_reels_that_pass_go_to_the_judge_as_they_are_not_back_for_a_nudge():
+def test_reels_that_pass_with_soft_problems_are_sent_back_however_many_pass():
     debate = _debate()
     debate.sentences[6].text = "Because it is a state matter."  # both reels have a later clip opening on it
     passed, problems, soft = pick.check_reels(debate, {"reels": [GOOD, OTHER]})
-    assert problems == [] and soft == [] and len(passed) == 2
-    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "x"})
+    assert problems == [] and len(passed) == 2
+    # 12 Nov: reels that passed together were never asked again, so later clips kept "But…" openers.
+    assert any(p.startswith('Reel 0: Clip 2 opens on "because"') for p in soft), soft
+    assert any(p.startswith('Reel 1: Clip 3 opens on "because"') for p in soft), soft
+    # Never fixed: the last answer's reels are judged, as they were.
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"reels": [GOOD, OTHER]}, {"reels": [GOOD, OTHER]}, {"best": 1, "why": "x"})
     result = asyncio.run(pick.pick_moments(debate, client=client))
-    assert (result.attempts, result.candidates, len(client.calls)) == (1, 2, 2)
+    assert (result.attempts, result.candidates, len(client.calls)) == (3, 2, 4)
     # One passing reel with a soft problem is sent back, with the other reels' problems too.
     _, _, soft = pick.check_reels(debate, {"reels": [GOOD, BROKEN]})
     assert any(p.startswith('Reel 0: Clip 2 opens on "because"') for p in soft), soft
@@ -788,7 +807,7 @@ def test_a_first_clip_opening_mid_sentence_or_on_a_connective_is_refused(text, p
         # geo-chat cuts the filler first (story_moments::filler_lead): the viewer hears "We need rules."
         "Um, we need rules.",
         "And we need rules.",
-        "So, it is a state matter.",
+        "So, voter ID is a state matter.",
         "Uh, you know, voter ID is a state matter.",
         "Um. Voter ID is a state matter.",
         "Émilie Durand ran the rolls in Ohio.",
@@ -878,10 +897,10 @@ def test_a_first_clip_opening_on_its_or_yes_is_a_soft_problem_not_refused(text, 
 def test_a_trim_steps_past_a_mid_sentence_start_when_a_clean_start_fits():
     debate = _debate()
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
-    # 0-2 is 34 s. Dropping sentence 0 lands on a run-on, so the trim steps on to sentence 2.
-    _long_first_turn(debate, [10, 12, 12], ["One.", "not just get completely overwhelmed.", "We need rules."])
+    # 0-2 is 55 s and no end fits. Dropping sentence 0 lands on a run-on, so the trim steps on to sentence 2.
+    _long_first_turn(debate, [31, 12, 12], ["One.", "not just get completely overwhelmed.", "We need rules."])
     (_, moments), problems, soft = pick.check(debate, GOOD)
-    assert problems == [] and moments[0].start_sentence == 2
+    assert len(problems) == 1 and moments[0].start_sentence == 2
 
 
 def _status_error(status):
@@ -932,10 +951,10 @@ def test_a_cut_off_with_no_retry_left_keeps_the_last_resort():
 def test_a_trim_with_no_clean_start_takes_a_soft_opener_over_one_clip_1_refuses():
     debate = _debate()
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
-    # 0-2 is 34 s. Sentence 1 runs on and opens on "and"; sentence 2 opens on "It's", soft on clip 1.
-    _long_first_turn(debate, [10, 12, 12], ["One.", "and not just get completely overwhelmed.", "It's time we set rules."])
+    # 0-2 is 55 s and no end fits. Sentence 1 runs on and opens on "and"; sentence 2 opens on "It's", soft on clip 1.
+    _long_first_turn(debate, [31, 12, 12], ["One.", "and not just get completely overwhelmed.", "It's time we set rules."])
     (_, moments), problems, soft = pick.check(debate, GOOD)
-    assert problems == [] and moments[0].start_sentence == 2 and moments[0].trimmed_from_sentence == 0
+    assert len(problems) == 1 and moments[0].start_sentence == 2 and moments[0].trimmed_from_sentence == 0
 
 
 @pytest.mark.parametrize("text", ["1960s America had no voter ID laws.", "10x more people vote by mail now.", "2nd, the rolls are clean."])
@@ -1105,7 +1124,7 @@ def test_a_first_clip_past_its_filler_keeps_the_soft_rule_for_what_is_heard():
 
 def test_a_later_clip_is_nudged_on_what_plays_after_its_filler():
     debate = _debate()
-    debate.sentences[3].text = "And it is a federal problem."  # plays as "It is a federal problem."
+    debate.sentences[3].text = "And federal rules win."  # plays as "Federal rules win."
     assert pick.check(debate, GOOD)[1:] == ([], [])
     debate.sentences[3].text = "And they want it federal."  # plays as "They want it federal."
     _, problems, soft = pick.check(debate, GOOD)
@@ -1115,10 +1134,10 @@ def test_a_later_clip_is_nudged_on_what_plays_after_its_filler():
 def test_a_trim_reads_a_start_past_its_filler_as_clip_1_does():
     debate = _debate()
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
-    # 0-2 is 34 s. Sentence 1 plays as "We need rules.", which clip 1 keeps: the trim takes it.
-    _long_first_turn(debate, [10, 12, 12], ["One.", "Um, we need rules.", "It holds."])
+    # 0-2 is 55 s and no end fits. Sentence 1 plays as "We need rules.", which clip 1 keeps: the trim takes it.
+    _long_first_turn(debate, [31, 12, 12], ["One.", "Um, we need rules.", "It holds."])
     (_, moments), problems, soft = pick.check(debate, GOOD)
-    assert problems == [] and moments[0].start_sentence == 1
+    assert len(problems) == 1 and moments[0].start_sentence == 1
 
 
 def test_an_accented_capital_opens_a_sentence_in_a_cased_transcript():
@@ -1137,3 +1156,248 @@ def test_a_spend_guard_trip_on_a_send_back_keeps_an_acceptable_answer(monkeypatc
     client = _FakeClaude({"reels": [GOOD]})
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert len(client.calls) == 1 and result.attempts == 1 and result.first_clip_problems == []
+
+
+# --- GEO-3691: every clip's opener, split sentences, over-long clips, problems for the judge ----
+
+
+@pytest.mark.parametrize(
+    "text, opener",
+    [
+        # What the 12 Nov preview opened later clips on.
+        ("Though, you know, I've personally been in this scenario before.", "though"),
+        ("For example, my state checks every voter's ID.", "for example"),
+        ("They're working against themselves, and most of these gals agree.", "they're"),
+        ("It needs to be included in the analysis.", "it"),
+        ("That argument falls apart at the border.", "that"),
+        ("Agree so i think i think it seems we agree as a blanket statement.", "agree"),
+        # An answer word with nothing of its own after it.
+        ("Yes.", "yes"),
+        ("Yeah, but it is a federal problem.", "yeah"),
+    ],
+)
+def test_a_later_clip_opening_on_a_word_it_leans_on_is_sent_back(text, opener):
+    debate = _debate()
+    debate.sentences[3].text = text  # GOOD's second clip
+    value, problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and value is not None
+    assert soft == [f'Clip 1 opens on "{opener}", which leans on what came before or is filler. Start it on a sentence that opens a thought.']
+
+
+@pytest.mark.parametrize(
+    "text, hard",
+    [
+        ("Though, you know, voter ID is a state matter.", True),
+        ("For example, my state checks every voter's ID.", True),
+        ("They're working against the states.", True),
+        ("That argument falls apart at the border.", True),
+        ("Agree, voter ID is a state matter.", True),
+        # Often states a position ("It is the death of relationships…"): soft, as "It's" is.
+        ("It is the death of state elections as we know them.", False),
+    ],
+)
+def test_the_new_openers_keep_the_first_clips_rules(text, hard):
+    debate = _debate()
+    debate.sentences[0].text = text
+    value, problems, soft = pick.check(debate, GOOD)
+    assert value is not None
+    assert bool(problems) == hard and bool(soft) != hard, (problems, soft)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Natural answers to the clip before: kept on a later clip.
+        "Yes, voter ID should be federal.",
+        "Yeah, I think that the truth has a threshold and a time limit.",
+        "Agreed, the rolls should be federal.",
+        # Refers to the clip just before by its own words (01a179d7 clip 3).
+        "What... What is problematic to me with that thinking is the road to redemption.",
+        "What is problematic to me with that thinking is the road to redemption.",
+        # A question opens a thought, and so does "To" before a verb or a person.
+        "Where do we draw the line on federal rules?",
+        "To be fair, states run their rolls well.",
+        "To me, this is a federal question.",
+    ],
+)
+def test_an_answer_to_the_clip_before_is_not_held_against_a_later_clip(text):
+    debate = _debate()
+    debate.sentences[3].text = text
+    assert pick.check(debate, GOOD)[1:] == ([], [])
+
+
+def test_yes_still_cannot_open_the_first_clip_cleanly():
+    # The newcomer heard no question: "Yes, …" on clip 1 stays a soft problem, "Yeah, …" a hard one.
+    debate = _debate()
+    debate.sentences[0].text = "Yes, voter ID should be federal."
+    assert pick.check(debate, GOOD)[2]
+    debate.sentences[0].text = "Yeah, I think voter ID should be federal."
+    assert pick.check(debate, GOOD)[1]
+
+
+def test_a_later_clip_starting_mid_sentence_is_sent_back():
+    # 12 Nov: two later clips opened on a lowercase run-on, which only the first clip was checked for.
+    debate = _debate()
+    debate.sentences[3].text = "not just get completely overwhelmed by a society."
+    value, problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and value is not None
+    assert soft == ["Clip 1 starts mid-sentence (its first sentence opens on a lowercase word). Start it on a sentence that opens a thought."]
+
+
+@pytest.mark.parametrize(
+    "before, text",
+    [
+        # The 12 Nov split errors.
+        ("Policy is how we got in this situation in the first place.", "Where corporations argued for sugar in soft drinks."),
+        ("There is a difference between migrants and cartel members.", "And that the border security can serve a useful purpose."),
+        ("That is how it feels in my head.", "To the, like, to the idea of a human relationship."),
+        # A sentence the transcript ended mid-phrase: the next one is its second half.
+        ("I think legal immigration is a.", "National security risk for everyone."),
+        ("We should ask whether.", "States can run their own rolls."),
+    ],
+)
+def test_a_sentence_the_transcript_split_off_the_one_before_is_marked_and_not_started_on(before, text):
+    debate = _debate()
+    debate.sentences[3].text, debate.sentences[4].text = before, text  # turn 1
+    assert pick.continues(debate, 4) and not pick.continues(debate, 3)
+    assert f"[4] 20.0-24.8 s (4.8 s, second half of a split sentence): {text}" in pick.render(debate)
+    assert "[3] 15.0-19.8 s (4.8 s): " in pick.render(debate)
+    # A later clip starting there is sent back, softly.
+    later = _with(1, start_sentence=4)
+    value, problems, soft = pick.check(debate, later)
+    assert problems == [] and value is not None
+    assert soft == ["Clip 1 starts on the second half of a split sentence: the transcript broke a sentence in two there. Start it on a sentence that opens a thought."]
+    # The first clip may not start there: a last resort at best.
+    for k, sentence in enumerate((before, text)):
+        debate.sentences[k].text = sentence
+    value, problems, _ = pick.check(debate, _with(0, start_sentence=1))
+    assert value is not None
+    assert problems == [
+        "Clip 0, the reel's first clip, opens on sentence 1, which is the second half of a split sentence: "
+        "the transcript broke a sentence in two there. The first clip is where a newcomer meets the debate: "
+        "start it on a sentence that begins a thought, or pick another first clip."
+    ]
+
+
+@pytest.mark.parametrize(
+    "before, text",
+    [
+        ("Policy got us here.", "Where do we draw the line?"),
+        ("Policy got us here.", "That argument falls apart."),
+        ("Policy got us here.", "To be fair, states run it well."),
+        ("Policy got us here.", "To me, it is federal."),
+        ("Policy got us here.", "Federal rules win."),
+        # Only within a turn: the other speaker's "the." is not this sentence's first half.
+        (None, "Federal rules win."),
+    ],
+)
+def test_a_sentence_that_opens_a_thought_is_not_marked_split(before, text):
+    debate = _debate()
+    if before is None:
+        debate.sentences[2].text = "We need the."  # turn 0, speaker 1
+        k = 3  # turn 1's first sentence
+    else:
+        debate.sentences[3].text = before
+        k = 4
+    debate.sentences[k].text = text
+    assert not pick.continues(debate, k)
+    assert "second half of a split sentence" not in pick.render(debate)
+
+
+def test_a_clip_over_the_limit_is_cut_from_its_end_only_where_it_ends_a_whole_sentence():
+    debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
+    texts = ["Voter ID is a state matter.", "Policy got us here.", "Where corporations argued for sugar."]
+    # 0-2 is 35.8 s. Ending at 1 would cut a sentence in half (2 continues it); ending at 0 keeps
+    # a whole sentence and the setup, so the last resort ends there.
+    _long_first_turn(debate, [12, 12, 11.8], texts)
+    (_, moments), problems, _ = pick.check(debate, GOOD)
+    assert len(problems) == 1 and "over the 30.0 s limit" in problems[0]
+    assert (moments[0].start_sentence, moments[0].end_sentence, moments[0].trimmed_to_sentence) == (0, 0, 2)
+    # Sentence 0 alone is under the minimum: no clean end fits, so it drops sentence 0, as before.
+    _long_first_turn(debate, [5, 14, 11.8], texts)
+    (_, moments), _, _ = pick.check(debate, GOOD)
+    assert (moments[0].start_sentence, moments[0].end_sentence, moments[0].trimmed_from_sentence) == (1, 2, 0)
+    assert moments[0].trimmed_to_sentence is None
+    # With no start that fits either, the end is cut anyway: a reel beats none.
+    _long_first_turn(debate, [5, 20, 31], texts)
+    assert pick.fit_to_limit(debate, 0, 2) == (0, 1)
+
+
+def test_a_reel_with_only_soft_problems_beats_one_with_a_clip_cut_to_fit():
+    debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
+    _long_first_turn(debate, [12, 12, 11.8])  # GOOD's first clip runs 35.8 s
+    debate.sentences[6].text = "Because it is a state matter."  # GOOD's third clip opens on it
+    soft = _with(0, end_sentence=1)  # fits; still opens clip 2 on "because"
+    # An over-long reel first, then soft ones: the soft one is kept, nothing cut.
+    client = _FakeClaude(GOOD, soft, soft)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 3 and all(m.trimmed_to_sentence is None for m in result.moments)
+    # A soft one first, then over-long ones: the soft one is still kept.
+    client = _FakeClaude(soft, GOOD, GOOD)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 1 and result.moments[0].end_sentence == 1
+
+
+def test_a_reel_whose_only_problems_are_later_openers_is_kept_when_never_fixed():
+    debate = _debate()
+    debate.sentences[3].text = "But it is a federal problem."
+    client = _FakeClaude({"reels": [GOOD]}, {"reels": [GOOD]}, {"reels": [GOOD]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 3 and len(result.moments) == 4 and result.first_clip_problems == []
+    # Each send-back carried the opener.
+    assert all('Clip 1 opens on "but"' in call["messages"][-1]["content"] for call in client.calls[1:])
+
+
+def test_the_judge_sees_each_reels_problems_by_clip_as_the_viewer_hears_them():
+    debate = _debate()
+    debate.sentences[6].text = "Because it is a state matter."  # GOOD's clip 3, OTHER's clip 4
+    debate.sentences[9].text = "not just get completely overwhelmed."  # OTHER's clip 3
+    reels = [pick.check(debate, GOOD)[0], pick.check(debate, OTHER)[0]]
+    judged = pick.render_for_judge(debate, reels)
+    good, other = judged.split("## Reel 1")
+    assert 'Problems found:\n- Clip 3 opens on "because", which leans on something the viewer did not hear or is filler.' in good
+    assert "- Clip 3 starts mid-sentence." in other and '- Clip 4 opens on "because"' in other
+    # Still the viewer's view: no claims, no story, no sentence numbers.
+    assert "Federal elections need" not in judged and "States suffice" not in judged
+    assert not re.search(r"sentences? \d", judged)
+    # A clean reel has nothing listed.
+    assert "Problems found" not in pick.render_for_judge(_debate(), [pick.check(_debate(), GOOD)[0]])
+
+
+def test_the_judge_sees_a_clip_cut_to_fit_and_a_reel_over_its_length():
+    debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
+    _long_first_turn(debate, [12, 12, 11.8])
+    judged = pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
+    assert "- Clip 1 its ending was cut to fit the length limit, so it may stop before its point lands." in judged
+    debate = _debate()
+    debate.clip_max_ms = 30_000
+    _clips_of(debate, 18.3)  # 73.2 s, over 4 x 18 s
+    assert "- The reel runs over 72.0 s." in pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
+
+
+def test_flawed_reels_reach_the_judge_with_their_problems_when_none_is_clean():
+    debate = _debate()
+    debate.sentences[6].text = "Because it is a state matter."  # in both reels
+    answer = {"reels": [GOOD, OTHER]}
+    client = _FakeClaude(answer, answer, answer, {"best": 0, "why": "x"})
+    asyncio.run(pick.pick_moments(debate, client=client))
+    assert "Problems found:" in client.calls[3]["messages"][0]["content"][0]["text"]
+
+
+def test_the_prompts_tell_of_the_split_mark_and_the_problems_listed():
+    from src.config.prompts.debates_pick_moments_prompt import (
+        DEBATES_PICK_MOMENTS_JUDGE_SYSTEM as judge,
+        DEBATES_PICK_MOMENTS_SYSTEM as picker,
+    )
+
+    assert f'marked "{pick.SPLIT_MARK}"' in picker
+    assert "A clip over the hard limit is sent back, not cut for you." in picker
+    assert '"Problems found"' in judge
+    # The picker's example answer opener must itself pass the check.
+    assert "Yes, the numbers show it" in picker
+    debate = _debate()
+    debate.sentences[3].text = "Yes, the numbers show it clearly."
+    assert pick.check(debate, GOOD)[2] == []

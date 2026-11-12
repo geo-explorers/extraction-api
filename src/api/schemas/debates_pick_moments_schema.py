@@ -115,8 +115,15 @@ class PickedMoment(BaseModel):
     trimmed_from_sentence: Optional[int] = Field(
         default=None,
         description="The model picked this clip from an earlier sentence, over the hard limit; it "
-        "was shortened from its start to fit. claim, claim_fit, role and why were given for the "
-        "longer clip. The model is not asked again about a trim.",
+        "was shortened from its start to fit, because no earlier end fitted cleanly. claim, "
+        "claim_fit, role and why were given for the longer clip. Only on a reel kept as a last "
+        "resort: an over-long clip is sent back to be picked again.",
+    )
+    trimmed_to_sentence: Optional[int] = Field(
+        default=None,
+        description="The model picked this clip to a later sentence, over the hard limit; it was "
+        "shortened from its end to fit, keeping its setup. claim, claim_fit, role and why were "
+        "given for the longer clip. Only on a reel kept as a last resort.",
     )
 
 
@@ -125,7 +132,7 @@ class DebatesPickMomentsResult(BaseModel):
     moments: List[PickedMoment] = Field(description="Exactly four, in play order, alternating speakers.")
     provider: str
     model_used: str
-    attempts: int = Field(description="Which answer the reel came from (1 for the first): the one that passed every rule, or for a last resort (first_clip_problems) the latest that broke only the first clip's rules.")
+    attempts: int = Field(description="Which answer the reel came from (1 for the first): the one that passed every rule, or for a last resort the latest that broke only the first clip's opening rules (first_clip_problems) or ran a clip over the limit (cut to fit: trimmed_to_sentence, trimmed_from_sentence).")
     candidates: int = Field(default=1, description="How many reels the pick was made from: those with no soft problem when any passed, else all that passed. More than one means the judge picked.")
     judge_why: Optional[str] = Field(default=None, description="Why the judge picked this reel, when it judged.")
     first_clip_problems: List[str] = Field(

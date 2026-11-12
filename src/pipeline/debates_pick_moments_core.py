@@ -2,23 +2,30 @@
 its reels must keep, how the best reel is judged, and how it becomes four moments.
 
 Claude offers up to three candidate reels in one answer. Each is checked on its own
-(`check`); the answer is sent back only when none passes the hard rules. When more
-than one passes, a second call judges them as a viewer meets them, the clips' words
-alone, and its pick is returned (`judge`).
+(`check`); the answer is sent back when none passes the hard rules, or when every reel
+that passes has a soft problem (`check_reels`). When more than one passes, a second call
+judges them as a viewer meets them, the clips' words alone with the problems found in
+how they play, and its pick is returned (`judge`).
 
 Every rule the prompt states that can be checked mechanically is checked here:
 four clips, alternating speakers, whole sentences from one turn, length bounds,
 no overlap, each clip linked to a different claim of its own speaker, and an
 answer playing after what it answers. A broken answer is sent back with its
 problems (claude_json.ask_json), so Claude fixes it rather than the run failing.
-A clip over the hard limit is first shortened from its start to fit (trim_to_fit) and
-marked trimmed_from_sentence, rather than refused.
+A clip over the hard limit is sent back with how long it runs to each sentence
+(over_limit_problem); cut to fit, from its end first (fit_to_limit), its reel is a
+last resort.
 
 The first clip has hard rules of its own (`first_clip_problems`): it starts a sentence
-and a thought, not mid-sentence, on a connective or on filler. Every opener rule reads a
-clip as the viewer hears it, past the filler geo-chat cuts before it plays (`heard_start`). A reel that breaks only
-those is sent back like any other, but kept as a last resort when no answer has a reel
-that keeps every rule, with the rules it breaks on the result (`first_clip_problems`).
+and a thought, not mid-sentence, on the second half of a sentence the transcript split
+(`split_start`), on a connective or on filler. Later clips keep the same rules softly
+(`later_clip_problems`): a reel that breaks them is sent back, but kept over no reel; an
+answer that goes on to a thought ("Yes, the rolls are clean.") is fine there. Every opener
+rule reads a clip as the viewer hears it, past the filler geo-chat cuts before it plays
+(`heard_start`), and whether or not it was cut to fit. A reel that breaks only the first
+clip's rules or ran a clip over the limit is sent back like any other, but kept as a last
+resort when no answer has a reel that keeps every hard rule, with the rules its first clip
+breaks on the result (`first_clip_problems`) and its cut clips marked.
 
 Both calls answer under a JSON schema (structured outputs), so the reply is the JSON
 alone (`REELS_SCHEMA`, `JUDGE_SCHEMA`).
@@ -72,19 +79,43 @@ SO_ADVERB_NEXT = ("far", "much", "many", "long", "few", "little", "often", "call
 # The filler stays when fewer than this many words of its sentence would be left: "So what now?".
 FILLER_KEEP_WORDS = 3
 # A clip whose heard words open on one of these leans on something the viewer did not hear, or is
-# filler geo-chat kept (FILLER_KEEP_WORDS). The prompt forbids it; the check asks again (a soft rule:
-# the last answer is kept regardless). For the first clip it is a hard rule (first_clip_problems),
-# except FIRST_CLIP_SOFT_OPENERS.
+# filler geo-chat kept (FILLER_KEEP_WORDS). The prompt forbids it; the check sends it back (a soft
+# rule: a reel without it is taken first, and the last answer is kept regardless). For the first
+# clip it is a hard rule (first_clip_problems), except FIRST_CLIP_SOFT_OPENERS. The second line is
+# what the 12 Nov preview (GEO-3691) opened later clips on: "Though, you know…", a pronoun the viewer
+# never heard introduced ("It needs to be included…", "they're working against themselves"), "That…".
 DANGLING_OPENERS = FILLER + (
     "but", "also", "because", "yeah", "yes", "okay", "ok", "like",
     "that's", "they", "it's", "which", "then", "plus", "or",
+    "though", "they're", "it", "that", "agree", "agreed",
 )
 # Openers that often state a position rather than lean on what came before ("It's time we…",
-# "Yes, voter ID should be federal"): soft on the first clip too, as on later ones.
-FIRST_CLIP_SOFT_OPENERS = ("it's", "yes")
+# "It is the death of relationships…", "Yes, voter ID should be federal"): soft on the first clip too,
+# as on later ones.
+FIRST_CLIP_SOFT_OPENERS = ("it's", "it", "yes")
+# Words that answer the clip before ("Yes, the rolls are clean."): on a later clip they open a
+# thought when the sentence goes on to one of its own (_answers_on). "Agree so i think…" does not.
+ANSWER_OPENERS = ("yes", "yeah", "agree", "agreed")
 # Two-word openers, each with whether it counts only when set off by a comma: "I mean, …" leans on
-# what came before; "You know, …" is filler when geo-chat keeps it ("You know, right?").
-DANGLING_PAIRS = {("i", "mean"): False, ("you", "know"): True}
+# what came before; "You know, …" is filler when geo-chat keeps it ("You know, right?"); an example
+# comes before its point.
+DANGLING_PAIRS = {("i", "mean"): False, ("you", "know"): True, ("for", "example"): False, ("for", "instance"): False}
+# The transcript sometimes breaks one sentence in two and capitalises the second half: Whisper put a
+# full stop mid-sentence ("…in the first place. Where corporations argued…"). Such a half is told
+# apart by how it opens: one of these words, followed by the words that make it a clause of the
+# sentence before rather than a sentence of its own (split_start).
+# "Where corporations argued…", but not a question: "Where do we draw the line?".
+WHERE_QUESTION_NEXT = ("is", "are", "was", "were", "do", "does", "did", "can", "could", "would", "should", "will", "has", "have", "had", "else")
+# "That the border security can serve…": "that" before its clause's subject, not "That argument…".
+THAT_CLAUSE_NEXT = (
+    "the", "a", "an", "we", "they", "he", "she", "i", "you", "there", "this", "these", "those",
+    "our", "their", "his", "my", "your", "it", "if", "when", "people",
+)
+# "To the, like, to the idea of…": "to" before a noun phrase, not "To be fair" or "To me".
+TO_PHRASE_NEXT = ("the", "a", "an")
+# The other half of the same mistake: a sentence that ends on one of these words stopped mid-phrase
+# ("…legal immigration is a."), so the next sentence of its turn is its second half.
+OPEN_ENDS = ("a", "an", "the", "and", "or", "but", "my", "your", "our", "their", "because", "if", "than", "whether")
 # A transcript is cased (Whisper's is) when at least this share of its sentences opens on a capital.
 # Only then does a sentence opening on a lowercase letter say it starts mid-sentence.
 CASED_SHARE = 0.5
@@ -191,8 +222,13 @@ def render(input: DebatesPickMomentsInput) -> str:
         if s.turn != turn:
             turn = s.turn
             lines.append(f"\n## Turn {s.turn}: Speaker {s.speaker} ({names[s.speaker]})")
-        lines.append(f"[{i}] {_seconds(s.start_ms)}-{_seconds(s.end_ms)} s ({_seconds(s.end_ms - s.start_ms)} s): {s.text.strip()}")
+        split = f", {SPLIT_MARK}" if continues(input, i) else ""
+        lines.append(f"[{i}] {_seconds(s.start_ms)}-{_seconds(s.end_ms)} s ({_seconds(s.end_ms - s.start_ms)} s{split}): {s.text.strip()}")
     return "\n".join(lines)
+
+
+# How the picker's transcript marks a sentence that continues the one before (continues).
+SPLIT_MARK = "second half of a split sentence"
 
 
 def _bare(word: str) -> str:
@@ -298,26 +334,69 @@ def opens_mid_sentence(sentence) -> bool:
     return _lead_char(word).isalpha() and letters.islower()
 
 
-def _opening(input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool) -> Tuple[bool, Optional[str]]:
+def split_start(input: DebatesPickMomentsInput, k: int, words: List[str]) -> bool:
+    """Whether sentence `k`, opening on `words`, is the second half of a sentence the transcript
+    broke in two: the sentence before it in its turn ends mid-phrase (OPEN_ENDS), or `words` open
+    as a clause of the sentence before ("Where corporations argued…", "That the border security
+    can serve…", "To the idea of…"). A clip that starts there starts mid-sentence, though the
+    transcript gave it a capital."""
+    sentences = input.sentences
+    if k > 0 and sentences[k - 1].turn == sentences[k].turn:
+        last = sentences[k - 1].text.split()[-1:]
+        if last and _bare(last[0]) in OPEN_ENDS:
+            return True
+    first, following = (_bare(w) for w in (words + ["", ""])[:2])
+    if first == "where":
+        return following not in WHERE_QUESTION_NEXT
+    return (first == "that" and following in THAT_CLAUSE_NEXT) or (first == "to" and following in TO_PHRASE_NEXT)
+
+
+def continues(input: DebatesPickMomentsInput, k: int) -> bool:
+    """Whether sentence `k` is the second half of a split sentence (split_start), read past the
+    filler it opens on as geo-chat would cut it: what the picker's transcript marks (SPLIT_MARK)."""
+    words = input.sentences[k].text.split()
+    return split_start(input, k, words[filler_lead(words):])
+
+
+def _answers_on(words: List[str]) -> bool:
+    """Whether `words`, opening on an answer word ("Yes, …"), go on in the same sentence to a
+    thought of their own: at least FILLER_KEEP_WORDS more words that open on no dangling word or
+    filler. "Yes, the rolls are clean." does; "Yes.", "Yeah, but…" and "Agree so i think…" don't."""
+    rest = words[1:]
+    return len(rest) >= FILLER_KEEP_WORDS and _opener(rest) is None
+
+
+def _opening(
+    input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool, later: bool = False
+) -> Tuple[bool, bool, Optional[str]]:
     """How a clip of sentences `start`-`end` opens, as the viewer hears it (heard_start): whether it
-    starts mid-sentence (in a cased transcript), and the dangling word or filler it opens on."""
+    starts mid-sentence (in a cased transcript), whether it starts on the second half of a split
+    sentence (split_start), and otherwise the dangling word or filler it opens on. A `later` clip
+    (not the first) may answer the one before it: "Yes, the rolls are clean." (ANSWER_OPENERS)."""
     k, words = heard_start(input, start, end)
-    return is_cased and opens_mid_sentence(input.sentences[k]), _opener(words)
+    mid = is_cased and opens_mid_sentence(input.sentences[k])
+    if split_start(input, k, words):
+        return mid, True, None
+    opener = _opener(words)
+    if later and opener in ANSWER_OPENERS and _answers_on(words):
+        opener = None
+    return mid, False, opener
 
 
 def _start_rank(input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool) -> int:
     """How well sentence `start` opens a clip ending at `end`, best first: clean (0); only a soft
     opener, which the first clip may keep (1); breaking the first clip's rules (2)."""
-    mid, opener = _opening(input, start, end, is_cased)
-    if mid or (opener and opener not in FIRST_CLIP_SOFT_OPENERS):
+    mid, split, opener = _opening(input, start, end, is_cased)
+    if mid or split or (opener and opener not in FIRST_CLIP_SOFT_OPENERS):
         return 2
     return 1 if opener else 0
 
 
 def first_clip_problems(input: DebatesPickMomentsInput, start: int, end: int, picked_start: int) -> List[str]:
     """Why a first clip of sentences `start`-`end` cannot open the reel: what the viewer hears of it
-    (heard_start) starts mid-sentence, or on a connective or filler. A newcomer meets the debate
-    there. `picked_start` is where the model started it, when a trim moved the start."""
+    (heard_start) starts mid-sentence, on the second half of a split sentence, or on a connective or
+    filler. A newcomer meets the debate there. `picked_start` is where the model started it, when a
+    trim moved the start."""
     where = (
         f"Clip 0, the reel's first clip, opens on sentence {start}"
         + (f" (cut to fit from sentence {picked_start})" if start != picked_start else "")
@@ -327,11 +406,35 @@ def first_clip_problems(input: DebatesPickMomentsInput, start: int, end: int, pi
         "thought, or pick another first clip."
     )
     problems = []
-    mid, opener = _opening(input, start, end, cased(input))
+    mid, split, opener = _opening(input, start, end, cased(input))
     if mid:
         problems.append(f"{where}, which starts mid-sentence (it opens on a lowercase word). {fix}")
+    if split:
+        problems.append(f"{where}, which is the {SPLIT_MARK}: the transcript broke a sentence in two there. {fix}")
     if opener and opener not in FIRST_CLIP_SOFT_OPENERS:
         problems.append(f'{where}, which opens on "{opener}", a connective or filler. {fix}')
+    return problems
+
+
+def later_clip_problems(input: DebatesPickMomentsInput, position: int, start: int, end: int, is_cased: bool) -> List[str]:
+    """How a clip of sentences `start`-`end` at `position` opens badly, short of the first clip's
+    hard rules: on a soft opener for the first clip; for a later one, mid-sentence, on the second
+    half of a split sentence, or on a dangling word or filler, except an answer that goes on to a
+    thought ("Yes, the rolls are clean."). Soft: sent back for a fix, and a reel without them is
+    taken first, but a reel with them still beats none."""
+    name = f"Clip {position}"
+    fix = "Start it on a sentence that opens a thought."
+    mid, split, opener = _opening(input, start, end, is_cased, later=position > 0)
+    if position == 0:
+        mid = split = False
+        opener = opener if opener in FIRST_CLIP_SOFT_OPENERS else None
+    problems = []
+    if mid:
+        problems.append(f"{name} starts mid-sentence (its first sentence opens on a lowercase word). {fix}")
+    if split:
+        problems.append(f"{name} starts on the {SPLIT_MARK}: the transcript broke a sentence in two there. {fix}")
+    if opener:
+        problems.append(f'{name} opens on "{opener}", which leans on what came before or is filler. {fix}')
     return problems
 
 
@@ -341,8 +444,8 @@ def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optiona
     mid-sentence, so the trim never lands on "But ..." when a cleaner start fits. With no clean
     start, one with only a soft opener ("It's ...") beats one the first clip may not open on
     (_start_rank, read as first_clip_problems reads it). `None` when no start leaves it within the
-    limits, so the clip is reported at the length the model picked. A clip within the limit is
-    left where it starts."""
+    limits. A clip within the limit is left where it starts. The last way to fit a clip
+    (fit_to_limit): it drops the setup the clip's story leans on."""
     sentences = input.sentences
     length = lambda first: sentences[end].end_ms - sentences[first].start_ms
     if length(start) <= input.clip_max_ms:
@@ -359,6 +462,43 @@ def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optiona
     return min(fitting, key=lambda first: _start_rank(input, first, end, is_cased))
 
 
+def fit_to_limit(input: DebatesPickMomentsInput, start: int, end: int) -> Optional[Tuple[int, int]]:
+    """The sentences a clip of `start`-`end` over the hard limit keeps once cut to fit, for a reel
+    kept as a last resort: the latest end that fits where the clip still ends on a whole sentence
+    (the next one is not its second half, split_start), so its setup stays; else the start
+    trim_to_fit picks; else the latest end that fits. `None` when nothing fits; a clip within the
+    limit keeps every sentence. Cutting the start lost the setup in 6 of 36 checkable clips of the
+    12 Nov preview (GEO-3691), so it comes after a clean end."""
+    sentences = input.sentences
+    length = lambda first, last: sentences[last].end_ms - sentences[first].start_ms
+    if length(start, end) <= input.clip_max_ms:
+        return start, end
+    ends = [last for last in range(end - 1, start - 1, -1) if input.clip_min_ms <= length(start, last) <= input.clip_max_ms]
+    clean = [last for last in ends if not continues(input, last + 1)]
+    if clean:
+        return start, clean[0]
+    first = trim_to_fit(input, start, end)
+    if first is not None:
+        return first, end
+    return (start, ends[0]) if ends else None
+
+
+def over_limit_problem(input: DebatesPickMomentsInput, name: str, start: int, end: int) -> str:
+    """What a clip over the hard limit is sent back with: how long it runs to each of its
+    sentences, so the next pick can end (or start) where it fits."""
+    sentences = input.sentences
+    runs = ", ".join(
+        f"{_seconds(sentences[last].end_ms - sentences[start].start_ms)} s to sentence {last}"
+        for last in range(start, end + 1)
+    )
+    return (
+        f"{name}, sentences {start}-{end}, runs {_seconds(sentences[end].end_ms - sentences[start].start_ms)} s, "
+        f"over the {_seconds(input.clip_max_ms)} s limit. From sentence {start} it runs {runs}. End it "
+        "earlier, after a sentence where its point has landed, or start it later on a sentence that "
+        f"opens a thought, to run {_seconds(input.clip_min_ms)}-{_seconds(input.clip_max_ms)} s."
+    )
+
+
 def _int(value: Any) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
@@ -367,14 +507,17 @@ def check(
     input: DebatesPickMomentsInput, answer: Any
 ) -> Tuple[Optional[Tuple[str, List[PickedMoment]]], List[str], List[str]]:
     """The answer as (story, moments), its problems, and its soft problems. A reel whose only
-    problems are its first clip's (first_clip_problems) comes back with them: refused, but usable
-    as a last resort."""
+    problems are its first clip's opening (first_clip_problems) or clips over the hard limit
+    (over_limit_problem) comes back with them, those clips cut to fit (fit_to_limit): refused, but
+    usable as a last resort."""
     if not isinstance(answer, dict) or not isinstance(answer.get("moments"), list):
         return None, ['The answer needs a "moments" list.'], []
     rows = answer["moments"]
     problems: List[str] = []
-    opening: List[str] = []
+    # Hard, but the reel is still a last resort with them.
+    fixable: List[str] = []
     soft: List[str] = []
+    is_cased = cased(input)
     if len(rows) != MOMENTS:
         problems.append(f"There are {len(rows)} clips; there must be exactly {MOMENTS}.")
     claims = {c.index: c for c in input.claims}
@@ -400,24 +543,21 @@ def check(
         if len({s.turn for s in run}) != 1:
             problems.append(f"{name}: sentences {start}-{end} span more than one turn.")
             continue
-        # A trim is final: it is recorded on the moment (trimmed_from_sentence), not sent back,
-        # since a model content with it would send the same pick and be trimmed again. Nor is
-        # the opener of a trimmed clip held against it: the model did not choose that start,
-        # and starting earlier only makes the clip too long to keep.
-        picked_start = start
-        trimmed = trim_to_fit(input, start, end)
-        start = start if trimmed is None else trimmed
+        # A clip over the limit is sent back with how long it runs to each sentence, so the model
+        # picks the stretch itself; the 12 Nov preview's trims from the start lost the setup. Cut
+        # to fit (fit_to_limit, recorded on the moment), the reel is a last resort. One that
+        # cannot be cut to fit is reported at the length the model picked.
+        picked_start, picked_end = start, end
+        fit = fit_to_limit(input, start, end)
+        if fit is not None and fit != (start, end):
+            fixable.append(over_limit_problem(input, name, start, end))
+            start, end = fit
         run = sentences[start : end + 1]
-        # Read past the filler geo-chat cuts before the clip plays, as the first clip's rules are.
-        _, opener = _opening(input, start, end, False)
+        # Every opener rule reads the clip as it plays, cut to fit or not, past the filler geo-chat
+        # cuts: the first clip's are hard (a newcomer meets the debate there), the rest soft.
         if position == 0:
-            # Hard, trimmed or not: whoever chose the start, the newcomer hears it first.
-            opening = first_clip_problems(input, start, end, picked_start)
-        if start == picked_start and opener and (position > 0 or opener in FIRST_CLIP_SOFT_OPENERS):
-            soft.append(
-                f'{name} opens on "{opener}", which leans on what came before or is filler. '
-                "Start it on a sentence that opens a thought."
-            )
+            fixable += first_clip_problems(input, start, end, picked_start)
+        soft += later_clip_problems(input, position, start, end, is_cased)
         start_ms, end_ms = run[0].start_ms, run[-1].end_ms
         length = end_ms - start_ms
         if not input.clip_min_ms <= length <= input.clip_max_ms:
@@ -449,6 +589,7 @@ def check(
                 answers=answers,
                 why=str(row.get("why") or "")[:500],
                 trimmed_from_sentence=picked_start if start != picked_start else None,
+                trimmed_to_sentence=picked_end if end != picked_end else None,
             )
         )
     if len(moments) == len(rows) == MOMENTS:
@@ -478,8 +619,8 @@ def check(
         )
     story = answer.get("story") if isinstance(answer.get("story"), str) else ""
     if problems:
-        return None, problems + opening, soft
-    return (named(input, story), moments), opening, soft
+        return None, problems + fixable, soft
+    return (named(input, story), moments), fixable, soft
 
 
 def named(input: DebatesPickMomentsInput, story: str) -> str:
@@ -494,7 +635,7 @@ def named(input: DebatesPickMomentsInput, story: str) -> str:
 
 Reel = Tuple[str, List[PickedMoment]]
 # A candidate reel that passed, with its soft problems; or, as a last resort, one that broke only
-# its first clip's rules, with those.
+# its first clip's opening rules or ran a clip over the limit (cut to fit), with those.
 Candidate = Tuple[Reel, List[str]]
 
 
@@ -502,14 +643,18 @@ def check_reels(
     input: DebatesPickMomentsInput, answer: Any
 ) -> Tuple[Optional[List[Candidate]], List[str], List[str]]:
     """The candidate reels that keep every hard rule, each with its soft problems; the answer's
-    problems when none does; and, when only one reel passed and it has soft problems, those and
+    problems when none does; and, when every reel that passed has a soft problem, all of those and
     the other reels' problems.
-    With two or more passing, the judge weighs them as they are: sending them back for a soft
-    nudge could return fewer.
 
-    When none passes, the reels that broke only their first clip's rules come back with the
-    problems, each with its first-clip problems: the answer is sent back, but they are a last
-    resort (claude_json.ask_json).
+    A reel with no soft problem is taken without a send-back (pick_moments judges only those). When
+    every passing reel has one (a later clip opening on "But…", a reel over its length), the answer
+    is sent back to fix them, however many passed: in the 12 Nov preview about 17 clips past the
+    first opened mid-thought, and reels that passed together were never asked again. ask_json
+    keeps the answer regardless, so a send-back that comes back worse costs nothing.
+
+    When none passes, the reels whose only problems are fixable (their first clip's opening, a clip
+    cut to fit) come back with the problems, each with its own: the answer is sent back, but they
+    are a last resort (claude_json.ask_json).
 
     A single reel (an answer in the old shape, {"moments": ...}) is one candidate."""
     if isinstance(answer, dict) and isinstance(answer.get("reels"), list):
@@ -536,23 +681,53 @@ def check_reels(
         softs += [label + p for p in soft]
     if not passed:
         return (last_resort or None), problems, []
-    # One reel passed with a soft problem: it goes back with the others' problems too, so the next
-    # answer can fix them as well as improve it.
-    return passed, [], (softs + problems if len(passed) == 1 and softs else [])
+    if any(not soft for _, soft in passed):
+        return passed, [], []
+    # Every reel that passed has a soft problem: they go back with the others' problems too, so the
+    # next answer can fix them as well as improve them.
+    return passed, [], softs + problems
+
+
+def clip_flaws(input: DebatesPickMomentsInput, position: int, moment: PickedMoment, is_cased: bool) -> List[str]:
+    """What the checks found wrong with a clip at `position`, as the viewer hears it: the soft
+    problems (later_clip_problems) and the hard ones a last resort keeps (first_clip_problems, a
+    cut to fit), in the judge's words. Each is how the clip plays, not what the picker meant."""
+    mid, split, opener = _opening(input, moment.start_sentence, moment.end_sentence, is_cased, later=position > 0)
+    flaws = []
+    if mid:
+        flaws.append("starts mid-sentence")
+    if split:
+        flaws.append("starts halfway through a sentence")
+    if opener:
+        flaws.append(f'opens on "{opener}", which leans on something the viewer did not hear or is filler')
+    if moment.trimmed_from_sentence is not None:
+        flaws.append("its opening was cut to fit the length limit, so it may lack its setup")
+    if moment.trimmed_to_sentence is not None:
+        flaws.append("its ending was cut to fit the length limit, so it may stop before its point lands")
+    return flaws
 
 
 def render_for_judge(input: DebatesPickMomentsInput, reels: List[Reel]) -> str:
     """The reels as a viewer meets them: the motion, who speaks for which side, and each clip's
-    words as heard, past the filler geo-chat cuts (heard_text), and its length as picked. No
-    transcript, no claims, no story: the judge sees what the viewer sees."""
+    words as heard, past the filler geo-chat cuts (heard_text), and its length as picked. Under a
+    reel, the problems the checks found in how its clips play (clip_flaws), so a clean reel is
+    preferred over one that reads as well but plays worse. No transcript, no claims, no story: the
+    judge sees what the viewer sees."""
     names = short_names(input)
+    is_cased = cased(input)
     lines = [f"Motion: {input.title}", ""]
     lines += [f"{names[s.slot]}{_side(s)}" for s in input.speakers]
     for number, (_, moments) in enumerate(reels):
         lines += ["", f"## Reel {number} ({_seconds(reel_ms(moments))} s)"]
+        flaws = []
         for position, m in enumerate(moments):
             words = heard_text(input, m.start_sentence, m.end_sentence)
             lines.append(f"Clip {position + 1}, {names[m.speaker]}, {_seconds(m.end_ms - m.start_ms)} s: {words}")
+            flaws += [f"- Clip {position + 1} {flaw}." for flaw in clip_flaws(input, position, m, is_cased)]
+        if reel_ms(moments) > reel_max_ms(input):
+            flaws.append(f"- The reel runs over {_seconds(reel_max_ms(input))} s.")
+        if flaws:
+            lines += ["Problems found:"] + flaws
     return "\n".join(lines)
 
 
@@ -598,8 +773,9 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
         schema=REELS_SCHEMA,
         cut_off_retries=CUT_OFF_RETRIES,
     )
-    # Judged among the reels with no soft problem when there are any, else among all that passed.
-    # (Last-resort reels all carry their first-clip problems, so they are judged among themselves.)
+    # Judged among the reels with no soft problem when there are any, else among all that passed,
+    # with their problems shown (render_for_judge). (Last-resort reels all carry their fixable
+    # problems, so they are judged among themselves.)
     clean = [(reel, soft) for reel, soft in passed if not soft]
     candidates = clean or passed
     best, why = (0, "")
@@ -612,6 +788,9 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
     broken = first_clip_problems(input, first.start_sentence, first.end_sentence, picked)
     if broken:
         logger.warning(f"{TASK}: no reel kept the first clip's rules; kept one that breaks them: {broken}")
+    cut = [i for i, m in enumerate(moments) if m.trimmed_from_sentence is not None or m.trimmed_to_sentence is not None]
+    if cut:
+        logger.warning(f"{TASK}: no reel kept every clip within the limit; kept one with clips {cut} cut to fit")
     return DebatesPickMomentsResult(
         story=story,
         moments=moments,
@@ -631,13 +810,18 @@ __all__ = [
     "TASK",
     "check",
     "check_reels",
+    "clip_flaws",
+    "continues",
     "filler_lead",
     "first_clip_problems",
+    "fit_to_limit",
     "heard_start",
     "heard_text",
     "judge",
+    "later_clip_problems",
     "pick_moments",
     "reel_ms",
     "render",
     "render_for_judge",
+    "split_start",
 ]
