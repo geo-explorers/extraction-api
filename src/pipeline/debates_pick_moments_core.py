@@ -115,8 +115,12 @@ THAT_CLAUSE_NEXT = (
 TO_PHRASE_NEXT = ("the", "a", "an")
 # ...unless the noun phrase is an idiom that opens a sentence of its own: "To the extent states run
 # their rolls…", "To the best of my knowledge…", "To a certain extent…", "To the contrary…", "To a
-# degree, …", "To the degree that…", "To a point, …".
-TO_IDIOM_NEXT = ("extent", "degree", "point", "best", "contrary", "certain", "large", "great")
+# degree, …", "To the degree that…", "To a point, …", and a debater taking points in turn: "To the
+# first point, …", "To the other side's argument, …".
+TO_IDIOM_NEXT = (
+    "extent", "degree", "point", "best", "contrary", "certain", "large", "great",
+    "first", "second", "third", "last", "final", "next", "other",
+)
 # The other half of the same mistake: a sentence that ends on one of these words stopped mid-phrase
 # ("…legal immigration is a."), so the next sentence of its turn is its second half. Not one ending on
 # a question or exclamation mark: "What if?" and "Oh my!" were finished as said.
@@ -339,24 +343,38 @@ def opens_mid_sentence(sentence) -> bool:
     return _lead_char(word).isalpha() and letters.islower()
 
 
+def _ends_on(text: str, marks: Tuple[str, ...]) -> bool:
+    """Whether `text` ends on one of `marks`, past any closing quote or bracket."""
+    return text.rstrip("\"'”’)").endswith(marks)
+
+
 def split_start(input: DebatesPickMomentsInput, k: int, words: List[str]) -> bool:
     """Whether sentence `k`, opening on `words`, is the second half of a sentence the transcript
     broke in two: the sentence before it in its turn ends mid-phrase (OPEN_ENDS), or `words` open
     as a clause of the sentence before ("Where corporations argued…", "That the border security
     can serve…", "To the idea of…"). A clip that starts there starts mid-sentence, though the
     transcript gave it a capital. A turn's first sentence is never one: it cannot be the second half
-    of the other speaker's sentence."""
+    of the other speaker's sentence. A sentence of nothing but filler ("Um.") between the halves is
+    looked past, as heard_start skips it. A sentence that ends on "?" is no clause of the one before
+    ("Where in the Constitution does it say that?")."""
     sentences = input.sentences
-    if k == 0 or sentences[k - 1].turn != sentences[k].turn:
+    j = k - 1
+    while j >= 0 and sentences[j].turn == sentences[k].turn:
+        before = sentences[j].text.split()
+        if filler_lead(before) < len(before):
+            break
+        j -= 1
+    if j < 0 or sentences[j].turn != sentences[k].turn:
         return False
-    before = sentences[k - 1].text.split()
-    last = before[-1] if before else ""
+    last = before[-1]
     if (
         _bare(last) in OPEN_ENDS
-        and not last.rstrip("\"'”’)").endswith(("?", "!"))
+        and not _ends_on(last, ("?", "!"))
         and (len(before) == 1 or not any(c.isupper() for c in last))
     ):
         return True
+    if _ends_on(sentences[k].text.strip(), ("?",)):
+        return False
     first, following, third = (_bare(w) for w in (words + ["", "", ""])[:3])
     if first == "where":
         return following not in WHERE_QUESTION_NEXT

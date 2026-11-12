@@ -1296,6 +1296,15 @@ def test_a_sentence_the_transcript_split_off_the_one_before_is_marked_and_not_st
         ("Policy got us here.", "To a degree, I agree with the states."),
         ("Policy got us here.", "To the degree that states run rolls, they run them well."),
         ("Policy got us here.", "To a point, the states are right."),
+        # A debater taking the other side's points in turn.
+        ("Policy got us here.", "To the first point, states run rolls well."),
+        ("Policy got us here.", "To the last question, I say no."),
+        ("Policy got us here.", "To the other side's argument, look at Georgia."),
+        # A question is no clause of the sentence before, whatever its second word.
+        ("Policy got us here.", "Where in the Constitution does it say that?"),
+        ("Policy got us here.", "Where exactly is the line?"),
+        ("Policy got us here.", "Where, in your view, should it stop?"),
+        ("Policy got us here.", "To the people at home, what would you do?"),
         # A capital past the first word is a letter or a name, not a hanging article.
         ("We need Plan A.", "Federal rules failed."),
         ("They give the plan an A.", "States run it well."),
@@ -1321,6 +1330,24 @@ def test_a_sentence_that_opens_a_thought_is_not_marked_split(before, text):
     debate.sentences[k].text = text
     assert not pick.continues(debate, k)
     assert "second half of a split sentence" not in pick.render(debate)
+
+
+def test_a_split_is_found_past_a_sentence_of_nothing_but_filler():
+    debate = _debate()
+    debate.clip_min_ms = 1_000  # short enough that geo-chat cuts the filler sentence
+    debate.sentences[3].text = "I think legal immigration is a."  # turn 1
+    debate.sentences[4].text = "Um."
+    debate.sentences[5].text = "National security risk for all."
+    assert pick.continues(debate, 5)
+    assert "[5] 25.0-29.8 s (4.8 s, second half of a split sentence): National security risk for all." in pick.render(debate)
+    # A later clip starting on the filler is heard from the half, and sent back.
+    value, problems, soft = pick.check(debate, _with(1, start_sentence=4))
+    assert problems == [] and value is not None
+    assert soft == ["Clip 1 starts on the second half of a split sentence: the transcript broke a sentence in two there. Start it on a sentence that opens a thought."]
+    # A turn of filler before a clause is still a turn start.
+    debate.sentences[3].text = "Um."
+    debate.sentences[5].text = "That the states run their rolls well is plain."
+    assert not pick.continues(debate, 5)
 
 
 def test_a_clip_over_the_limit_is_cut_from_its_end_only_where_it_ends_a_whole_sentence():
