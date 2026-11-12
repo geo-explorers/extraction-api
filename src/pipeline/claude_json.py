@@ -22,13 +22,14 @@ hit the token limit on 8 of 20 runs on 11 Nov writing it).
 
 An answer cut off at the token limit is logged with its tail. With
 `cut_off_retries`, it is sent back that many times, told to answer shorter with
-the JSON alone; otherwise, or once those run out, the best answer so far is
-kept, and with none the run fails.
+the JSON alone. An acceptable answer seen before the cut-off is kept at once;
+a last resort only once no retry is left; with neither the run fails.
 
 Failures are final (`FinalDecisionError`, which Hatchet does not retry) when
 asking again cannot help: no acceptable answer, an answer cut off at the token
-limit, no API key, the spend guard. A failed request (network, rate limit,
-overload) stays retryable, so the engine runs the task again.
+limit, no API key, the spend guard, a request Claude rejects (a 4xx such as a
+schema it cannot compile). A failed request (network, rate limit, overload)
+stays retryable, so the engine runs the task again.
 
 The model and its knobs are the `moments_claude_*` settings, overridable per run.
 The system prompt and the first message are marked for prompt caching, so a send
@@ -59,6 +60,10 @@ SPEND_KEY = "claude"
 # the run, so a task's execution timeout can be sized as attempts x this. 180 s cut off slow but
 # healthy answers during a story-reel backfill (GEO-3638), failing the whole run.
 REQUEST_TIMEOUT_S = 300
+# The 4xx statuses worth running the task again for (timeout, conflict, rate limit). Any other 4xx
+# (a schema structured outputs rejects, a model without it, a prompt too long) fails the same way
+# on every run, so it is final. 5xx, 529 overloaded and connection errors stay retryable.
+RETRYABLE_4XX = {408, 409, 429}
 
 T = TypeVar("T")
 
@@ -149,6 +154,8 @@ async def ask_json(
                 **shape,
             )
         except Exception as e:  # network, rate limit, overload: the engine retries the run
+            if _rejected(e):
+                raise FinalDecisionError(f"{task}: Claude rejected the request: {e}") from e
             raise DecisionError(f"{task}: Claude request failed: {e}", retryable=True) from e
         _log_usage(task, attempt, message)
         raw = claude_text(message)
@@ -157,8 +164,9 @@ async def ask_json(
                 f"{task}: answer {attempt}/{attempts} cut off at the token limit after "
                 f"{len(raw)} chars; it ended: {raw[-CUT_OFF_TAIL_CHARS:]!r}"
             )
-            if best is not None or last_resort is not None:
+            if best is not None:
                 break
+            # With only a last resort, a retry left can still bring an answer that keeps every rule.
             if cut_off_retries > 0 and attempt < attempts:
                 cut_off_retries -= 1
                 messages += [
@@ -166,6 +174,8 @@ async def ask_json(
                     {"role": "user", "content": CUT_OFF_MESSAGE},
                 ]
                 continue
+            if last_resort is not None:
+                break
             raise FinalDecisionError(f"{task}: the answer was cut off at the token limit")
         try:
             value, hard, soft = check(parse_json(raw))
@@ -197,6 +207,13 @@ async def ask_json(
         )
         return last_resort[0], model, last_resort[1]
     raise FinalDecisionError(f"{task}: no acceptable answer after {attempts} attempts: {problems}")
+
+
+def _rejected(e: Exception) -> bool:
+    """Whether Claude refused the request itself (a 4xx not in RETRYABLE_4XX)."""
+    import anthropic
+
+    return isinstance(e, anthropic.APIStatusError) and 400 <= e.status_code < 500 and e.status_code not in RETRYABLE_4XX
 
 
 def _log_usage(task: str, attempt: int, message: Any) -> None:

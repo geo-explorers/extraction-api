@@ -17,13 +17,14 @@ Both tasks run on Claude, using the `moments_claude_*` settings. They write an a
 
 **JSON only.** Pick and its judge answer under a JSON schema (Anthropic structured outputs, `output_config.format`), so the reply is the JSON and nothing else. On 11 Nov, before this, 8 of 20 pick runs were cut off at the 16,000-token limit: the model wrote its reasoning out before the JSON, which itself runs about 2k tokens. Punctuate is asked as before, without a schema.
 
-**Cut off at the token limit.** The answer's last 500 characters are logged. Pick and its judge send a cut-off answer back once, told it was cut off and to answer shorter with the JSON alone; a second cut-off ends the run. Punctuate never sends one back: every sentence end is required, so a second answer would be as long. Either way, an acceptable answer seen before the cut-off is kept.
+**Cut off at the token limit.** The answer's last 500 characters are logged. Pick and its judge send a cut-off answer back once, told it was cut off and to answer shorter with the JSON alone; a second cut-off ends the run. Punctuate never sends one back: every sentence end is required, so a second answer would be as long. Either way, an acceptable answer seen before the cut-off is kept; a pick's last resort (see below) is kept only once the retry is used up.
 
 **Failures.** A failed request (network, rate limit, overload) is retryable, and Hatchet runs the task again. These are final (`FinalDecisionError`, a `NonRetryableException`), because running again cannot help:
 - no acceptable answer
 - an answer cut off at the token limit (for pick, a second one)
 - a missing key
 - a tripped spend guard
+- a request Claude rejects: any 4xx except 408, 409 and 429 (a schema structured outputs can't compile, a model without them, a prompt too long). The judge still keeps the first reel when its request is rejected.
 
 The caller then falls back. Each task's execution timeout covers every request at its 300 s ceiling. The client doesn't retry on its own.
 

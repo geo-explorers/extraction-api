@@ -857,3 +857,45 @@ def test_a_trim_steps_past_a_mid_sentence_start_when_a_clean_start_fits():
     _long_first_turn(debate, [10, 12, 12], ["One.", "not just get completely overwhelmed.", "We need rules."])
     (_, moments), problems, soft = pick.check(debate, GOOD)
     assert problems == [] and moments[0].start_sentence == 2
+
+
+def _status_error(status):
+    import anthropic
+    import httpx
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.APIStatusError(
+        f"HTTP {status}", response=httpx.Response(status, request=request), body=None
+    )
+
+
+def test_a_request_claude_rejects_is_final_not_rerun():
+    # A schema structured outputs cannot compile is a 400 on every run alike.
+    client = _FakeClaude(_status_error(400))
+    with pytest.raises(FinalDecisionError, match="rejected the request"):
+        asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize("status", [408, 409, 429, 500, 529])
+def test_a_rate_limit_or_overload_stays_retryable(status):
+    client = _FakeClaude(_status_error(status))
+    with pytest.raises(DecisionError) as raised:
+        asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert raised.value.retryable and not isinstance(raised.value, FinalDecisionError)
+
+
+def test_a_cut_off_after_a_last_resort_still_takes_its_retry():
+    debate = _debate()
+    debate.sentences[0].text = "And it is a state matter."  # GOOD's opener: a last resort
+    client = _FakeClaude({"reels": [GOOD]}, _CutOff("..."), {"reels": [_past_sentence_0(OTHER)]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 3 and result.attempts == 3 and result.first_clip_problems == []
+
+
+def test_a_cut_off_with_no_retry_left_keeps_the_last_resort():
+    debate = _debate()
+    debate.sentences[0].text = "And it is a state matter."
+    client = _FakeClaude({"reels": [GOOD]}, _CutOff("a"), _CutOff("b"))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 3 and result.attempts == 1 and result.first_clip_problems
