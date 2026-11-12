@@ -3,7 +3,7 @@
 geo-chat sends the punctuated transcript as sentences, the debate's claims and
 its motion; Claude offers candidate reels of four alternating clips that tell the
 debate's story, each clip a run of whole sentences, and a judge picks among those
-that pass. By default (link_claims "after", GEO-3692) the picker never sees the
+that pass, soft flaws and all (GEO-3696). By default (link_claims "after", GEO-3692) the picker never sees the
 claims: a third call then links each clip to one of its speaker's claims, falling
 back to the claim it shares most words with, so a reel is never lost to its links.
 link_claims "in_pick" restores the picker that links them itself. Every mechanical rule is checked
@@ -33,7 +33,9 @@ async def _handle(input: DebatesPickMomentsInput, ctx: Context) -> DebatesPickMo
     total = reel_ms(result.moments) / 1000
     logger.info(
         f"{TASK}: 4 moments, {total:.1f} s, {result.attempts} answer(s), "
-        f"judged from {result.candidates} reel(s), claims linked {input.link_claims} ({result.model_used})"
+        f"judged from {result.candidates} reel(s), "
+        f"{sum(m.fitted_around_payoff for m in result.moments)} clip(s) fitted around their payoff, "
+        f"claims linked {input.link_claims} ({result.model_used})"
     )
     return result
 

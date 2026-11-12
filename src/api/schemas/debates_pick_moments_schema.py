@@ -135,20 +135,46 @@ class PickedMoment(BaseModel):
         default=None, description="Position in `moments` of the earlier clip this one answers, or null."
     )
     why: str
+    payoff_sentence: Optional[int] = Field(
+        default=None,
+        description="The sentence the picker named as the clip's payoff, the line that makes it "
+        "worth showing (GEO-3696): always inside the clip. A clip over the hard limit is fitted "
+        "around it (fitted_around_payoff). None only for an answer without one.",
+    )
+    fitted_around_payoff: bool = Field(
+        default=False,
+        description="The model picked this clip over the hard limit and it was fitted around its "
+        "payoff_sentence (GEO-3696): it keeps the payoff, starts on a sentence that opens a thought "
+        "and ends at or just after the payoff, within the limit. trimmed_from_sentence and "
+        "trimmed_to_sentence say where the model's pick started and ended. Not a last resort.",
+    )
     trimmed_from_sentence: Optional[int] = Field(
         default=None,
         description="The model picked this clip from an earlier sentence, over the hard limit; it "
-        "was shortened from its start to fit, because no earlier end fitted cleanly. role and "
-        "why (and claim and claim_fit under link_claims \"in_pick\") were given for the longer "
-        "clip. Only on a reel kept as a last "
-        "resort: an over-long clip is sent back to be picked again.",
+        "was shortened from its start to fit: around its payoff (fitted_around_payoff), or, on a "
+        "reel kept as a last resort, because no earlier end fitted cleanly. role and why (and "
+        "claim and claim_fit under link_claims \"in_pick\") were given for the longer clip.",
     )
     trimmed_to_sentence: Optional[int] = Field(
         default=None,
         description="The model picked this clip to a later sentence, over the hard limit; it was "
-        "shortened from its end to fit, keeping its setup. role and why (and claim and claim_fit "
-        "under link_claims \"in_pick\") were given for the longer clip. Only on a reel kept as a "
-        "last resort.",
+        "shortened from its end to fit: around its payoff (fitted_around_payoff), or, on a reel "
+        "kept as a last resort, keeping its setup. role and why (and claim and claim_fit under "
+        "link_claims \"in_pick\") were given for the longer clip.",
+    )
+
+
+class CandidateReel(BaseModel):
+    """A reel the pick was made from, kept so the judge's choice can be graded later (GEO-3696).
+    Its moments are as checked, before any claim is linked: under link_claims "after" each has
+    claim_index -1 and claim_fit 0 (only the picked reel, `moments`, is linked)."""
+
+    story: str
+    moments: List[PickedMoment]
+    problems: List[str] = Field(
+        default_factory=list,
+        description="What the checks found: soft problems for a reel that passed, and for a last "
+        "resort the hard ones it was kept despite. Shown to the judge as the problems found.",
     )
 
 
@@ -158,8 +184,19 @@ class DebatesPickMomentsResult(BaseModel):
     provider: str
     model_used: str
     attempts: int = Field(description="Which answer the reel came from (1 for the first): the one that passed every rule, else the passing one whose best reel had the fewest soft problems, or for a last resort the one (with the fewest problems in its best reel) that broke only the first clip's opening rules (first_clip_problems) or ran a clip over the limit (cut to fit: trimmed_to_sentence, trimmed_from_sentence).")
-    candidates: int = Field(default=1, description="How many reels the pick was made from: those with no soft problem when any passed, else all that passed. More than one means the judge picked.")
+    candidates: int = Field(default=1, description="How many reels the pick was made from: every reel of the kept answer that passed (GEO-3696: soft problems and all), else its last resorts. More than one means the judge picked.")
     judge_why: Optional[str] = Field(default=None, description="Why the judge picked this reel, when it judged.")
+    candidate_reels: List[CandidateReel] = Field(
+        default_factory=list,
+        description="The reels the pick was made from, in the order the judge saw them (no soft "
+        "problem first, then by fewest problems, the picker's order among equals), so its choice "
+        "can be graded (GEO-3696). geo-chat ignores it.",
+    )
+    judge_pick: Optional[int] = Field(
+        default=None,
+        description="The position in candidate_reels of the reel returned: the judge's pick, or 0 "
+        "when it gave none. None when there was one candidate and no judge ran.",
+    )
     first_clip_problems: List[str] = Field(
         default_factory=list,
         description="Empty unless no answer had a reel whose first clip keeps its rules (it starts a "

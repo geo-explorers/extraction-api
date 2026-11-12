@@ -490,7 +490,7 @@ def test_a_start_trim_that_can_only_land_on_a_dangling_opener_is_flagged_as_it_p
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
     # 0-2 is 55 s and sentence 0 alone is over the limit, so no end fits; every start that fits
     # (1 or 2) opens on a dangling word, so the trim takes 1.
-    _long_first_turn(debate, [31, 12, 12], ["One.", "And that.", "But so."])
+    _long_first_turn(debate, [31, 12, 12], ["One.", "And that.", "But so we hold the line."])
     # Turn 0 is OTHER's second clip.
     (_, moments), problems, soft = pick.check(debate, OTHER)
     assert moments[1].start_sentence == 1 and moments[1].trimmed_from_sentence == 0
@@ -713,14 +713,35 @@ def test_a_judge_request_that_fails_keeps_the_first_reel():
     assert [m.speaker for m in result.moments] == [1, 2, 1, 2]
 
 
-def test_a_clean_reel_is_taken_over_one_with_soft_problems_without_a_judge():
+def test_a_reel_with_soft_problems_is_judged_beside_a_clean_one_not_dropped():
+    # GEO-3696: the judge ran in only 10 of 20 debates, because a reel with a soft flaw was dropped
+    # before judging; a stronger reel with one "But…" never reached it.
     debate = _debate()
     debate.sentences[6].text = "Because it is a state matter."  # GOOD's third clip opens on "because"
     clean = json.loads(json.dumps(OTHER))
     clean["moments"][3]["start_sentence"] = 7  # starts past it
-    client = _FakeClaude({"reels": [GOOD, clean]})
+    client = _FakeClaude({"reels": [GOOD, clean]}, {"best": 1, "why": "Its exchange is sharper."})
     result = asyncio.run(pick.pick_moments(debate, client=client))
-    assert [m.speaker for m in result.moments] == [2, 1, 2, 1] and len(client.calls) == 1
+    # No send-back (a clean reel passed), and both reach the judge: the clean one first, the
+    # flawed one with its problem shown.
+    assert len(client.calls) == 2 and result.attempts == 1 and result.candidates == 2
+    judged = client.calls[1]["messages"][0]["content"][0]["text"]
+    reel_0, reel_1 = judged.split("## Reel 1")
+    assert "Clip 1, Nico" in reel_0 and "Problems found" not in reel_0
+    assert '- Clip 3 opens on "because"' in reel_1
+    # The judge may take the flawed reel: it is the judge's call, not the check's.
+    assert [m.speaker for m in result.moments] == [1, 2, 1, 2] and result.moments[2].start_sentence == 6
+    assert result.judge_pick == 1 and result.judge_why == "Its exchange is sharper."
+    # Every candidate is kept on the result, in the order judged, with its problems.
+    assert [r.moments[0].speaker for r in result.candidate_reels] == [2, 1]
+    assert result.candidate_reels[0].problems == []
+    assert result.candidate_reels[1].problems == [
+        'Clip 2 opens on "because", which leans on what came before or is filler. Start it on a sentence that opens a thought.'
+    ]
+    # A judge that gives no pick keeps the clean reel, now first.
+    client = _FakeClaude({"reels": [GOOD, clean]}, RuntimeError("overloaded"))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert [m.speaker for m in result.moments] == [2, 1, 2, 1] and result.judge_pick == 0
 
 
 def test_a_clip_opening_on_because_is_a_soft_problem():
@@ -1544,9 +1565,10 @@ def test_a_reel_whose_only_problem_is_a_split_first_clip_is_sent_back_but_still_
 def test_a_clean_reel_is_taken_over_one_with_a_split_first_clip():
     debate = _debate()
     marked = _split_first_clip(debate)
-    client = _FakeClaude({"reels": [marked, GOOD]})
+    client = _FakeClaude({"reels": [marked, GOOD]}, {"best": 0, "why": "x"})
     result = asyncio.run(pick.pick_moments(debate, client=client))
-    assert len(client.calls) == 1 and result.candidates == 1 and result.moments[0].start_sentence == 0
+    # Both are judged (GEO-3696), the clean one first, so the judge's pick 0 is the clean one.
+    assert len(client.calls) == 2 and result.candidates == 2 and result.moments[0].start_sentence == 0
     # And a split first clip beats a first clip that breaks a hard rule.
     debate = _debate()
     marked = _split_first_clip(debate)
@@ -1613,10 +1635,11 @@ def test_a_send_back_that_comes_back_worse_does_not_replace_the_better_answer():
     other = json.loads(json.dumps(better))
     other["moments"][3].update(start_sentence=10)  # clip 4 at 10-11, clean; clip 3 at 7-8, clean
     other["moments"][1].update(start_sentence=3, end_sentence=4)
-    debate.sentences[3].text = "And so but the states differ."  # clip 2 of `other` opens on "but"
-    client = _FakeClaude({"reels": [better, other]}, GOOD, BROKEN, {"best": 1, "why": "x"})
+    debate.sentences[3].text = "And so but the states differ."  # clip 2 of both opens on "but"
+    client = _FakeClaude({"reels": [better, other]}, GOOD, BROKEN, {"best": 0, "why": "x"})
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert result.attempts == 1 and result.candidates == 2 and len(client.calls) == 4
+    # `other` has one problem to `better`'s two, so the judge sees it first (judge_order).
     assert result.moments[3].start_sentence == 10
     # Equal answers: the later one, as before.
     debate = _debate()
@@ -1824,7 +1847,7 @@ def test_the_picker_is_never_shown_a_claim_after_the_pick():
     assert "claim" not in story.lower()
     moment = pick.STORY_REELS_SCHEMA["properties"]["reels"]["items"]["properties"]["moments"]["items"]
     assert "claim" not in json.dumps(pick.STORY_REELS_SCHEMA)
-    assert moment["required"] == ["speaker", "start_sentence", "end_sentence", "role", "answers", "why"]
+    assert moment["required"] == ["speaker", "start_sentence", "end_sentence", "role", "answers", "why", "payoff_sentence"]
     client = _FakeClaude({"reels": [STORY]}, _links(0, 5, 8, 9))
     asyncio.run(pick.pick_moments(debate, client=client))
     picked = client.calls[0]
@@ -1994,11 +2017,323 @@ def test_the_two_picker_prompts_differ_only_in_the_claims():
     from src.config.prompts import debates_pick_moments_prompt as prompt
 
     story, linked = prompt.DEBATES_PICK_MOMENTS_STORY_SYSTEM, prompt.DEBATES_PICK_MOMENTS_SYSTEM
-    for section in (prompt._GIVEN, prompt._FIND, prompt._BUILD, prompt._CLIP_RULES, prompt._FORMAT_TAIL):
+    for section in (
+        prompt._GIVEN, prompt._FIND, prompt._BUILD, prompt._CLIP_RULES_HEAD, prompt._STARTS, prompt._STANDS,
+        prompt._RULES_TAIL, prompt._FORMAT_TAIL,
+    ):
         assert section in story and section in linked
     for claims in (prompt._CLAIMS_GIVEN, prompt._CLAIMS_NOT_YET, prompt._CLAIMS_LINK, prompt._CLAIMS_FIELDS):
         assert claims in linked and claims not in story
+    # GEO-3696's payoff and close rules are the story picker's alone; "in_pick" keeps GEO-3691's.
+    for new, old in ((prompt._CLOSE, prompt._CLOSE_3691), (prompt._LENGTH, prompt._LENGTH_3691), (prompt._ENDS, prompt._ENDS_3691)):
+        assert new in story and new not in linked and old in linked and old not in story
+    for new in (prompt._CONCESSION, prompt._PAYOFF_FIELD, prompt._PAYOFF_NOTE):
+        assert new in story and new not in linked
 
 
 def test_the_link_call_is_on_the_runs_budget():
     assert pick.CALLS == pick.ATTEMPTS + pick.JUDGE_ATTEMPTS + pick.LINK_ATTEMPTS
+
+
+# --- keeping the moment and landing the close (GEO-3696) ---------------------------------------
+
+
+def _turn0(lengths, texts=None, link_claims="after"):
+    """`_debate` with turn 0 (speaker 1) re-made as sentences of `lengths` seconds back to back,
+    texted `texts` (default "Point 0.k."), then turns 1-3 of three 5 s sentences as before. Turn
+    0's sentences are 0..n-1; turn 1's n..n+2, turn 2's n+3..n+5, turn 3's n+6..n+8."""
+    debate = _debate(link_claims)
+    sentences, at = [], 0
+    for k, seconds in enumerate(lengths):
+        text = texts[k] if texts else f"Point 0.{k}."
+        sentences.append(MomentSentence(speaker=1, turn=0, start_ms=at, end_ms=at + int(seconds * 1000), text=text))
+        at += int(seconds * 1000)
+    for k, sentence in enumerate(debate.sentences[3:]):
+        start = at + k * 5_000
+        sentences.append(sentence.model_copy(update={"start_ms": start, "end_ms": start + 4_800}))
+    debate.sentences = sentences
+    return debate
+
+
+def _reel0(n, first, last, payoff, story=True):
+    """GOOD for a debate whose turn 0 has `n` sentences: clip 0 is `first`-`last` of turn 0 with
+    payoff `payoff`; the other clips are GOOD's, shifted past turn 0. As the "after" picker
+    answers (no claims) unless `story` is False."""
+    shift = n - 3
+    answer = json.loads(json.dumps(GOOD))
+    for position, row in enumerate(answer["moments"]):
+        if position == 0:
+            row.update(start_sentence=first, end_sentence=last, payoff_sentence=payoff)
+        else:
+            row.update(start_sentence=row["start_sentence"] + shift, end_sentence=row["end_sentence"] + shift)
+            row["payoff_sentence"] = row["end_sentence"]
+    return _story(answer) if story else answer
+
+
+def test_a_clip_over_the_limit_is_fitted_around_its_payoff_not_sent_back():
+    # 13 of the 30 moments graders missed on 12 Nov were in the picker's first answer, in a clip
+    # over 22 s that was sent back and swapped for another moment.
+    debate = _turn0([6, 6, 6, 6, 6])  # 0-4 runs 30 s
+    (_, moments), problems, soft = pick.check(debate, _reel0(5, 0, 4, payoff=2))
+    # Kept: no problem at all, so the reel is no last resort and nothing goes back.
+    assert problems == [] and soft == []
+    clip = moments[0]
+    # Ends on its payoff and keeps all of its setup (0-2 is 18 s).
+    assert (clip.start_sentence, clip.end_sentence, clip.payoff_sentence) == (0, 2, 2)
+    assert clip.fitted_around_payoff and (clip.trimmed_from_sentence, clip.trimmed_to_sentence) == (None, 4)
+    assert (clip.start_ms, clip.end_ms) == (0, 18_000)
+    # The other clips keep their payoff and are untouched.
+    assert [(m.payoff_sentence, m.fitted_around_payoff) for m in moments[1:]] == [(7, False), (10, False), (13, False)]
+    # In a run: one answer, no send-back, no last-resort warning.
+    client = _FakeClaude({"reels": [_reel0(5, 0, 4, payoff=2)]}, _links(0, 5, 8, 9))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 1 and len(client.calls) == 2 and result.moments[0].end_sentence == 2
+
+
+def test_a_fit_moves_the_start_later_when_the_payoff_comes_late():
+    debate = _turn0([6, 6, 6, 6, 6])
+    (_, moments), problems, _ = pick.check(debate, _reel0(5, 0, 4, payoff=4))
+    # Ends on the payoff (its last sentence); the earliest start that fits is 2 (1-4 runs 24 s).
+    assert problems == [] and (moments[0].start_sentence, moments[0].end_sentence) == (2, 4)
+    assert (moments[0].trimmed_from_sentence, moments[0].trimmed_to_sentence) == (0, None)
+
+
+def test_a_fit_ends_just_after_the_payoff_when_the_payoff_stops_mid_phrase():
+    # Sentence 2 ends on "a", so ending there would cut the thought: the fit ends on 3.
+    texts = ["Point 0.0.", "Point 0.1.", "Illegal immigration is a.", "National security risk.", "Point 0.4."]
+    debate = _turn0([5, 5, 5, 5, 5], texts)
+    (_, moments), problems, soft = pick.check(debate, _reel0(5, 0, 4, payoff=2))
+    assert problems == [] and soft == []
+    assert (moments[0].start_sentence, moments[0].end_sentence) == (0, 3)
+
+
+def _third(answer):
+    """`answer` with its clips 0 and 2 (both speaker 1's) swapped, so turn 0's clip plays third."""
+    moments = answer["moments"]
+    moments[0], moments[2] = moments[2], moments[0]
+    for row in moments:
+        row["answers"] = None
+    return answer
+
+
+def test_a_fit_starts_on_a_thought_never_on_a_connective_or_mid_sentence():
+    # The payoff is 4; 0-4 runs 30 s and 1-4 24 s. 2 opens on "But" and 3 mid-sentence, so the
+    # earliest start that fits and opens a thought is 4 itself (6 s), as the first clip or a later one.
+    texts = ["Point 0.0.", "Point 0.1.", "But that is why.", "and so we stand.", "We hold the line."]
+    debate = _turn0([6, 6, 6, 6, 6], texts)
+    for position in (0, 2):
+        answer = _reel0(5, 0, 4, payoff=4)
+        if position == 2:
+            answer = _third(answer)
+        (_, moments), problems, soft = pick.check(debate, answer)
+        clip = moments[position]
+        assert problems == [] and soft == [], (position, problems, soft)
+        assert (clip.start_sentence, clip.end_sentence) == (4, 4) and clip.fitted_around_payoff
+
+
+def test_a_fit_keeps_the_pickers_own_start_and_adds_no_flaw():
+    # The model's own start may carry a soft flaw; the fit keeps it rather than refuse, and
+    # never moves to a start with a new one.
+    texts = ["Because it works.", "Point 0.1.", "Point 0.2.", "Point 0.3.", "Point 0.4."]
+    debate = _turn0([6, 6, 6, 6, 6], texts)
+    answer = _third(_reel0(5, 0, 4, payoff=2))
+    (_, moments), problems, soft = pick.check(debate, answer)
+    assert problems == [] and (moments[2].start_sentence, moments[2].end_sentence) == (0, 2)
+    assert soft == ['Clip 2 opens on "because", which leans on what came before or is filler. Start it on a sentence that opens a thought.']
+
+
+def test_a_clip_that_cannot_be_fitted_around_its_payoff_is_sent_back_and_cut_only_as_a_last_resort():
+    # Every start after 0 opens on a connective and the payoff is the last sentence, so nothing
+    # clean keeps it within 22 s: sent back, with why, and cut from its end as a last resort.
+    # Sentence 4 alone (5 s) is under the minimum.
+    texts = ["Point 0.0.", "But one.", "And two.", "So yeah but three.", "We hold the line."]
+    debate = _turn0([6, 6, 6, 6, 5], texts)
+    (_, moments), problems, _ = pick.check(debate, _reel0(5, 0, 4, payoff=4))
+    assert len(problems) == 1
+    assert problems[0].startswith(
+        "Clip 0, sentences 0-4, runs 29.0 s, over the 22.0 s limit. No start that opens a thought and end at or "
+        "just after its payoff (sentence 4) fit within the limit. From sentence 0 it runs 6.0 s to sentence 0"
+    )
+    clip = moments[0]
+    assert not clip.fitted_around_payoff and (clip.start_sentence, clip.end_sentence, clip.trimmed_to_sentence) == (0, 2, 4)
+    # Its payoff did not survive the cut, so none is reported.
+    assert clip.payoff_sentence is None
+
+
+def test_a_payoff_sentence_too_long_for_the_limit_is_sent_back():
+    debate = _turn0([6, 25, 6])
+    _, problems, _ = pick.check(debate, _reel0(3, 0, 2, payoff=1))
+    assert any("over the 22.0 s limit" in p and "payoff (sentence 1)" in p for p in problems), problems
+
+
+def test_a_fit_never_goes_under_the_minimum_length():
+    # 0-3 runs 27 s with the payoff on 3. 3 alone is 3 s, under the 6 s minimum, so the fit starts on 2.
+    debate = _turn0([12, 12, 3, 3])
+    (_, moments), problems, _ = pick.check(debate, _reel0(4, 0, 3, payoff=3))
+    assert problems == [] and (moments[0].start_sentence, moments[0].end_sentence) == (1, 3)
+    debate = _turn0([20, 4, 3])
+    (_, moments), problems, _ = pick.check(debate, _reel0(3, 0, 2, payoff=2))
+    assert problems == [] and (moments[0].start_sentence, moments[0].end_sentence) == (1, 2)
+
+
+def test_a_payoff_outside_its_clip_is_refused():
+    debate = _turn0([5, 5, 5])
+    for payoff in (5, -1):
+        accepted, problems, _ = pick.check(debate, _reel0(3, 0, 2, payoff=payoff))
+        assert accepted is None
+        assert f"Clip 0: its payoff_sentence {payoff} is not one of its sentences 0-2." in problems
+
+
+def test_an_answer_without_a_payoff_is_fitted_as_before():
+    # The "in_pick" picker's answer has no payoff_sentence: its long clips go back as they did.
+    debate = _turn0([6, 6, 6, 6, 6], link_claims="in_pick")
+    answer = _reel0(5, 0, 4, payoff=2, story=False)
+    del answer["moments"][0]["payoff_sentence"]
+    (_, moments), problems, _ = pick.check(debate, answer)
+    assert len(problems) == 1 and "over the 22.0 s limit. From sentence 0" in problems[0]
+    assert not moments[0].fitted_around_payoff and moments[0].payoff_sentence is None
+
+
+def test_a_fitted_clip_keeps_every_rule_geo_chat_checks_again():
+    # geo-chat's story_reel re-checks: whole sentences of one turn of the clip's speaker, 6-22 s,
+    # alternating, no overlap. A fitted clip is a run inside the one picked, so all still hold.
+    debate = _turn0([4, 7, 7, 7, 7, 7])
+    (_, moments), problems, soft = pick.check(debate, _reel0(6, 0, 5, payoff=3))
+    assert problems == [] and soft == []
+    clip = moments[0]
+    run = debate.sentences[clip.start_sentence : clip.end_sentence + 1]
+    assert {s.turn for s in run} == {0} and {s.speaker for s in run} == {clip.speaker}
+    assert debate.clip_min_ms <= clip.end_ms - clip.start_ms <= debate.clip_max_ms
+    assert clip.start_sentence <= clip.payoff_sentence <= clip.end_sentence
+    assert [m.speaker for m in moments] == [1, 2, 1, 2]
+
+
+def test_the_judge_is_not_told_a_clip_fitted_around_its_payoff_was_cut():
+    debate = _turn0([6, 6, 6, 6, 6])
+    reel = pick.check(debate, _reel0(5, 0, 4, payoff=2))[0]
+    assert "Problems found" not in pick.render_for_judge(debate, [reel])
+
+
+def test_the_story_picker_names_each_clips_payoff_and_is_told_a_long_clip_is_cut_around_it():
+    story = pick.prompts.get("debates_pick_moments.story_system")
+    moment = pick.STORY_REELS_SCHEMA["properties"]["reels"]["items"]["properties"]["moments"]["items"]
+    assert moment["properties"]["payoff_sentence"] == {"type": "integer"} and "payoff_sentence" in moment["required"]
+    assert '"payoff_sentence": 13' in story and "Give its number as payoff_sentence" in story
+    assert "A clip over the hard limit is cut for you around its payoff" in story
+    assert "A clip over the hard limit is sent back, not cut for you" not in story
+    assert "Shorter is better, but never at the cost of the payoff" in story
+
+
+def test_the_story_picker_is_told_clip_4_ends_on_its_speakers_firmest_line():
+    # 16 weak closes in 40 graded reels on 12 Nov: mostly hedges and concessions.
+    story = pick.prompts.get("debates_pick_moments.story_system")
+    assert "it ends on its speaker's firmest statement of their position or their most memorable line" in story
+    assert 'Never end it on a hedge, a concession, a call to "find a balance", or a fragment' in story
+    assert "Never end the reel on one." in story
+
+
+def test_a_clip_ending_mid_thought_is_a_soft_problem():
+    # Sentence 2 ends on "the", and the turn goes on: the clip stops mid-phrase.
+    debate = _debate()
+    debate.sentences[2].text = "The answer is the."
+    value, problems, soft = pick.check(debate, GOOD)
+    assert value is not None and problems == []
+    assert soft == [
+        "Clip 0 ends mid-thought: sentence 2 stops mid-phrase or runs on into the next one. End it on a whole "
+        "sentence where its point lands."
+    ]
+    # Also when the next sentence of its turn reads as its second half.
+    debate = _debate()
+    debate.sentences[5].text = "Where corporations argued for less."  # after clip 2's sentence 4
+    _, _, soft = pick.check(debate, _with(1, end_sentence=4))
+    assert any(p.startswith("Clip 1 ends mid-thought") for p in soft), soft
+    # Not on a question, a capitalised word, or at a turn's end that is a whole sentence.
+    for text in ("What if?", "We need Plan A.", "We need rules."):
+        debate = _debate()
+        debate.sentences[2].text = text
+        assert not any("mid-thought" in p for p in pick.check(debate, GOOD)[2]), text
+
+
+@pytest.mark.parametrize("text", ["But like beyond that.", "So yeah.", "And stuff.", "Um.", "Like, you know?"])
+def test_a_clip_ending_on_a_fragment_is_a_soft_problem(text):
+    debate = _debate()
+    debate.sentences[11].text = text
+    value, problems, soft = pick.check(debate, GOOD)
+    assert value is not None and problems == []
+    assert any(p.startswith("Clip 3 ends on a fragment") for p in soft), soft
+    # Inside the transcript's last sentence too: the punctuate step left Whisper's own full stop.
+    debate = _debate()
+    debate.sentences[11].text = f"That is something they could work on. {text}"
+    assert any(p.startswith(f'Clip 3 ends on a fragment ("{text}")') for p in pick.check(debate, GOOD)[2])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Conviction means conviction.",  # short, but a statement graders wanted as a close
+        "It's that simple.",
+        "Yes, absolutely.",
+        "But we can stop it today.",  # opens on "but", but long enough to say something
+        "We spoke to Mr. Smith.",  # "Smith." after "Mr." is no sentence
+    ],
+)
+def test_a_short_closing_line_that_states_something_is_no_fragment(text):
+    debate = _debate()
+    debate.sentences[11].text = text
+    assert not any("fragment" in p for p in pick.check(debate, GOOD)[2])
+
+
+def test_a_one_sentence_clip_is_no_fragment():
+    debate = _debate()
+    debate.sentences[11].text = "But so."
+    debate.sentences[11].end_ms = debate.sentences[11].start_ms + 7_000
+    assert not pick.ends_on_fragment(debate, 11, 11) and pick.ends_on_fragment(debate, 9, 11)
+
+
+def test_the_judge_sees_how_a_clip_ends():
+    debate = _debate()
+    debate.sentences[11].text = "But like beyond that."
+    debate.sentences[2].text = "The answer is the."
+    judged = pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
+    assert "- Clip 1 ends mid-thought, before its sentence does." in judged
+    assert "- Clip 4 ends on a fragment." in judged
+
+
+def test_the_judge_weighs_the_close_right_after_the_first_clip():
+    judge = pick.prompts.get("debates_pick_moments.judge_system")
+    steps = [judge.index(f"\n{n}. ") for n in (1, 2, 3, 4)]
+    assert steps == sorted(steps)
+    close = judge[steps[1] : steps[2]]
+    assert close.startswith("\n2. Does the close land?")
+    assert "a hedge, a concession" in close and "loses to one whose close lands" in close
+    assert "ends mid-thought or on a fragment" in judge
+
+
+def test_one_candidate_runs_no_judge_and_is_still_kept_on_the_result():
+    client = _FakeClaude({"reels": [GOOD, BROKEN]})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert result.judge_pick is None and len(result.candidate_reels) == 1
+    assert result.candidate_reels[0].moments == result.moments and result.candidate_reels[0].problems == []
+
+
+def test_candidates_are_kept_unlinked_beside_the_linked_pick():
+    debate = _debate("after")
+    client = _FakeClaude({"reels": [STORY, _story(OTHER)]}, {"best": 1, "why": "x"}, _links(5, 0, 9, 8))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.judge_pick == 1 and [m.claim_index for m in result.moments] == [5, 0, 9, 8]
+    picked = result.candidate_reels[1]
+    assert [m.claim_index for m in picked.moments] == [pick.UNLINKED] * 4
+    assert [(m.start_sentence, m.end_sentence) for m in picked.moments] == [(m.start_sentence, m.end_sentence) for m in result.moments]
+    # And the result carries them as plain JSON fields, which geo-chat's PickedReel ignores.
+    dumped = json.loads(result.model_dump_json())
+    assert {"candidate_reels", "judge_pick"} <= set(dumped) and dumped["moments"][0]["payoff_sentence"] is None
+
+
+def test_last_resorts_are_judged_among_themselves_and_kept_on_the_result():
+    debate = _debate()
+    debate.sentences[0].text = "but states run it."  # GOOD's first clip: mid-sentence (fixable)
+    debate.sentences[3].text = "And so but federal rules."  # OTHER's first clip: on "but" (fixable)
+    client = _FakeClaude({"reels": [GOOD, OTHER]}, {"reels": [GOOD, OTHER]}, {"reels": [GOOD, OTHER]}, {"best": 0, "why": "x"})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.candidates == 2 and result.judge_pick == 0 and result.first_clip_problems
+    assert all(r.problems for r in result.candidate_reels)
