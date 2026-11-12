@@ -103,7 +103,8 @@ def repair(t: int, turn: PunctuateTurn, ends: List[SentenceEnd]) -> Tuple[List[S
     for k, end in enumerate(kept[:-1]):
         nxt = kept[k + 1]
         start = end.word + 1
-        opener = " ".join(_bare(w).lower() for w in turn.words[start : start + 2])
+        # Its first two words, never past its own end: "That. The point..." doesn't open "that the".
+        opener = " ".join(_bare(w).lower() for w in turn.words[start : min(start + 2, nxt.word + 1)])
         match = _CONTINUES.match(opener)
         if end.mark != "." or not match or (match.group(1) in _ASKS and nxt.mark == "?"):
             continue

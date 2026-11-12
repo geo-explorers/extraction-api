@@ -257,6 +257,32 @@ def test_openers_after_a_long_pause_a_question_or_opening_one_are_not_hinted(wor
     assert [[e.word, e.mark] for e in turns[0].ends] == ends
 
 
+def test_a_one_word_sentence_is_not_read_as_opening_with_the_next_sentence():
+    # "That." is not "That the...": the opener stops at the sentence's own end.
+    words = "so what about that That The point is it fails"
+    turns, problems, soft = punct.check(_input(_timed(words)), _ends([[3, "."], [4, "."], [9, "."]]))
+    assert problems == [] and soft == []
+    assert [e.word for e in turns[0].ends] == [3, 4, 9]
+
+
+@pytest.mark.parametrize("extra, joined", [(0, True), (1, False)])
+def test_an_end_is_joined_up_to_and_including_the_join_gap(extra, joined):
+    turns, problems, soft = punct.check(
+        _input(_timed(SPLIT, pauses={4: punct.JOIN_GAP_MS + extra})), _ends([[4, "."], [10, "."]])
+    )
+    assert problems == [] and soft == []
+    assert [e.word for e in turns[0].ends] == ([10] if joined else [4, 10])
+
+
+@pytest.mark.parametrize("extra, hinted", [(0, True), (1, False)])
+def test_an_opener_is_hinted_up_to_and_including_the_hint_gap(extra, hinted):
+    turns, problems, soft = punct.check(
+        _input(_timed(OPENS, pauses={9: punct.HINT_GAP_MS + extra})), _ends([[9, "."], [15, "."]])
+    )
+    assert problems == [] and [e.word for e in turns[0].ends] == [9, 15]
+    assert len(soft) == (1 if hinted else 0)
+
+
 @pytest.mark.parametrize("joined", [True, False])
 def test_a_hint_goes_back_once_and_the_second_answer_is_kept_whether_it_joins_or_not(joined):
     first = _ends([[9, "."], [15, "."]])
