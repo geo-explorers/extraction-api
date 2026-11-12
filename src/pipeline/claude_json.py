@@ -13,7 +13,9 @@ first with no problems at all, otherwise the latest with only soft ones. A check
 may also return a value with hard problems: that answer is refused and sent back
 like any other, but kept as a last resort, returned only when no answer passed
 the hard rules. Only when none passed and there is no last resort does the run
-fail.
+fail. A caller that passes `rank` keeps, among answers with only soft problems
+(and among last resorts), the one it ranks best, the latest among equals: a
+send-back that comes back worse then does not replace the better answer.
 
 A caller that passes a JSON `schema` gets Anthropic structured outputs
 (`output_config.format`): the reply is constrained to JSON in that shape, so the
@@ -129,17 +131,25 @@ async def ask_json(
     client: Any = None,
     schema: Optional[dict] = None,
     cut_off_retries: int = 0,
+    rank: Optional[Callable[[T], Any]] = None,
 ) -> Tuple[T, str, int]:
     """Ask until an answer has no problems, or `attempts` run out. Returns (value, model, answers
     asked for); the value is the best answer seen (see the module doc). `schema`, a JSON schema,
     constrains the reply to it (structured outputs); `cut_off_retries` is how many answers cut off
-    at the token limit are sent back to be answered shorter, within `attempts`."""
+    at the token limit are sent back to be answered shorter, within `attempts`. `rank` (lower is
+    better) chooses among answers with only soft problems, and among last resorts; without it the
+    latest wins."""
+
+    def no_worse(value: T, held: Optional[Tuple[Any, ...]]) -> bool:
+        return held is None or rank is None or rank(value) <= rank(held[0])
+
     model = llm.get("moments_claude_model")
     client = client or _client()
     messages: List[dict] = [{"role": "user", "content": _cached(user)}]
     shape = {"output_config": {"format": {"type": "json_schema", "schema": schema}}} if schema else {}
     best: Optional[Tuple[T, int]] = None
-    last_resort: Optional[Tuple[T, int]] = None
+    # The last resort kept, with the problems it was refused for (logged if it is returned).
+    last_resort: Optional[Tuple[T, int, List[str]]] = None
     problems: List[str] = []
     for attempt in range(1, attempts + 1):
         try:
@@ -194,11 +204,12 @@ async def ask_json(
             # way the answer is refused and sent back, never a crash Hatchet would rerun.
             value, hard, soft = None, [f"The answer is not valid JSON in the asked shape ({e})."], []
         if not hard:
-            best = (value, attempt)
             if not soft:
                 return value, model, attempt
-        elif value is not None:
-            last_resort = (value, attempt)
+            if no_worse(value, best):
+                best = (value, attempt)
+        elif value is not None and no_worse(value, last_resort):
+            last_resort = (value, attempt, hard)
         # Hard problems alone while there are any: soft nudges sent with them pull the answer
         # in more directions at once (an earlier opener makes a clip longer).
         problems = hard or soft
@@ -213,7 +224,7 @@ async def ask_json(
     if last_resort is not None:
         logger.warning(
             f"{task}: no answer kept every rule; keeping answer {last_resort[1]} as a last "
-            f"resort: {problems}"
+            f"resort: {last_resort[2]}"
         )
         return last_resort[0], model, last_resort[1]
     raise FinalDecisionError(f"{task}: no acceptable answer after {attempts} attempts: {problems}")

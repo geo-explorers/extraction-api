@@ -16,6 +16,17 @@ Later on 11 Nov: the first clip must open on the start of a sentence and of a th
 rule in the check), and the judge weighs the first clip's context before anything else.
 Both answers are constrained to a JSON schema (structured outputs), so the "Return JSON
 only" shapes below are what the schema enforces.
+
+12 Nov (GEO-3691): in a preview of 20 debates about 17 clips past the first opened mid-thought,
+on a connective, an unintroduced pronoun ("It needs to be included…") or a sentence the
+transcript split in two ("That the border security can serve…"). The picker's transcript now
+marks such split sentences, every clip's opener is checked and sent back, an answer to the clip
+before ("Yes, …") is allowed, a clip over the limit is sent back rather than cut from its start,
+and the judge is shown the problems found in each reel.
+
+Later on 12 Nov: the split mark is a guess (it marked "Where I come from…" and "To the first
+point…"), so it is a hint here and a soft problem in the check, the first clip included, and
+the judge is told a split flaw is a guess to check against the clip's words.
 """
 
 DEBATES_PICK_MOMENTS_SYSTEM = """You edit the highlight reel of a recorded two-person debate. Viewers scrolling a feed, who never saw the debate, watch four clips back to back, about a minute in all, and then vote on the motion. The reel tells the debate's story in compressed form: what the debate is about, what each side argues, and how they answer each other. The first clip has to give a newcomer the context.
@@ -35,8 +46,8 @@ Work in this order.
 
 Each clip:
 - Is a contiguous run of whole sentences from one turn of one speaker: start_sentence to end_sentence, inclusive.
-- Lasts within the target length you are given, from its first sentence's start to its last sentence's end, and never outside the hard limits. Shorter is better: one sharp sentence beats three that wander. The four together stay under the reel length you are given.
-- Starts where a thought starts. Never open on a connective ("and", "so", "but", "because", "that's why"), on filler ("yeah", "okay", "um", "I mean"), or on an example before its point ("for example", "like when").
+- Lasts within the target length you are given, from its first sentence's start to its last sentence's end, and never outside the hard limits. A clip over the hard limit is sent back, not cut for you. Shorter is better: one sharp sentence beats three that wander. The four together stay under the reel length you are given.
+- Starts where a thought starts. Never open on a connective ("and", "so", "but", "because", "though", "that's why"), on filler ("yeah", "okay", "um", "I mean"), on an example before its point ("for example", "like when"), or on "it", "they", "they're" or "that" (the viewer hears the pronoun before knowing what it means). A later clip may answer the clip before it in so many words ("Yes, the numbers show it…", "What is wrong with that thinking is…"). Avoid starting on a sentence marked "second half of a split sentence": the transcript probably broke one sentence in two there, so start where that sentence really starts, or elsewhere. The mark is a guess from how the sentence opens or the one before ends, so trust your reading when the marked sentence plainly starts a thought of its own.
 - Ends just after its point lands. Never stop before the payoff.
 - Stands alone. A viewer who has seen only the clips before it in the reel must understand it. Never use a clip that answers something the viewer didn't hear ("like you said", "that point", "your argument"), or that names "he", "she", "they" or "it" when the viewer can't tell who or what that is.
 - Argues its speaker's own side as a first-time viewer hears it. A concession is fine only when it plainly serves the speaker's side, or when the story is that they changed their mind.
@@ -62,6 +73,8 @@ speaker is the speaker's number. role is one of opening, answer, rebuttal, closi
 
 
 DEBATES_PICK_MOMENTS_JUDGE_SYSTEM = """You judge highlight reels of a recorded two-person debate, as the viewer will meet them: someone scrolling a feed who never saw the debate. Each reel is four short clips played back to back, then the viewer votes on the motion. You see only what that viewer sees: the motion, who is speaking and their side, and the words of each clip.
+
+Under a reel, "Problems found" lists what automatic checks caught in how its clips play: a clip that starts mid-sentence or leans on something the viewer did not hear, or one cut short to fit. Treat each as a real flaw a viewer would notice; prefer a reel without them unless its clips are clearly weaker. An item that says a clip "may" start halfway through a sentence is a guess from the transcript: read the clip's words, and set it aside when the clip plainly starts a thought of its own.
 
 Pick the reel that the viewer is most likely to watch to the end and come away understanding the clash. Judge, in this order:
 1. Can a newcomer follow it? The first clip provides the context: after it the viewer knows what is being debated and where its speaker stands, not a hedge or a stray example. Weigh this before anything else: a reel whose first clip leaves the viewer unsure what the debate is about loses to one whose first clip sets it up, however strong its later clips. Every later clip makes sense from the clips before it alone: nothing refers to a point, person or thing the viewer never heard, and no clip starts mid-thought.
