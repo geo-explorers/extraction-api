@@ -398,15 +398,16 @@ def _opening(
     """How a clip of sentences `start`-`end` opens, as the viewer hears it (heard_start): whether it
     starts mid-sentence (in a cased transcript), the dangling word or filler it opens on, and
     otherwise whether it starts on what looks like the second half of a split sentence
-    (split_start). The opener wins over the split mark, which is only a guess: "That the border
-    security…" opens on "that" whether or not it is a split half. A `later` clip (not the first)
+    (split_start). Mid-sentence and the opener win over the split mark, which is only a guess, so
+    one flaw is not counted twice: "That the border security…" opens on "that", and "where
+    corporations argued…" starts mid-sentence, whether or not either is a split half. A `later` clip (not the first)
     may answer the one before it: "Yes, the rolls are clean." (ANSWER_OPENERS)."""
     k, words = heard_start(input, start, end)
     mid = is_cased and opens_mid_sentence(input.sentences[k])
     opener = _opener(words)
     if later and opener in ANSWER_OPENERS and _answers_on(words):
         opener = None
-    return mid, opener is None and split_start(input, k, words), opener
+    return mid, not mid and opener is None and split_start(input, k, words), opener
 
 
 def _start_rank(input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool) -> int:
@@ -665,7 +666,8 @@ def named(input: DebatesPickMomentsInput, story: str) -> str:
 
 Reel = Tuple[str, List[PickedMoment]]
 # A candidate reel that passed, with its soft problems; or, as a last resort, one that broke only
-# its first clip's opening rules or ran a clip over the limit (cut to fit), with those.
+# its first clip's opening rules or ran a clip over the limit (cut to fit), with those and its soft
+# problems.
 Candidate = Tuple[Reel, List[str]]
 
 
@@ -684,8 +686,8 @@ def check_reels(
     comes back worse does not replace a better answer.
 
     When none passes, the reels whose only problems are fixable (their first clip's opening, a clip
-    cut to fit) come back with the problems, each with its own: the answer is sent back, but they
-    are a last resort (claude_json.ask_json).
+    cut to fit) come back with the problems, each with its own and its soft ones: the answer is
+    sent back with the hard problems alone, but they are a last resort (claude_json.ask_json).
 
     A single reel (an answer in the old shape, {"moments": ...}) is one candidate."""
     if isinstance(answer, dict) and isinstance(answer.get("reels"), list):
@@ -706,7 +708,9 @@ def check_reels(
         if hard:
             problems += [label + p for p in hard]
             if value is not None:
-                last_resort.append((value, hard))
+                # With its soft problems too, so answer_rank weighs a later "But…" or a split
+                # mark between two last resorts; only the hard ones are sent back.
+                last_resort.append((value, hard + soft))
             continue
         passed.append((value, soft))
         softs += [label + p for p in soft]
@@ -722,7 +726,7 @@ def check_reels(
 def answer_rank(candidates: List[Candidate]) -> int:
     """How an answer with no clean reel ranks against another (claude_json.ask_json's `rank`, lower
     is better): the fewest problems of any of its reels, soft ones for reels that passed, fixable
-    ones for last resorts. Before, the latest answer always won, and once every soft answer was
+    and soft ones for last resorts (a soft flaw counts between two last resorts too). Before, the latest answer always won, and once every soft answer was
     sent back (GEO-3691) a worse second answer replaced a better first one."""
     return min(len(problems) for _, problems in candidates)
 

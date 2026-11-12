@@ -1547,3 +1547,42 @@ def test_the_prompts_tell_of_the_split_mark_and_the_problems_listed():
     debate = _debate()
     debate.sentences[3].text = "Yes, the numbers show it clearly."
     assert pick.check(debate, GOOD)[2] == []
+
+
+def test_a_last_resort_with_a_soft_flaw_does_not_replace_a_cleaner_one():
+    # Two last resorts with the same clip cut to fit: the one whose clip 2 also opens on "But…"
+    # ranks worse, though it came later (review of GEO-3691).
+    debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
+    _long_first_turn(debate, [12, 12, 11.8])  # GOOD's first clip runs 35.8 s
+    debate.sentences[3].text = "But it is a federal problem."
+    cleaner = _with(1, start_sentence=4)  # clip 2 at 4-5, clean
+    result = asyncio.run(pick.pick_moments(debate, client=_FakeClaude(cleaner, GOOD, GOOD)))
+    assert result.attempts == 1 and result.moments[1].start_sentence == 4
+    # The soft problem is weighed, not sent back: the send-backs carry the hard problem alone.
+    client = _FakeClaude(GOOD, GOOD, GOOD)
+    asyncio.run(pick.pick_moments(debate, client=client))
+    assert all('opens on "but"' not in call["messages"][-1]["content"] for call in client.calls[1:])
+
+
+def test_a_lowercase_split_half_is_one_flaw_not_two():
+    debate = _debate()
+    debate.sentences[3].text = "Policy got us here."
+    debate.sentences[4].text = "where corporations argued for sugar."
+    (_, moments), problems, soft = pick.check(debate, _with(1, start_sentence=4))
+    assert problems == []
+    assert soft == ["Clip 1 starts mid-sentence (its first sentence opens on a lowercase word). Start it on a sentence that opens a thought."]
+    judged = pick.render_for_judge(debate, [(None, moments)])
+    assert "- Clip 2 starts mid-sentence." in judged and "halfway" not in judged
+
+
+def test_the_judge_is_told_a_split_start_may_be_one_and_to_check_the_words():
+    from src.config.prompts.debates_pick_moments_prompt import DEBATES_PICK_MOMENTS_JUDGE_SYSTEM as judge
+
+    debate = _debate()
+    debate.sentences[3].text = "Policy is how we got in this situation in the first place."
+    debate.sentences[4].text = "Where corporations argued for sugar in soft drinks."
+    reel = pick.check(debate, _with(1, start_sentence=4))[0]
+    assert "- Clip 2 may start halfway through a sentence." in pick.render_for_judge(debate, [reel])
+    assert '"may" start halfway through a sentence is a guess' in judge
+    assert "set it aside when the clip plainly starts a thought" in judge

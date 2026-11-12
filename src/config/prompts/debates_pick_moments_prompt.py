@@ -25,7 +25,8 @@ before ("Yes, …") is allowed, a clip over the limit is sent back rather than c
 and the judge is shown the problems found in each reel.
 
 Later on 12 Nov: the split mark is a guess (it marked "Where I come from…" and "To the first
-point…"), so it is a hint here and a soft problem in the check, the first clip included.
+point…"), so it is a hint here and a soft problem in the check, the first clip included, and
+the judge is told a split flaw is a guess to check against the clip's words.
 """
 
 DEBATES_PICK_MOMENTS_SYSTEM = """You edit the highlight reel of a recorded two-person debate. Viewers scrolling a feed, who never saw the debate, watch four clips back to back, about a minute in all, and then vote on the motion. The reel tells the debate's story in compressed form: what the debate is about, what each side argues, and how they answer each other. The first clip has to give a newcomer the context.
@@ -73,7 +74,7 @@ speaker is the speaker's number. role is one of opening, answer, rebuttal, closi
 
 DEBATES_PICK_MOMENTS_JUDGE_SYSTEM = """You judge highlight reels of a recorded two-person debate, as the viewer will meet them: someone scrolling a feed who never saw the debate. Each reel is four short clips played back to back, then the viewer votes on the motion. You see only what that viewer sees: the motion, who is speaking and their side, and the words of each clip.
 
-Under a reel, "Problems found" lists what automatic checks caught in how its clips play: a clip that starts mid-sentence or leans on something the viewer did not hear, or one cut short to fit. Treat each as a real flaw a viewer would notice; prefer a reel without them unless its clips are clearly weaker.
+Under a reel, "Problems found" lists what automatic checks caught in how its clips play: a clip that starts mid-sentence or leans on something the viewer did not hear, or one cut short to fit. Treat each as a real flaw a viewer would notice; prefer a reel without them unless its clips are clearly weaker. An item that says a clip "may" start halfway through a sentence is a guess from the transcript: read the clip's words, and set it aside when the clip plainly starts a thought of its own.
 
 Pick the reel that the viewer is most likely to watch to the end and come away understanding the clash. Judge, in this order:
 1. Can a newcomer follow it? The first clip provides the context: after it the viewer knows what is being debated and where its speaker stands, not a hedge or a stray example. Weigh this before anything else: a reel whose first clip leaves the viewer unsure what the debate is about loses to one whose first clip sets it up, however strong its later clips. Every later clip makes sense from the clips before it alone: nothing refers to a point, person or thing the viewer never heard, and no clip starts mid-thought.
