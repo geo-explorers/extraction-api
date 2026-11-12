@@ -9,9 +9,17 @@ Previously the reel was stitched together from clips cut around extracted claims
 - Clips judged to argue the wrong side were dropped, with nothing to replace them.
 - Transcripts lost their punctuation partway through, so no clean sentence ends could be found.
 
-Both tasks run on Claude, using the `moments_claude_*` settings. They write an answer rather than choosing among options, so they can't use the decision model.
+Both tasks run on Claude. They write an answer rather than choosing among options, so they can't use the decision model.
 
-**Budgets.** Both count against the `claude` spend-guard key that the news Claude paths use, so one hourly budget covers every Claude call. They draw on the `claude_global` per-minute rate limit at one unit per call the run can make (2 for punctuate, 7 for pick: 3 answers, 2 judge answers and 2 link answers), as the news tasks reserve. Punctuate runs one at a time and pick four at a time, so a backfill can't starve news. Each answer's token counts are logged (`… used input_tokens …, output_tokens …`).
+**Models (GEO-3702).** Punctuate runs on `moments_claude_*`: `claude-sonnet-4-6` at temperature 0.2, 16,000 tokens. Pick, its judge and its claim-link call run on `moments_pick_claude_*`: `claude-sonnet-5-5` at effort `low`, 32,000 tokens. Thinking counts toward the token limit, so the limit leaves room for it beyond the ~2k-token answer. On the 20-debate offline set (12 Nov), Sonnet 5.5 at `low` was preferred 10 vs 6 over Sonnet 4.6 in blind paired grading, at $0.80-0.89 vs $1.46 for the 20 reels and about 22 s a reel. Its hooks were stronger, its clip endings and responses slightly weaker. `medium` graded slightly worse than 4.6, and `high` cost 42% more without grading better.
+
+- A temperature is sent only to a model that takes one (`claude_json.takes_temperature`). Sonnet 5.5 rejects a temperature, so `moments_pick_claude_temperature` applies only when the pick runs on an older model.
+- The effort goes in `output_config.effort`, beside the schema's `format`. An empty effort sends none.
+- A thinking model's answer can start with thinking blocks. The answer is read from its text blocks, and only that text goes back with a send-back.
+- An answer Claude declines (stop reason `refusal`) is logged with its category. It ends the conversation: the answer already held is kept, and otherwise the run fails as final.
+- To restore the earlier picker without a code change, set `MOMENTS_PICK_CLAUDE_MODEL=claude-sonnet-4-6`, `MOMENTS_PICK_CLAUDE_EFFORT=` (empty) and `MOMENTS_PICK_CLAUDE_MAX_TOKENS=16000`. Its requests are then exactly as before, temperature 0.2 included. A single run can do the same through `llm_overrides`.
+
+**Budgets.** Both count against the `claude` spend-guard key that the news Claude paths use, so one hourly budget covers every Claude call. They draw on the `claude_global` per-minute rate limit at one unit per call the run can make (2 for punctuate, 7 for pick: 3 answers, 2 judge answers and 2 link answers), as the news tasks reserve. Punctuate runs one at a time and pick four at a time, so a backfill can't starve news. Each answer's model and token counts are logged (`… answer 1 (claude-sonnet-5-5) used input_tokens …, output_tokens …`); output tokens include thinking. The spend guard and the rate limit count calls, not tokens, so the switch to Sonnet 5.5 changes neither.
 
 **Asking again.** Each task checks the answer. Problems go back to Claude in the same conversation: punctuate gets 2 answers, pick gets 3. The first answer with no problems wins. An answer with only soft problems is kept if the later ones get worse. The system prompt and the transcript are prompt-cached, so a send-back rereads them from cache. Soft problems go back only once an answer has no hard ones, so the model isn't pulled in two directions at once.
 

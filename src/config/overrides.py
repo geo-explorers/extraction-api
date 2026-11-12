@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Set
 
-from src.config.settings import Settings, settings
+from src.config.settings import EFFORT_LEVELS, Settings, settings
 from src.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -44,7 +44,7 @@ MAX_TEMPERATURE = 1.0
 MAX_TOKENS_CEILING = 1_000_000
 
 # The settings a run may override, explicitly. A new *_model / *_temperature /
-# *_thinking_level / *_max_tokens field must be added here or to
+# *_thinking_level / *_max_tokens / *_effort field must be added here or to
 # LLM_SETTINGS_NOT_OVERRIDABLE (tests/test_overrides.py enforces the choice),
 # so nothing becomes overridable by naming accident.
 LLM_SETTINGS: tuple[str, ...] = (
@@ -71,6 +71,10 @@ LLM_SETTINGS: tuple[str, ...] = (
     "moments_claude_model",
     "moments_claude_temperature",
     "moments_claude_max_tokens",
+    "moments_pick_claude_model",
+    "moments_pick_claude_effort",
+    "moments_pick_claude_temperature",
+    "moments_pick_claude_max_tokens",
     "claims_extract_model",
     "claims_extract_temperature",
     "claims_extract_thinking_level",
@@ -89,7 +93,7 @@ LLM_SETTINGS_NOT_OVERRIDABLE: tuple[str, ...] = (
     "ollama_embedding_model",  # embedding dimensions are baked into stored vectors
     "premium_extraction_rate_limit_max_tokens",  # a rate-limit budget, not a call parameter
 )
-LLM_SETTING_SUFFIXES = ("_model", "_temperature", "_thinking_level", "_max_tokens")
+LLM_SETTING_SUFFIXES = ("_model", "_temperature", "_thinking_level", "_max_tokens", "_effort")
 
 _unknown = [n for n in LLM_SETTINGS if n not in Settings.model_fields]
 if _unknown:
@@ -329,6 +333,13 @@ def validate_llm_overrides(value: Mapping[str, Any]) -> Dict[str, Any]:
                 raise ValueError(
                     f"llm override {name!r} must be one of {list(THINKING_LEVELS)} "
                     "(empty disables thinking config)"
+                )
+            cleaned[name] = v.strip().lower()
+        elif name.endswith("_effort"):
+            if not isinstance(v, str) or v.strip().lower() not in EFFORT_LEVELS:
+                raise ValueError(
+                    f"llm override {name!r} must be one of {list(EFFORT_LEVELS)} "
+                    "(empty sends no effort)"
                 )
             cleaned[name] = v.strip().lower()
         elif name.endswith("_max_tokens"):
