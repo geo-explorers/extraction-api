@@ -28,6 +28,19 @@ class PunctuateTurn(BaseModel):
     # The turn's words as transcribed, in order. Punctuation already on a word is
     # shown to the model as a hint, not trusted.
     words: List[str] = Field(min_length=1, max_length=MAX_WORDS_PER_TURN)
+    # When each word starts and ends (ms, any clock), one per word: optional. With them, an end
+    # the model put on a word that can't end a sentence ("a", "the", "and") is dropped when the
+    # speaker went straight on, and kept after a pause (GEO-3694). Without them it is sent back.
+    starts_ms: Optional[List[int]] = None
+    ends_ms: Optional[List[int]] = None
+
+    @model_validator(mode="after")
+    def _one_time_per_word(self) -> "PunctuateTurn":
+        if (self.starts_ms is None) != (self.ends_ms is None):
+            raise ValueError("starts_ms and ends_ms come together or not at all")
+        if self.starts_ms is not None and not len(self.starts_ms) == len(self.ends_ms) == len(self.words):
+            raise ValueError("starts_ms and ends_ms need one time per word")
+        return self
 
 
 class TranscriptPunctuateInput(OverridesMixin):

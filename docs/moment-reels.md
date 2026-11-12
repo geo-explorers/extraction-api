@@ -34,11 +34,12 @@ The caller then falls back. Each task's execution timeout covers every request a
 
 Whisper sometimes drops punctuation partway through a debate. Once one window comes back as a run-on, the next window is prompted with it and carries on the same way. This task restores sentence ends.
 
-**Input:** the motion and the turns, each with its speaker and its words as transcribed.
+**Input:** the motion and the turns, each with its speaker and its words as transcribed. Each turn may also carry when each word starts and ends (`starts_ms`, `ends_ms`, one per word); they're used only to judge pauses.
 
 ```json
 {"media_type": "debate", "title": "Voter ID should be required nationwide",
- "turns": [{"speaker": "Nico", "words": ["it", "is", "a", "federal", "problem", "so"]}]}
+ "turns": [{"speaker": "Nico", "words": ["it", "is", "a", "federal", "problem", "so"],
+            "starts_ms": [0, 180, 300, 360, 820, 1500], "ends_ms": [150, 280, 340, 780, 1300, 1700]}]}
 ```
 
 **Output:** for each turn, where each sentence ends, given as a word position and a mark.
@@ -54,6 +55,12 @@ The answer never contains text, so:
 - and checking the answer is a bounds check.
 
 A turn's last word always ends a sentence. If the model leaves it out, the task adds it with a ".".
+
+**Ends inside a clause (GEO-3694).** The model sometimes ends a sentence mid-clause ("…is a. National security risk…"), and moment clips and subtitles then start on the second half. Two guards run inside each turn, never across turns:
+- An end on a word no sentence ends on (an article, a conjunction such as "and" or "because", a possessive) is dropped when the next word follows within 500 ms, so the halves join. After a longer pause the speaker trailed off, so the end stays. Without word times the pause is unknown, so the end goes back to the model as a soft problem instead.
+- A sentence that opens like the rest of the one before ("That the…", "Where…" or "Which…" when it isn't a question, "To the…"), within 1 s of it, goes back as a soft problem: join them if it continues, keep it if not. Whichever the model answers is kept, so a wrong hint costs one more answer and nothing else.
+
+The output shape is unchanged.
 
 ## debates.pick_moments
 

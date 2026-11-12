@@ -152,6 +152,139 @@ def test_the_transcript_is_marked_for_prompt_caching():
     assert call["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 
+# --- transcript.punctuate: ends inside a clause (GEO-3694) ---------------------------------
+
+
+def _timed(text: str, pauses: dict = None, speaker: str = "Nico") -> PunctuateTurn:
+    """A turn whose words each last 200 ms with 50 ms between them, or `pauses[i]` ms after word i."""
+    starts, ends, at = [], [], 0
+    for i, _ in enumerate(text.split()):
+        starts.append(at)
+        ends.append(at + 200)
+        at += 200 + (pauses or {}).get(i, 50)
+    return PunctuateTurn(speaker=speaker, words=text.split(), starts_ms=starts, ends_ms=ends)
+
+
+def _input(*turns: PunctuateTurn) -> TranscriptPunctuateInput:
+    return TranscriptPunctuateInput(media_type="debate", title="Illegal immigration is a security risk", turns=list(turns))
+
+
+def _ends(*turns) -> dict:
+    return {"turns": [{"turn": t, "ends": ends} for t, ends in enumerate(turns)]}
+
+
+SPLIT = "so illegal immigration is a national security risk in my view"
+
+
+def test_an_end_on_a_word_that_cannot_end_a_sentence_is_dropped_when_the_speaker_went_straight_on():
+    # "...is a. National security risk..." with 50 ms between "a" and "national".
+    turns, problems, soft = punct.check(_input(_timed(SPLIT)), _ends([[4, "."], [10, "."]]))
+    assert problems == [] and soft == []
+    assert [(e.word, e.mark) for e in turns[0].ends] == [(10, ".")]
+
+
+def test_the_end_stays_after_a_pause_long_enough_to_be_a_trail_off():
+    # "i think the." then a 900 ms pause and a fresh start: the speaker broke off.
+    inp = _input(_timed("i think the the question is how it is framed", pauses={2: punct.JOIN_GAP_MS + 400}))
+    turns, problems, soft = punct.check(inp, _ends([[2, "."], [9, "."]]))
+    assert problems == [] and soft == []
+    assert [e.word for e in turns[0].ends] == [2, 9]
+
+
+def test_a_turn_ending_on_such_a_word_still_ends_there_and_is_never_joined_to_the_next_turn():
+    inp = _input(_timed("we should look at the"), _timed("idea of a border", speaker="Dahmmy"))
+    turns, problems, soft = punct.check(inp, _ends([[4, "."]], [[3, "."]]))
+    assert problems == [] and soft == []
+    assert [[e.word for e in t.ends] for t in turns] == [[4], [3]]
+
+
+@pytest.mark.parametrize(
+    "words, ends",
+    [
+        # A question or exclamation is the model's call: "...you agree, or?"
+        ("you agree or that is what I hear", [[2, "?"], [7, "."]]),
+        # Capitalised, so a name or a letter: "We call it Plan A."
+        ("we call it Plan A that is the idea", [[4, "."], [8, "."]]),
+    ],
+)
+def test_ends_marked_as_questions_or_on_capitalised_words_are_untouched(words, ends):
+    turns, problems, soft = punct.check(_input(_timed(words)), _ends(ends))
+    assert problems == [] and soft == []
+    assert [[e.word, e.mark] for e in turns[0].ends] == ends
+
+
+def test_without_word_times_such_an_end_is_kept_and_sent_back_as_a_soft_problem():
+    inp = _input(PunctuateTurn(speaker="Nico", words=SPLIT.split()))
+    turns, problems, soft = punct.check(inp, _ends([[4, "."], [10, "."]]))
+    assert problems == [] and [e.word for e in turns[0].ends] == [4, 10]
+    assert len(soft) == 1 and 'ends on "a"' in soft[0] and "word 4" in soft[0]
+
+
+OPENS = "this is how we got here in the first place where corporations argued for more sugar"
+
+
+@pytest.mark.parametrize(
+    "words, first_end",
+    [
+        (OPENS, 9),  # "...in the first place. Where corporations argued..."
+        ("they worry about the border that the border security can serve a purpose", 4),
+        ("i keep coming back to the idea to the idea of a human relationship", 6),
+        ("we tried a sugar tax which is why prices went up", 4),
+    ],
+)
+def test_a_sentence_that_opens_like_the_rest_of_the_one_before_is_sent_back_as_a_soft_problem(words, first_end):
+    last = len(words.split()) - 1
+    turns, problems, soft = punct.check(_input(_timed(words)), _ends([[first_end, "."], [last, "."]]))
+    # The answer stands as it is: only the model can tell a clause from a sentence.
+    assert problems == [] and [e.word for e in turns[0].ends] == [first_end, last]
+    assert len(soft) == 1 and f"starting at word {first_end + 1}" in soft[0] and f"end at word {first_end}" in soft[0]
+
+
+@pytest.mark.parametrize(
+    "words, pauses, ends",
+    [
+        # "Where I come from..." after a real pause: a sentence of its own.
+        ("that is my answer where i come from people vote", {3: punct.HINT_GAP_MS + 500}, [[3, "."], [9, "."]]),
+        # "Where in the Constitution...?" asks, so it opens a sentence.
+        ("that is my answer where in the constitution is that", {}, [[3, "."], [9, "?"]]),
+        # After a question, a new sentence starts whatever it opens with.
+        ("is that fair to the first point yes", {}, [[2, "?"], [7, "."]]),
+    ],
+)
+def test_openers_after_a_long_pause_a_question_or_opening_one_are_not_hinted(words, pauses, ends):
+    turns, problems, soft = punct.check(_input(_timed(words, pauses=pauses)), _ends(ends))
+    assert problems == [] and soft == []
+    assert [[e.word, e.mark] for e in turns[0].ends] == ends
+
+
+@pytest.mark.parametrize("joined", [True, False])
+def test_a_hint_goes_back_once_and_the_second_answer_is_kept_whether_it_joins_or_not(joined):
+    first = _ends([[9, "."], [15, "."]])
+    second = _ends([[15, "."]]) if joined else first
+    client = _FakeClaude(first, second)
+    result = asyncio.run(punct.punctuate(_input(_timed(OPENS)), client=client))
+    # Two answers, within the budget the task reserves; the hint went back with the first.
+    assert len(client.calls) == punct.ATTEMPTS == 2
+    assert "starting at word 10" in client.calls[1]["messages"][2]["content"]
+    assert [e.word for e in result.turns[0].ends] == ([15] if joined else [9, 15])
+
+
+def test_an_answer_with_nothing_to_hint_is_kept_without_asking_again():
+    client = _FakeClaude(_ends([[4, "."], [10, "."]]))
+    result = asyncio.run(punct.punctuate(_input(_timed(SPLIT)), client=client))
+    assert len(client.calls) == 1
+    assert [e.word for e in result.turns[0].ends] == [10] and result.sentences == 1
+
+
+@pytest.mark.parametrize(
+    "starts, ends",
+    [([0, 1], None), ([0], [1]), ([0, 1], [1, 2, 3])],
+)
+def test_word_times_come_as_a_pair_with_one_time_per_word(starts, ends):
+    with pytest.raises(ValueError):
+        PunctuateTurn(speaker="Nico", words=["a", "b"], starts_ms=starts, ends_ms=ends)
+
+
 def test_json_is_read_whole_or_from_a_fence_as_the_news_paths_read_it():
     assert parse_json('{"a": 1}') == {"a": 1}
     assert parse_json('Here it is:\n```json\n{"a": 1}\n```') == {"a": 1}
