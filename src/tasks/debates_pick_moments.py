@@ -32,7 +32,7 @@ DEBATES_PICK_MOMENTS_MAX_PAYLOAD_BYTES = 1024 * 1024
 # geo-chat waits 17 min for a pick (PICK_MOMENTS_POLL_TIMEOUT in crates/media/src/extraction.rs),
 # counted from when its enqueue returns, so queue time and Hatchet retries are inside it; past it
 # geo-chat falls back to its own picker and drops the result. Without a deadline a run could take
-# CALLS x REQUEST_TIMEOUT_S + 60 = 26 min per attempt.
+# CALLS x REQUEST_TIMEOUT_S + 60 = 36 min per attempt (7 calls of up to 300 s each).
 GEO_CHAT_WAIT_S = 17 * 60
 # The run's deadline, counted from when the facade enqueued it (deadline.ENQUEUED_AT, a moment
 # before geo-chat's clock starts): 2 min under geo-chat's wait, for the result to reach it (the

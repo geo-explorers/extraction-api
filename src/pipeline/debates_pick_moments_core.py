@@ -44,7 +44,9 @@ alone (`REELS_SCHEMA`, `JUDGE_SCHEMA`).
 Under a deadline (GEO-3697, deadline.Deadline), the run returns before geo-chat stops
 waiting: ask_json sends no more answers back once too little time is left and keeps
 the best held, and the judge is skipped for the top-ranked passing reel (`top_ranked`), the
-same reel a judge that gives no pick keeps.
+same reel a judge that gives no pick keeps. The link call (link_claims "after") is skipped the
+same way, every clip then linked by words in common (`closest_claims`), and its requests are
+capped by the time left.
 """
 
 from __future__ import annotations
@@ -74,7 +76,8 @@ ATTEMPTS = 3
 JUDGE_ATTEMPTS = 2
 # Link answers per run, under link_claims "after" (GEO-3692).
 LINK_ATTEMPTS = 2
-# Claude calls one run can make: what it reserves of the shared budget, and times out by. Under
+# Claude calls one run can make: what it reserves of the shared budget (its time is set by the
+# deadline, deadline.Deadline, not by how many calls it makes). Under
 # link_claims "in_pick" the link call is never made, so a run makes at most ATTEMPTS + JUDGE_ATTEMPTS.
 CALLS = ATTEMPTS + JUDGE_ATTEMPTS + LINK_ATTEMPTS
 # The claim_index a moment holds between the pick and its link under link_claims "after": never
@@ -1038,11 +1041,27 @@ def link_rank(value: Tuple[Links, List[int]]) -> int:
     return len(value[1])
 
 
-async def link_claims(input: DebatesPickMomentsInput, moments: List[PickedMoment], *, client: Any = None) -> List[PickedMoment]:
+async def link_claims(
+    input: DebatesPickMomentsInput,
+    moments: List[PickedMoment],
+    *,
+    client: Any = None,
+    deadline: Optional[Deadline] = None,
+) -> List[PickedMoment]:
     """`moments` each linked to a claim of its own speaker, a speaker's two clips to different
     claims, by a call that sees the claims and the clips as heard (render_for_link). Links the call
     gets wrong after LINK_ATTEMPTS, and every link when it gives no answer (a failed request, the
-    spend guard), are filled by closest_claims: the reel is never lost to its links."""
+    spend guard, a request cut off at the deadline), are filled by closest_claims: the reel is
+    never lost to its links. Under `deadline` the call is not started without the time for a
+    request (every clip is then linked by closest_claims), and its requests are capped by the time
+    left."""
+    if deadline is not None and not deadline.allows_request():
+        logger.warning(
+            f"{TASK}: shortened by the deadline: {deadline.left():.0f} s left, so the link call was skipped; "
+            "linking every clip by words in common"
+        )
+        links, _ = closest_claims(input, moments, [None] * len(moments))
+        return [m.model_copy(update={"claim_index": claim, "claim_fit": fit}) for m, (claim, fit) in zip(moments, links)]
     try:
         (links, filled), _, _ = await ask_json(
             prompts.get("debates_pick_moments.link_system"),
@@ -1054,6 +1073,7 @@ async def link_claims(input: DebatesPickMomentsInput, moments: List[PickedMoment
             schema=LINK_SCHEMA,
             cut_off_retries=CUT_OFF_RETRIES,
             rank=link_rank,
+            deadline=deadline,
         )
     except DecisionError as e:
         logger.warning(f"{TASK}: the link call gave no answer; linking every clip by words in common: {e}")
@@ -1113,7 +1133,7 @@ async def pick_moments(
     if cut:
         logger.warning(f"{TASK}: no reel kept every clip within the limit; kept one with clips {cut} cut to fit")
     if not in_pick:
-        moments = await link_claims(input, moments, client=client)
+        moments = await link_claims(input, moments, client=client, deadline=deadline)
     return DebatesPickMomentsResult(
         story=story,
         moments=moments,
