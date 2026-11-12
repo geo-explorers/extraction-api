@@ -339,25 +339,25 @@ def test_a_trim_that_would_go_below_the_minimum_reports_the_real_length():
 def test_a_trim_steps_past_a_dangling_opener_when_a_clean_start_fits():
     debate = _debate()
     debate.clip_max_ms = 30_000  # timed against a 30 s limit
-    # 0-2 is 34 s. Dropping sentence 0 lands on "And", so the trim steps on to sentence 2.
-    _long_first_turn(debate, [10, 12, 12], ["One.", "And that is why.", "It holds."])
+    # 0-2 is 34 s. Dropping sentence 0 lands on "But", so the trim steps on to sentence 2.
+    _long_first_turn(debate, [10, 12, 12], ["One.", "But that is why.", "It holds."])
     (_, moments), problems, soft = pick.check(debate, GOOD)
     assert problems == []
     assert moments[0].start_sentence == 2
-    assert not any('opens on "and"' in p for p in soft), soft
+    assert not any('opens on "but"' in p for p in soft), soft
 
 
 def test_a_soft_answer_between_hard_ones_is_kept_and_its_nudge_sent_once():
     debate = _debate()
-    debate.sentences[3].text = "And it is a federal problem."
+    debate.sentences[3].text = "But it is a federal problem."
     broken = {"moments": GOOD["moments"][:3]}
     client = _FakeClaude(broken, GOOD, broken)
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert result.attempts == 2 and len(result.moments) == 4
     conversation = client.calls[-1]["messages"]
     first, second = conversation[2]["content"], conversation[4]["content"]
-    assert "exactly 4" in first and 'opens on "and"' not in first
-    assert 'opens on "and"' in second
+    assert "exactly 4" in first and 'opens on "but"' not in first
+    assert 'opens on "but"' in second
 
 
 def test_one_sentence_too_long_is_still_refused():
@@ -369,11 +369,11 @@ def test_one_sentence_too_long_is_still_refused():
 
 def test_hard_problems_are_sent_back_without_the_soft_ones():
     debate = _debate()
-    debate.sentences[3].text = "And it is a federal problem."
+    debate.sentences[3].text = "But it is a federal problem."
     client = _FakeClaude({"moments": GOOD["moments"][:3]}, GOOD, GOOD)
     asyncio.run(pick.pick_moments(debate, client=client))
     first_send_back = client.calls[1]["messages"][2]["content"]
-    assert "exactly 4" in first_send_back and 'opens on "and"' not in first_send_back
+    assert "exactly 4" in first_send_back and 'opens on "but"' not in first_send_back
 
 
 def test_pick_refuses_overlapping_clips():
@@ -401,15 +401,15 @@ def test_pick_sends_a_broken_reel_back_and_returns_the_fixed_one():
 
 def test_a_clip_opening_on_a_connective_is_asked_again_but_kept_on_the_last_answer():
     debate = _debate()
-    debate.sentences[3].text = "And it is a federal problem."
+    debate.sentences[3].text = "But it is a federal problem."
     accepted, problems, soft = pick.check(debate, GOOD)
     assert problems == [] and accepted is not None
-    assert any('opens on "and"' in p for p in soft), soft
+    assert any('opens on "but"' in p for p in soft), soft
     # Asked again while attempts remain; the last answer is kept with it.
     client = _FakeClaude(GOOD, GOOD, GOOD)
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert result.attempts == 3 and len(client.calls) == 3
-    assert 'opens on "and"' in client.calls[1]["messages"][2]["content"]
+    assert 'opens on "but"' in client.calls[1]["messages"][2]["content"]
 
 
 def test_an_acceptable_answer_is_kept_when_the_ones_sent_back_get_worse():
@@ -536,7 +536,7 @@ def test_a_judge_request_that_fails_keeps_the_first_reel():
 
 def test_a_clean_reel_is_taken_over_one_with_soft_problems_without_a_judge():
     debate = _debate()
-    debate.sentences[6].text = "So it is a state matter."  # GOOD's third clip opens on "so"
+    debate.sentences[6].text = "Because it is a state matter."  # GOOD's third clip opens on "because"
     clean = json.loads(json.dumps(OTHER))
     clean["moments"][3]["start_sentence"] = 7  # starts past it
     client = _FakeClaude({"reels": [GOOD, clean]})
@@ -544,11 +544,11 @@ def test_a_clean_reel_is_taken_over_one_with_soft_problems_without_a_judge():
     assert [m.speaker for m in result.moments] == [2, 1, 2, 1] and len(client.calls) == 1
 
 
-def test_a_clip_opening_on_so_is_a_soft_problem():
+def test_a_clip_opening_on_because_is_a_soft_problem():
     debate = _debate()
-    debate.sentences[3].text = "So it is a federal problem."
+    debate.sentences[3].text = "Because it is a federal problem."
     _, problems, soft = pick.check(debate, GOOD)
-    assert problems == [] and any('opens on "so"' in p for p in soft), soft
+    assert problems == [] and any('opens on "because"' in p for p in soft), soft
 
 
 def _clips_of(debate, seconds):
@@ -574,7 +574,7 @@ def test_a_reel_over_four_clips_at_the_target_is_asked_to_shorten():
 
 def test_reels_that_pass_go_to_the_judge_as_they_are_not_back_for_a_nudge():
     debate = _debate()
-    debate.sentences[6].text = "So it is a state matter."  # both reels have a later clip opening on it
+    debate.sentences[6].text = "Because it is a state matter."  # both reels have a later clip opening on it
     passed, problems, soft = pick.check_reels(debate, {"reels": [GOOD, OTHER]})
     assert problems == [] and soft == [] and len(passed) == 2
     client = _FakeClaude({"reels": [GOOD, OTHER]}, {"best": 1, "why": "x"})
@@ -582,7 +582,7 @@ def test_reels_that_pass_go_to_the_judge_as_they_are_not_back_for_a_nudge():
     assert (result.attempts, result.candidates, len(client.calls)) == (1, 2, 2)
     # One passing reel with a soft problem is sent back, with the other reels' problems too.
     _, _, soft = pick.check_reels(debate, {"reels": [GOOD, BROKEN]})
-    assert any(p.startswith('Reel 0: Clip 2 opens on "so"') for p in soft), soft
+    assert any(p.startswith('Reel 0: Clip 2 opens on "because"') for p in soft), soft
     assert any(p.startswith("Reel 1: ") and "exactly 4" in p for p in soft), soft
 
 
@@ -699,7 +699,7 @@ def test_a_reel_answer_cut_off_twice_fails_without_an_engine_retry():
 
 def test_a_cut_off_after_an_acceptable_answer_keeps_that_answer():
     debate = _debate()
-    debate.sentences[3].text = "And it is a federal problem."  # a soft problem: asked again
+    debate.sentences[3].text = "But it is a federal problem."  # a soft problem: asked again
     client = _FakeClaude({"reels": [GOOD]}, _CutOff("..."), {"reels": [GOOD]})
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert result.attempts == 1 and len(client.calls) == 2
@@ -733,17 +733,20 @@ def test_a_cut_off_judge_answer_is_asked_again_too():
         # The 11 Nov worst case: Whisper had "…models, and not just get completely overwhelmed…".
         ("and not just get completely overwhelmed by a society.", "starts mid-sentence"),
         ("not just get completely overwhelmed by a society.", "starts mid-sentence"),
-        ("And it is a state matter.", 'opens on "and"'),
-        ("So it is a state matter.", 'opens on "so"'),
+        # Filler geo-chat cuts is skipped first; what plays after it is what counts.
+        ("And so but it is a state matter.", 'opens on "but"'),
+        ("Um, they want you to believe it.", 'opens on "they"'),
+        # Too short to cut: geo-chat keeps three words of the sentence, so it plays as said.
+        ("So what now?", 'opens on "so"'),
+        ("Um. But it is a state matter.", 'opens on "but"'),
         ("But it is a state matter.", 'opens on "but"'),
         ("Because it is a state matter.", 'opens on "because"'),
         ("That's why it is a state matter.", 'opens on "that\'s"'),
         ("Yeah, it is a state matter.", 'opens on "yeah"'),
         ("Okay, it is a state matter.", 'opens on "okay"'),
-        ("Um, it is a state matter.", 'opens on "um"'),
         ("I mean, it is a state matter.", 'opens on "i mean"'),
         ("Like, it is a state matter.", 'opens on "like"'),
-        ("You know, it is a state matter.", 'opens on "you know"'),
+        ("You know, right?", 'opens on "you know"'),
     ],
 )
 def test_a_first_clip_opening_mid_sentence_or_on_a_connective_is_refused(text, problem):
@@ -767,6 +770,13 @@ def test_a_first_clip_opening_mid_sentence_or_on_a_connective_is_refused(text, p
         "You know nothing about the rolls.",
         "I meant every word of it.",
         "This is the number that matters.",
+        # geo-chat cuts the filler first (story_moments::filler_lead): the viewer hears "We need rules."
+        "Um, we need rules.",
+        "And we need rules.",
+        "So, it is a state matter.",
+        "Uh, you know, voter ID is a state matter.",
+        "Um. Voter ID is a state matter.",
+        "Émilie Durand ran the rolls in Ohio.",
     ],
 )
 def test_a_first_clip_opening_on_a_sentence_that_starts_a_thought_is_accepted(text):
@@ -795,7 +805,7 @@ def _past_sentence_0(reel):
 
 def test_one_candidate_with_a_good_opener_is_taken_without_a_send_back():
     debate = _debate()
-    debate.sentences[0].text = "And it is a state matter."  # GOOD opens on it; OTHER opens on sentence 3
+    debate.sentences[0].text = "But it is a state matter."  # GOOD opens on it; OTHER opens on sentence 3
     client = _FakeClaude({"reels": [GOOD, _past_sentence_0(OTHER)]})
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert len(client.calls) == 1 and result.candidates == 1
@@ -804,14 +814,14 @@ def test_one_candidate_with_a_good_opener_is_taken_without_a_send_back():
 
 def test_reels_that_break_only_the_first_clip_rules_are_sent_back_then_kept_as_a_last_resort():
     debate = _debate()
-    debate.sentences[0].text = "And it is a state matter."  # GOOD's opener
+    debate.sentences[0].text = "But it is a state matter."  # GOOD's opener
     debate.sentences[3].text = "but it is federal."  # OTHER's opener, mid-sentence too
     answer = {"reels": [GOOD, OTHER]}
     client = _FakeClaude(answer, answer, answer, {"best": 1, "why": "x"})
     result = asyncio.run(pick.pick_moments(debate, client=client))
     # Sent back twice with the first clips' problems, then the last answer's reels judged.
     assert len(client.calls) == 4 and result.attempts == 3 and result.candidates == 2
-    assert 'Reel 0: Clip 0, the reel\'s first clip, opens on sentence 0, which opens on "and"' in client.calls[1]["messages"][2]["content"]
+    assert 'Reel 0: Clip 0, the reel\'s first clip, opens on sentence 0, which opens on "but"' in client.calls[1]["messages"][2]["content"]
     assert [m.speaker for m in result.moments] == [2, 1, 2, 1]
     assert any("starts mid-sentence" in p for p in result.first_clip_problems)
     assert any('opens on "but"' in p for p in result.first_clip_problems)
@@ -819,7 +829,7 @@ def test_reels_that_break_only_the_first_clip_rules_are_sent_back_then_kept_as_a
 
 def test_a_reel_fixed_after_a_first_clip_send_back_wins_with_nothing_to_report():
     debate = _debate()
-    debate.sentences[0].text = "And it is a state matter."
+    debate.sentences[0].text = "But it is a state matter."
     client = _FakeClaude({"reels": [GOOD]}, {"reels": [_past_sentence_0(OTHER)]})
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert result.attempts == 2 and result.first_clip_problems == []
@@ -827,8 +837,8 @@ def test_a_reel_fixed_after_a_first_clip_send_back_wins_with_nothing_to_report()
 
 def test_a_reel_with_other_hard_problems_is_no_last_resort():
     debate = _debate()
-    debate.sentences[0].text = "And it is a state matter."
-    broken = {"moments": GOOD["moments"][:3]}  # opens on "and", and only three clips
+    debate.sentences[0].text = "But it is a state matter."
+    broken = {"moments": GOOD["moments"][:3]}  # opens on "but", and only three clips
     value, problems, _ = pick.check(debate, broken)
     assert value is None and any("exactly 4" in p for p in problems)
     with pytest.raises(FinalDecisionError):
@@ -887,7 +897,7 @@ def test_a_rate_limit_or_overload_stays_retryable(status):
 
 def test_a_cut_off_after_a_last_resort_still_takes_its_retry():
     debate = _debate()
-    debate.sentences[0].text = "And it is a state matter."  # GOOD's opener: a last resort
+    debate.sentences[0].text = "But it is a state matter."  # GOOD's opener: a last resort
     client = _FakeClaude({"reels": [GOOD]}, _CutOff("..."), {"reels": [_past_sentence_0(OTHER)]})
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert len(client.calls) == 3 and result.attempts == 3 and result.first_clip_problems == []
@@ -895,7 +905,7 @@ def test_a_cut_off_after_a_last_resort_still_takes_its_retry():
 
 def test_a_cut_off_with_no_retry_left_keeps_the_last_resort():
     debate = _debate()
-    debate.sentences[0].text = "And it is a state matter."
+    debate.sentences[0].text = "But it is a state matter."
     client = _FakeClaude({"reels": [GOOD]}, _CutOff("a"), _CutOff("b"))
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert len(client.calls) == 3 and result.attempts == 1 and result.first_clip_problems
@@ -944,7 +954,7 @@ def _guard_trips_after(monkeypatch, calls):
 
 def _last_resort_debate():
     debate = _debate()
-    debate.sentences[0].text = "And it is a state matter."  # GOOD's opener: a last resort
+    debate.sentences[0].text = "But it is a state matter."  # GOOD's opener: a last resort
     return debate
 
 
@@ -970,7 +980,7 @@ def test_a_send_back_whose_request_fails_keeps_the_last_resort(failure):
 
 def test_a_send_back_whose_request_fails_keeps_an_acceptable_answer():
     debate = _debate()
-    debate.sentences[3].text = "And it is a federal problem."  # a soft problem: asked again
+    debate.sentences[3].text = "But it is a federal problem."  # a soft problem: asked again
     client = _FakeClaude({"reels": [GOOD]}, RuntimeError("overloaded"))
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert len(client.calls) == 2 and result.attempts == 1 and result.first_clip_problems == []
@@ -985,3 +995,100 @@ def test_each_answer_logs_its_token_counts(monkeypatch):
     message = SimpleNamespace(content=[], usage=usage)
     claude_json._log_usage("t", 2, message)
     assert lines == ["t: answer 2 used input_tokens 10, cache_read_input_tokens 900, output_tokens 40"]
+
+
+# --- round 3: clip openers as the viewer hears them, past the filler geo-chat cuts ----------
+
+
+def test_the_filler_list_is_geo_chats():
+    # A copy of geo-chat crates/media/src/clip_ranges.rs (FILLER, FILLER_PAIRS, KNOW_OBJECT_NEXT,
+    # SO_ADVERB_NEXT) and story_moments.rs (FILLER_KEEP_WORDS). When geo-chat changes them, change
+    # the copy and this test together.
+    assert pick.FILLER == ("um", "uh", "er", "ah", "hmm", "so", "and")
+    assert pick.FILLER_PAIRS == (("you", "know"),)
+    assert pick.KNOW_OBJECT_NEXT == (
+        "nothing", "what", "how", "why", "who", "where", "when", "everything", "anything", "something",
+        "more", "better", "exactly",
+    )
+    assert pick.SO_ADVERB_NEXT == ("far", "much", "many", "long", "few", "little", "often", "called", "bad", "good")
+    assert pick.FILLER_KEEP_WORDS == 3
+    # One copy: the opener list takes the filler from it, so kept filler still counts as an opener.
+    assert pick.DANGLING_OPENERS[: len(pick.FILLER)] == pick.FILLER
+
+
+def _heard(*sentences):
+    """Sentences `sentences` as one clip's turn: where the viewer starts hearing it, as words."""
+    debate = _debate()
+    for k, text in enumerate(sentences):
+        debate.sentences[k].text = text
+    k, words = pick.heard_start(debate, 0, len(sentences) - 1)
+    return k, " ".join(words)
+
+
+def test_a_clip_is_heard_from_where_geo_chat_cuts_its_filler():
+    # geo-chat's own cases (story_moments.rs, a_clip_starts_past_its_filler_but_keeps_a_short_sentence_whole).
+    assert _heard("So, people embrace this.") == (0, "people embrace this.")
+    assert _heard("And so the point stands.") == (0, "the point stands.")
+    assert _heard("Um, so the point stands.") == (0, "the point stands.")
+    assert _heard("You know, the point stands.") == (0, "the point stands.")
+    assert _heard("So what is it?") == (0, "what is it?")
+    assert _heard("So what now?") == (0, "So what now?")
+    assert _heard("So far the data agrees.") == (0, "So far the data agrees.")
+    assert _heard("You know nothing about it.") == (0, "You know nothing about it.")
+    assert _heard("But for that law we'd lose.") == (0, "But for that law we'd lose.")
+    assert _heard("Soon we will see.") == (0, "Soon we will see.")
+    # A_first_sentence_of_nothing_but_filler_is_dropped_whole.
+    assert _heard("Um.", "The data shows it.") == (1, "The data shows it.")
+    assert _heard("Uh.", "Um, so the data shows it.") == (1, "the data shows it.")
+    assert _heard("Um.", "So what now?") == (1, "So what now?")
+
+
+def test_a_filler_sentence_before_a_run_on_still_refuses_the_first_clip():
+    debate = _debate()
+    debate.sentences[0].text, debate.sentences[1].text = "Um.", "but it is a state matter."
+    _, problems, _ = pick.check(debate, GOOD)
+    assert any("starts mid-sentence" in p for p in problems) and any('opens on "but"' in p for p in problems), problems
+
+
+def test_a_first_clip_past_its_filler_keeps_the_soft_rule_for_what_is_heard():
+    debate = _debate()
+    debate.sentences[0].text = "Um, it's time we stopped pretending states can run federal elections."
+    value, problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and value is not None
+    assert any(p.startswith('Clip 0 opens on "it\'s"') for p in soft), soft
+
+
+def test_a_later_clip_is_nudged_on_what_plays_after_its_filler():
+    debate = _debate()
+    debate.sentences[3].text = "And it is a federal problem."  # plays as "It is a federal problem."
+    assert pick.check(debate, GOOD)[1:] == ([], [])
+    debate.sentences[3].text = "And they want it federal."  # plays as "They want it federal."
+    _, problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and any(p.startswith('Clip 1 opens on "they"') for p in soft), soft
+
+
+def test_a_trim_reads_a_start_past_its_filler_as_clip_1_does():
+    debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
+    # 0-2 is 34 s. Sentence 1 plays as "We need rules.", which clip 1 keeps: the trim takes it.
+    _long_first_turn(debate, [10, 12, 12], ["One.", "Um, we need rules.", "It holds."])
+    (_, moments), problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and moments[0].start_sentence == 1
+
+
+def test_an_accented_capital_opens_a_sentence_in_a_cased_transcript():
+    debate = _debate()
+    for sentence in debate.sentences:
+        sentence.text = "Élan matters here."
+    assert pick.cased(debate)
+    debate.sentences[0].text = "élan matters here."  # a lowercase accented letter still runs on
+    assert any("starts mid-sentence" in p for p in pick.check(debate, GOOD)[1])
+
+
+def test_a_spend_guard_trip_on_a_send_back_keeps_an_acceptable_answer(monkeypatch):
+    _guard_trips_after(monkeypatch, 1)
+    debate = _debate()
+    debate.sentences[3].text = "But it is a federal problem."  # a soft problem: asked again
+    client = _FakeClaude({"reels": [GOOD]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 1 and result.attempts == 1 and result.first_clip_problems == []

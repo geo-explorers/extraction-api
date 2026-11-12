@@ -15,7 +15,8 @@ A clip over the hard limit is first shortened from its start to fit (trim_to_fit
 marked trimmed_from_sentence, rather than refused.
 
 The first clip has hard rules of its own (`first_clip_problems`): it starts a sentence
-and a thought, not mid-sentence, on a connective or on filler. A reel that breaks only
+and a thought, not mid-sentence, on a connective or on filler. Every opener rule reads a
+clip as the viewer hears it, past the filler geo-chat cuts before it plays (`heard_start`). A reel that breaks only
 those is sent back like any other, but kept as a last resort when no answer has a reel
 that keeps every rule, with the rules it breaks on the result (`first_clip_problems`).
 
@@ -53,18 +54,36 @@ CANDIDATES = 3
 # Titles a speaker's short name skips: "Dr. Jane Smith" is Jane.
 TITLES = {"dr", "mr", "mrs", "ms", "mx", "prof", "sir"}
 ROLES = ("opening", "answer", "rebuttal", "closing")
-# A clip opening on one of these leans on something the viewer did not hear, or on filler. The
-# prompt forbids it; the check asks again (a soft rule: the last answer is kept regardless). For
-# the first clip it is a hard rule (first_clip_problems), except FIRST_CLIP_SOFT_OPENERS.
-DANGLING_OPENERS = (
-    "and", "but", "so", "also", "because", "yeah", "yes", "okay", "ok", "um", "uh", "like",
+# The filler geo-chat cuts from the start of every clip before it plays, so a clip's opener is
+# judged on what is left (heard_start). A copy of geo-chat's crates/media/src/clip_ranges.rs
+# (FILLER, FILLER_PAIRS, KNOW_OBJECT_NEXT, SO_ADVERB_NEXT, filler_lead) and
+# crates/media/src/story_moments.rs (FILLER_KEEP_WORDS, filler_lead): change them together, and
+# test_the_filler_list_is_geo_chats will fail until the copy matches again.
+FILLER = ("um", "uh", "er", "ah", "hmm", "so", "and")
+# Two-word filler, checked before FILLER.
+FILLER_PAIRS = (("you", "know"),)
+# "you know" before one of these is a verb with its object, not filler: "you know nothing".
+KNOW_OBJECT_NEXT = (
+    "nothing", "what", "how", "why", "who", "where", "when", "everything", "anything", "something",
+    "more", "better", "exactly",
+)
+# "so" before one of these is an adverb, not filler: "so far the data shows" keeps its "so".
+SO_ADVERB_NEXT = ("far", "much", "many", "long", "few", "little", "often", "called", "bad", "good")
+# The filler stays when fewer than this many words of its sentence would be left: "So what now?".
+FILLER_KEEP_WORDS = 3
+# A clip whose heard words open on one of these leans on something the viewer did not hear, or is
+# filler geo-chat kept (FILLER_KEEP_WORDS). The prompt forbids it; the check asks again (a soft rule:
+# the last answer is kept regardless). For the first clip it is a hard rule (first_clip_problems),
+# except FIRST_CLIP_SOFT_OPENERS.
+DANGLING_OPENERS = FILLER + (
+    "but", "also", "because", "yeah", "yes", "okay", "ok", "like",
     "that's", "they", "it's", "which", "then", "plus", "or",
 )
 # Openers that often state a position rather than lean on what came before ("It's time we…",
 # "Yes, voter ID should be federal"): soft on the first clip too, as on later ones.
 FIRST_CLIP_SOFT_OPENERS = ("it's", "yes")
-# Two-word filler openers, each with whether it counts only when set off by a comma, as geo-chat's
-# clip_ranges::filler_lead reads "you know": "You know, the data…" is filler, "you know nothing" a verb.
+# Two-word openers, each with whether it counts only when set off by a comma: "I mean, …" leans on
+# what came before; "You know, …" is filler when geo-chat keeps it ("You know, right?").
 DANGLING_PAIRS = {("i", "mean"): False, ("you", "know"): True}
 # A transcript is cased (Whisper's is) when at least this share of its sentences opens on a capital.
 # Only then does a sentence opening on a lowercase letter say it starts mid-sentence.
@@ -177,81 +196,108 @@ def render(input: DebatesPickMomentsInput) -> str:
 
 
 def _bare(word: str) -> str:
-    """`word` lowercased, letters and apostrophes only (curly ones straightened)."""
-    return re.sub(r"[^a-z']", "", word.lower().replace("’", "'"))
+    """`word` lowercased, letters, digits and apostrophes only (curly ones straightened), as
+    geo-chat's clip_ranges::bare reads it."""
+    return "".join(c for c in word.lower().replace("’", "'") if c.isalnum() or c == "'")
 
 
-def _head(sentence) -> str:
-    """A sentence's first word, as written."""
-    return (sentence.text.split() or [""])[0]
+def _runs_on(word: str) -> bool:
+    """Whether no punctuation ends `word`, so it and the next can be one phrase ("so far", "you know
+    nothing"); "So, many people" is filler before a new clause. geo-chat's clip_ranges::runs_on."""
+    return not word.rstrip().endswith((",", ".", ";", ":", "!", "?", "…"))
 
 
-def _first_word(sentence) -> str:
-    """A sentence's first word, bare."""
-    return _bare(_head(sentence))
+def filler_lead(words: List[str]) -> int:
+    """How many of `words`' first words are filler a clip starts past: FILLER and FILLER_PAIRS,
+    except "so" as an adverb (SO_ADVERB_NEXT) and "you know" with its object (KNOW_OBJECT_NEXT),
+    each only when the words run on. geo-chat's clip_ranges::filler_lead."""
+    at = lambda i: _bare(words[i]) if i < len(words) else None
+    runs_on_at = lambda i: i < len(words) and _runs_on(words[i])
+    first = 0
+    while (head := at(first)) is not None:
+        following = at(first + 1)
+        if (
+            runs_on_at(first)
+            and (head, following) in FILLER_PAIRS
+            and not (runs_on_at(first + 1) and at(first + 2) in KNOW_OBJECT_NEXT)
+        ):
+            first += 2
+        elif head in FILLER and not (head == "so" and runs_on_at(first) and following in SO_ADVERB_NEXT):
+            first += 1
+        else:
+            break
+    return first
 
 
-def dangling_opener(sentence) -> Optional[str]:
-    """The dangling word or filler `sentence` opens on (DANGLING_OPENERS, DANGLING_PAIRS), or None."""
-    words = sentence.text.split()
+def heard_start(input: DebatesPickMomentsInput, start: int, end: int) -> Tuple[int, List[str]]:
+    """Where the viewer starts hearing a clip of sentences `start`-`end`, once geo-chat has cut its
+    filler: the sentence, and its words from the first one heard. Sentences that are nothing but
+    filler ("Um.") are skipped, then the filler the next one opens on, unless that leaves fewer than
+    FILLER_KEEP_WORDS of it. geo-chat's story_moments::filler_lead. (geo-chat also keeps the filler
+    when the clip would drop under its minimum length without it; a few filler words never decide
+    that for a clip inside the limits.)"""
+    for k in range(start, end + 1):
+        words = input.sentences[k].text.split()
+        lead = filler_lead(words)
+        if lead == len(words) and k < end:
+            continue
+        return k, (words if len(words) - lead < FILLER_KEEP_WORDS else words[lead:])
+    return end, input.sentences[end].text.split()
+
+
+def _opener(words: List[str]) -> Optional[str]:
+    """The dangling word or filler `words` open on (DANGLING_OPENERS, DANGLING_PAIRS), or None."""
     pair = tuple(_bare(w) for w in words[:2])
     if pair in DANGLING_PAIRS and (not DANGLING_PAIRS[pair] or words[1].endswith(",")):
         return " ".join(pair)
-    first = _first_word(sentence)
+    first = _bare(words[0]) if words else ""
     return first if first in DANGLING_OPENERS else None
 
 
-def _opens_on_a_letter(text: str) -> bool:
-    """Whether `text`'s first letter or digit is a letter. A sentence opening on a number ("50",
-    "1960s", "10x") says nothing about case."""
-    lead = re.search(r"[A-Za-z0-9]", text)
-    return bool(lead) and lead.group(0).isalpha()
+def _lead_char(text: str) -> str:
+    """`text`'s first letter or digit, any script ("É" as much as "E"); "" if it has none."""
+    return next((c for c in text if c.isalnum()), "")
 
 
 def cased(input: DebatesPickMomentsInput) -> bool:
     """Whether the transcript keeps capitals at sentence starts (CASED_SHARE), among the sentences
-    that open on a letter."""
-    firsts = [re.search(r"[A-Za-z]", s.text).group(0) for s in input.sentences if _opens_on_a_letter(s.text)]
+    that open on a letter. A sentence opening on a number ("50", "1960s") says nothing about case."""
+    firsts = [c for c in (_lead_char(s.text) for s in input.sentences) if c.isalpha()]
     return bool(firsts) and sum(c.isupper() for c in firsts) >= CASED_SHARE * len(firsts)
 
 
 def opens_mid_sentence(sentence) -> bool:
     """Whether `sentence` opens on a lowercase word ("and not just get…"): in a cased transcript, the
     speech recogniser heard it run on from the words before, wherever the punctuation put its start.
-    A word cased inside ("iPhone") is a name, not a run-on; one opening on a number ("50", "1960s")
-    says nothing."""
-    head = _head(sentence)
-    letters = re.sub(r"[^A-Za-z]", "", head)
-    return _opens_on_a_letter(head) and letters.islower()
+    Read on the sentence's first word as written, filler and all: a capital on "And we need rules."
+    is where the recogniser started a sentence, so what plays after the cut "And" starts one too,
+    while "and not just…" plays as a run-on. A word cased inside ("iPhone") is a name, not a run-on;
+    one opening on a number ("50", "1960s") says nothing (cased)."""
+    word = next((w for w in sentence.text.split() if _lead_char(w)), "")
+    letters = "".join(c for c in word if c.isalpha())
+    return _lead_char(word).isalpha() and letters.islower()
 
 
-def _hard_start(sentence, is_cased: bool) -> Tuple[bool, Optional[str]]:
-    """What the first clip may not open on, for `sentence`: whether it starts mid-sentence (in a cased
-    transcript), and the connective or filler it opens on, if that is hard on the first clip."""
-    opener = dangling_opener(sentence)
-    return is_cased and opens_mid_sentence(sentence), (opener if opener not in FIRST_CLIP_SOFT_OPENERS else None)
+def _opening(input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool) -> Tuple[bool, Optional[str]]:
+    """How a clip of sentences `start`-`end` opens, as the viewer hears it (heard_start): whether it
+    starts mid-sentence (in a cased transcript), and the dangling word or filler it opens on."""
+    k, words = heard_start(input, start, end)
+    return is_cased and opens_mid_sentence(input.sentences[k]), _opener(words)
 
 
-def clean_start(sentence, is_cased: bool) -> bool:
-    """Whether `sentence` can open a clip: no dangling opener, and in a cased transcript not
-    mid-sentence. What a trim looks for first."""
-    return dangling_opener(sentence) is None and not (is_cased and opens_mid_sentence(sentence))
+def _start_rank(input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool) -> int:
+    """How well sentence `start` opens a clip ending at `end`, best first: clean (0); only a soft
+    opener, which the first clip may keep (1); breaking the first clip's rules (2)."""
+    mid, opener = _opening(input, start, end, is_cased)
+    if mid or (opener and opener not in FIRST_CLIP_SOFT_OPENERS):
+        return 2
+    return 1 if opener else 0
 
 
-def _start_rank(sentence, is_cased: bool) -> int:
-    """How well `sentence` opens a clip, best first: clean (0); only a soft opener, which the first
-    clip may keep (1); breaking the first clip's rules (2)."""
-    if clean_start(sentence, is_cased):
-        return 0
-    mid, opener = _hard_start(sentence, is_cased)
-    return 2 if mid or opener else 1
-
-
-def first_clip_problems(input: DebatesPickMomentsInput, start: int, picked_start: int) -> List[str]:
-    """Why a first clip starting at sentence `start` cannot open the reel: it starts mid-sentence,
-    or on a connective or filler. A newcomer meets the debate there. `picked_start` is where the
-    model started it, when a trim moved the start."""
-    sentence = input.sentences[start]
+def first_clip_problems(input: DebatesPickMomentsInput, start: int, end: int, picked_start: int) -> List[str]:
+    """Why a first clip of sentences `start`-`end` cannot open the reel: what the viewer hears of it
+    (heard_start) starts mid-sentence, or on a connective or filler. A newcomer meets the debate
+    there. `picked_start` is where the model started it, when a trim moved the start."""
     where = (
         f"Clip 0, the reel's first clip, opens on sentence {start}"
         + (f" (cut to fit from sentence {picked_start})" if start != picked_start else "")
@@ -261,20 +307,20 @@ def first_clip_problems(input: DebatesPickMomentsInput, start: int, picked_start
         "thought, or pick another first clip."
     )
     problems = []
-    mid, opener = _hard_start(sentence, cased(input))
+    mid, opener = _opening(input, start, end, cased(input))
     if mid:
         problems.append(f"{where}, which starts mid-sentence (it opens on a lowercase word). {fix}")
-    if opener:
+    if opener and opener not in FIRST_CLIP_SOFT_OPENERS:
         problems.append(f'{where}, which opens on "{opener}", a connective or filler. {fix}')
     return problems
 
 
 def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optional[int]:
     """Where a clip over the hard limit should start so it fits: sentences dropped from its start
-    (the payoff at its end stays), and past any that open on a dangling word or mid-sentence
-    (clean_start), so the trim never lands on "And ..." when a cleaner start fits. With no clean
+    (the payoff at its end stays), and past any whose heard words open on a dangling word or
+    mid-sentence, so the trim never lands on "But ..." when a cleaner start fits. With no clean
     start, one with only a soft opener ("It's ...") beats one the first clip may not open on
-    (_start_rank). `None` when no start leaves it within the
+    (_start_rank, read as first_clip_problems reads it). `None` when no start leaves it within the
     limits, so the clip is reported at the length the model picked. A clip within the limit is
     left where it starts."""
     sentences = input.sentences
@@ -290,7 +336,7 @@ def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optiona
         return None
     is_cased = cased(input)
     # The earliest of the best-ranked starts: min keeps the first among equals.
-    return min(fitting, key=lambda first: _start_rank(sentences[first], is_cased))
+    return min(fitting, key=lambda first: _start_rank(input, first, end, is_cased))
 
 
 def _int(value: Any) -> Optional[int]:
@@ -342,10 +388,11 @@ def check(
         trimmed = trim_to_fit(input, start, end)
         start = start if trimmed is None else trimmed
         run = sentences[start : end + 1]
-        opener = dangling_opener(run[0])
+        # Read past the filler geo-chat cuts before the clip plays, as the first clip's rules are.
+        _, opener = _opening(input, start, end, False)
         if position == 0:
             # Hard, trimmed or not: whoever chose the start, the newcomer hears it first.
-            opening = first_clip_problems(input, start, picked_start)
+            opening = first_clip_problems(input, start, end, picked_start)
         if start == picked_start and opener and (position > 0 or opener in FIRST_CLIP_SOFT_OPENERS):
             soft.append(
                 f'{name} opens on "{opener}", which leans on what came before or is filler. '
@@ -541,7 +588,7 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
     # A kept reel's first clip either keeps its rules or this is a last resort that breaks them.
     first = moments[0]
     picked = first.start_sentence if first.trimmed_from_sentence is None else first.trimmed_from_sentence
-    broken = first_clip_problems(input, first.start_sentence, picked)
+    broken = first_clip_problems(input, first.start_sentence, first.end_sentence, picked)
     if broken:
         logger.warning(f"{TASK}: no reel kept the first clip's rules; kept one that breaks them: {broken}")
     return DebatesPickMomentsResult(
@@ -563,8 +610,9 @@ __all__ = [
     "TASK",
     "check",
     "check_reels",
-    "dangling_opener",
+    "filler_lead",
     "first_clip_problems",
+    "heard_start",
     "judge",
     "pick_moments",
     "reel_ms",
