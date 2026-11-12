@@ -320,9 +320,13 @@ def test_json_is_read_whole_or_from_a_fence_as_the_news_paths_read_it():
 # --- debates.pick_moments ---------------------------------------------------------------
 
 
-def _debate() -> DebatesPickMomentsInput:
+def _debate(link_claims: str = "in_pick") -> DebatesPickMomentsInput:
     """Four turns, alternating, three 5 s sentences each: sentences 0-2 turn 0 (speaker 1),
-    3-5 turn 1 (speaker 2), 6-8 turn 2 (speaker 1), 9-11 turn 3 (speaker 2)."""
+    3-5 turn 1 (speaker 2), 6-8 turn 2 (speaker 1), 9-11 turn 3 (speaker 2).
+
+    The picker as before GEO-3692 (link_claims "in_pick") unless told otherwise: every test of
+    the picker's rules written before then runs on it unchanged, so it pins that the escape hatch
+    still behaves as the picker did. The "after" tests are under "linking claims after the pick"."""
     sentences = []
     for turn in range(4):
         speaker = 1 if turn % 2 == 0 else 2
@@ -340,6 +344,7 @@ def _debate() -> DebatesPickMomentsInput:
             MomentClaim(index=8, speaker=1, text="This president would abuse it"),
             MomentClaim(index=9, speaker=2, text="Every president tips the scales"),
         ],
+        link_claims=link_claims,
     )
 
 
@@ -865,7 +870,9 @@ def test_the_reel_schemas_keep_to_what_structured_outputs_accepts():
                 walk(value)
 
     walk(pick.REELS_SCHEMA)
+    walk(pick.STORY_REELS_SCHEMA)
     walk(pick.JUDGE_SCHEMA)
+    walk(pick.LINK_SCHEMA)
     # The prompt's example clip has exactly the schema's fields.
     assert set(_moment(1, 0, 2, 0)) == set(pick.REELS_SCHEMA["properties"]["reels"]["items"]["properties"]["moments"]["items"]["properties"])
 
@@ -1772,3 +1779,227 @@ def test_the_judge_is_told_a_split_start_may_be_one_and_to_check_the_words():
     assert "- Clip 2 may start halfway through a sentence." in pick.render_for_judge(debate, [reel])
     assert '"may" start halfway through a sentence is a guess' in judge
     assert "set it aside when the clip plainly starts a thought" in judge
+
+
+# --- linking claims after the pick (link_claims "after", GEO-3692) --------------------------
+
+
+def _story(answer):
+    """`answer` as the "after" picker gives it: its clips without claim or claim_fit."""
+    answer = json.loads(json.dumps(answer))
+    for reel in answer.get("reels", [answer]):
+        for row in reel["moments"]:
+            row.pop("claim", None)
+            row.pop("claim_fit", None)
+    return answer
+
+
+STORY = _story(GOOD)
+
+
+def _links(*claims, fits=None):
+    """A link answer: clip i linked to claims[i]."""
+    fits = fits or [0.9] * len(claims)
+    return {"clips": [{"clip": i, "claim": c, "fit": f} for i, (c, f) in enumerate(zip(claims, fits))]}
+
+
+def test_claims_are_linked_after_the_pick_by_default():
+    assert DebatesPickMomentsInput(**{**_debate().model_dump(), "link_claims": "after"}).link_claims == "after"
+    data = _debate().model_dump()
+    del data["link_claims"]
+    assert DebatesPickMomentsInput(**data).link_claims == "after"
+
+
+def test_the_picker_is_never_shown_a_claim_after_the_pick():
+    from src.config.prompts.debates_pick_moments_prompt import DEBATES_PICK_MOMENTS_STORY_SYSTEM as story
+
+    debate = _debate("after")
+    shown = pick.render(debate)
+    assert "Claims:" not in shown and "claim" not in shown.lower()
+    assert all(c.text not in shown for c in debate.claims)
+    # Everything else the picker reads is as before.
+    assert shown == pick.render(_debate()).replace(
+        "\n\nClaims:\n" + "\n".join(f"[{c.index}] Speaker {c.speaker}: {c.text}" for c in debate.claims), ""
+    )
+    # The prompt and the answer's schema have no claims either.
+    assert "claim" not in story.lower()
+    moment = pick.STORY_REELS_SCHEMA["properties"]["reels"]["items"]["properties"]["moments"]["items"]
+    assert "claim" not in json.dumps(pick.STORY_REELS_SCHEMA)
+    assert moment["required"] == ["speaker", "start_sentence", "end_sentence", "role", "answers", "why"]
+    client = _FakeClaude({"reels": [STORY]}, _links(0, 5, 8, 9))
+    asyncio.run(pick.pick_moments(debate, client=client))
+    picked = client.calls[0]
+    assert picked["system"][0]["text"] == story
+    assert picked["output_config"] == {"format": {"type": "json_schema", "schema": pick.STORY_REELS_SCHEMA}}
+    assert "claim" not in picked["messages"][0]["content"][0]["text"].lower()
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        _with(1, claim=0),  # the other speaker's claim
+        _with(1, claim=42),  # no such claim
+        _with(2, claim=0),  # the same claim as the speaker's other clip
+        _story(GOOD),  # no claims at all
+    ],
+)
+def test_the_picker_is_never_refused_on_a_claim_rule_after_the_pick(answer):
+    (_, moments), problems, soft = pick.check(_debate("after"), answer)
+    assert problems == [] and soft == []
+    assert all(m.claim_index == pick.UNLINKED for m in moments)
+    # The same reels are refused when the picker links claims itself, except the one without them.
+    in_pick, problems, _ = pick.check(_debate(), answer)
+    assert in_pick is None and problems
+
+
+def test_each_picked_clip_is_linked_to_a_claim_of_its_own_speaker_by_a_second_call():
+    client = _FakeClaude({"reels": [STORY]}, _links(8, 9, 0, 5, fits=[0.9, 0.7, 0.6, 0.4]))
+    result = asyncio.run(pick.pick_moments(_debate("after"), client=client))
+    assert [(m.speaker, m.claim_index, m.claim_fit) for m in result.moments] == [(1, 8, 0.9), (2, 9, 0.7), (1, 0, 0.6), (2, 5, 0.4)]
+    assert len(client.calls) == 2 and result.attempts == 1
+    linked = client.calls[1]
+    assert linked["system"][0]["text"] == pick.prompts.get("debates_pick_moments.link_system")
+    assert linked["output_config"] == {"format": {"type": "json_schema", "schema": pick.LINK_SCHEMA}}
+    shown = linked["messages"][0]["content"][0]["text"]
+    # Each speaker's claims under them, and the clips as the viewer hears them.
+    assert "Speaker 1's claims:\n[0] States manage voter ID fine\n[8] This president would abuse it" in shown
+    assert "Speaker 2's claims:\n[5] Federal elections need federal rules\n[9] Every president tips the scales" in shown
+    assert "Clip 1, Speaker 2 (Nico): Point 1.0. Point 1.1. Point 1.2." in shown
+
+
+@pytest.mark.parametrize(
+    "answer, problem",
+    [
+        (_links(5, 9, 8, 0), "claim [5] is Speaker 2's, not Speaker 1's"),
+        (_links(42, 5, 8, 9), "there is no claim [42]"),
+        (_links(0, 5, 0, 9), "Clips 0 and 2 are the same speaker's and link the same claim [0]"),
+        (_links(0, 5, 8), "exactly 4"),
+        ({"clips": [{"clip": 0, "claim": 0, "fit": 1}] * 4}, "Clip 0 has more than one entry"),
+        ({"links": []}, 'needs a "clips" list'),
+    ],
+)
+def test_a_link_that_breaks_a_rule_is_sent_back_and_the_fixed_links_kept(answer, problem):
+    client = _FakeClaude({"reels": [STORY]}, answer, _links(0, 5, 8, 9))
+    result = asyncio.run(pick.pick_moments(_debate("after"), client=client))
+    assert problem in client.calls[2]["messages"][2]["content"]
+    assert [m.claim_index for m in result.moments] == [0, 5, 8, 9]
+
+
+def test_links_still_broken_after_the_send_back_keep_the_good_ones_and_fill_the_rest():
+    # Clip 2 repeats clip 0's claim at a lower fit both times: clip 0 keeps it, clip 2 gets the
+    # speaker's other claim, and the other speaker's links stand as given.
+    broken = _links(0, 9, 0, 5, fits=[0.9, 0.8, 0.3, 0.7])
+    client = _FakeClaude({"reels": [STORY]}, broken, broken)
+    result = asyncio.run(pick.pick_moments(_debate("after"), client=client))
+    assert [(m.claim_index, m.claim_fit) for m in result.moments] == [(0, 0.9), (9, 0.8), (8, 0.0), (5, 0.7)]
+
+
+def test_a_speakers_two_clips_naming_one_claim_at_the_same_fit_leave_it_to_the_earlier_clip():
+    # A tie in fit: the earlier clip keeps the claim and the later one is filled.
+    tied = _links(0, 9, 0, 5, fits=[0.8, 0.8, 0.8, 0.8])
+    client = _FakeClaude({"reels": [STORY]}, tied, tied)
+    result = asyncio.run(pick.pick_moments(_debate("after"), client=client))
+    assert [(m.claim_index, m.claim_fit) for m in result.moments] == [(0, 0.8), (9, 0.8), (8, 0.0), (5, 0.8)]
+
+
+def _said(debate):
+    """The clips of GOOD saying words of the claims, crossed: clip 0 (speaker 1) argues claim 8,
+    clip 2 claim 0; clip 1 (speaker 2) claim 9, clip 3 claim 5."""
+    for k, text in ((0, "This president would abuse it."), (7, "States manage it fine."), (3, "Every president tips the scales."), (10, "Federal rules for federal elections.")):
+        debate.sentences[k].text = text
+    return debate
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("overloaded"), _status_error(400), _CutOff('{"clips": [')])
+def test_a_link_call_that_fails_links_by_words_in_common_and_keeps_the_reel(failure):
+    client = _FakeClaude({"reels": [STORY]}, failure, failure)
+    result = asyncio.run(pick.pick_moments(_said(_debate("after")), client=client))
+    assert [(m.speaker, m.claim_index, m.claim_fit) for m in result.moments] == [(1, 8, 0.0), (2, 9, 0.0), (1, 0, 0.0), (2, 5, 0.0)]
+    assert result.attempts == 1 and len(result.moments) == 4
+
+
+def test_a_link_call_stopped_by_the_spend_guard_still_returns_the_reel(monkeypatch):
+    _guard_trips_after(monkeypatch, 1)
+    client = _FakeClaude({"reels": [STORY]})
+    result = asyncio.run(pick.pick_moments(_said(_debate("after")), client=client))
+    assert len(client.calls) == 1
+    assert [m.claim_index for m in result.moments] == [8, 9, 0, 5]
+
+
+def test_the_fallback_gives_a_speakers_two_clips_the_pair_of_claims_they_say_most():
+    debate = _said(_debate("after"))
+    moments = pick.check(debate, STORY)[0][1]
+    links, filled = pick.closest_claims(debate, moments, [None] * 4)
+    assert [c for c, _ in links] == [8, 9, 0, 5] and filled == [0, 1, 2, 3]
+    # Clip 0 says half of claim 8 and a fifth of claim 0; clip 2 says all of claim 8 and none of
+    # claim 0. Taken in play order, clip 0 would take claim 8 and leave clip 2 a claim it never
+    # says; the pair is chosen as a whole, so clip 2 gets claim 8.
+    debate.sentences[0].text = "The president will manage."
+    debate.sentences[7].text = "This president would abuse it."
+    links, _ = pick.closest_claims(debate, moments, [None] * 4)
+    assert [c for c, _ in links] == [0, 9, 8, 5]
+    # A link already given is kept, and its claim never reused for the speaker's other clip.
+    links, filled = pick.closest_claims(debate, moments, [None, (5, 0.8), (8, 0.9), None])
+    assert [c for c, _ in links] == [0, 5, 8, 9] and filled == [0, 3]
+
+
+def test_clips_saying_no_claims_words_take_the_claims_in_the_callers_order():
+    debate = _debate("after")
+    moments = pick.check(debate, STORY)[0][1]
+    links, _ = pick.closest_claims(debate, moments, [None] * 4)
+    assert links == [(0, 0.0), (5, 0.0), (8, 0.0), (9, 0.0)]
+
+
+def test_a_speaker_with_too_few_claims_fails_before_any_call_after_the_pick():
+    debate = _debate("after")
+    debate.claims = [c for c in debate.claims if c.index != 8]  # speaker 1 keeps one claim
+    client = _FakeClaude()
+    with pytest.raises(FinalDecisionError, match="Speaker 1 has 1 claim"):
+        asyncio.run(pick.pick_moments(debate, client=client))
+    assert client.calls == []
+
+
+def test_a_speaker_with_too_few_claims_still_fails_as_before_when_the_picker_links_them():
+    # The picker as before GEO-3692: each answer is refused on the shared claim, and the run fails
+    # once the answers run out, as it always did (geo-chat then falls back to its own picker).
+    debate = _debate()
+    debate.claims = [c for c in debate.claims if c.index != 8]
+    answer = _with(2, claim=0)
+    client = _FakeClaude(answer, answer, answer)
+    with pytest.raises(FinalDecisionError, match="link the same claim"):
+        asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == pick.ATTEMPTS
+
+
+def test_the_picker_that_links_claims_itself_is_unchanged():
+    import hashlib
+
+    # The prompt as deployed through GEO-3691 (extraction-api f01c366), byte for byte.
+    system = pick.prompts.get("debates_pick_moments.system")
+    assert hashlib.sha256(system.encode()).hexdigest() == "7e9c1c21b58e4ee8f39551269e1683a23f80b6d9a9953fc24795fe65c595a090"
+    # Its answer's schema as it was.
+    assert pick.REELS_SCHEMA["properties"]["reels"]["items"]["properties"]["moments"]["items"]["required"] == [
+        "speaker", "start_sentence", "end_sentence", "claim", "claim_fit", "role", "answers", "why"
+    ]
+    # One call, the claims shown, the picker's own links returned, and no link call.
+    client = _FakeClaude({"reels": [GOOD]})
+    result = asyncio.run(pick.pick_moments(_debate(), client=client))
+    assert len(client.calls) == 1
+    assert client.calls[0]["system"][0]["text"] == system
+    assert client.calls[0]["output_config"] == {"format": {"type": "json_schema", "schema": pick.REELS_SCHEMA}}
+    assert "Claims:\n[0] Speaker 1: States manage voter ID fine" in client.calls[0]["messages"][0]["content"][0]["text"]
+    assert [(m.claim_index, m.claim_fit) for m in result.moments] == [(0, 0.8), (5, 0.8), (8, 0.8), (9, 0.8)]
+
+
+def test_the_two_picker_prompts_differ_only_in_the_claims():
+    from src.config.prompts import debates_pick_moments_prompt as prompt
+
+    story, linked = prompt.DEBATES_PICK_MOMENTS_STORY_SYSTEM, prompt.DEBATES_PICK_MOMENTS_SYSTEM
+    for section in (prompt._GIVEN, prompt._FIND, prompt._BUILD, prompt._CLIP_RULES, prompt._FORMAT_TAIL):
+        assert section in story and section in linked
+    for claims in (prompt._CLAIMS_GIVEN, prompt._CLAIMS_NOT_YET, prompt._CLAIMS_LINK, prompt._CLAIMS_FIELDS):
+        assert claims in linked and claims not in story
+
+
+def test_the_link_call_is_on_the_runs_budget():
+    assert pick.CALLS == pick.ATTEMPTS + pick.JUDGE_ATTEMPTS + pick.LINK_ATTEMPTS

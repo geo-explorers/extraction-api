@@ -14,7 +14,17 @@ from src.pipeline import debates_pick_moments_core as pick
 from src.pipeline import deadline as deadline_mod
 from src.pipeline.claude_json import REQUEST_TIMEOUT_S, FinalDecisionError
 from src.pipeline.deadline import ENQUEUED_AT, MIN_REQUEST_S, Deadline, enqueued_at
-from tests.test_moment_reel_tasks import BROKEN, GOOD, OTHER, _debate, _FakeClaude, _last_resort_debate
+from tests.test_moment_reel_tasks import (
+    BROKEN,
+    GOOD,
+    OTHER,
+    STORY,
+    _debate,
+    _FakeClaude,
+    _last_resort_debate,
+    _links,
+    _said,
+)
 
 
 class _Clock:
@@ -151,6 +161,43 @@ def test_a_judge_skipped_at_the_deadline_keeps_the_same_reel(monkeypatch):
     assert len(client.calls) == 3 and [m.speaker for m in result.moments] == [2, 1, 2, 1]
 
 
+# --- the claim-link call (link_claims "after", GEO-3692) -----------------------------------
+
+
+def test_the_link_call_is_skipped_near_the_deadline_and_every_clip_linked_by_words(monkeypatch):
+    lines = _warnings(monkeypatch)
+    clock = _Clock()
+    # The pick takes 450 s of 500: 50 s are left, too few to start the link call.
+    client = _SlowClaude(clock, 450, {"reels": [STORY]}, _links(0, 5, 8, 9))
+    result = asyncio.run(pick.pick_moments(_said(_debate("after")), client=client, deadline=_deadline(clock, 500)))
+    assert len(client.calls) == 1
+    # The links closest_claims gives, each at fit 0 (chosen by words, not judged).
+    assert [(m.claim_index, m.claim_fit) for m in result.moments] == [(8, 0.0), (9, 0.0), (0, 0.0), (5, 0.0)]
+    assert any(
+        "shortened by the deadline: 50 s left" in line and "link call was skipped" in line and "words in common" in line
+        for line in lines
+    ), lines
+
+
+def test_the_link_request_is_capped_by_the_time_left():
+    clock = _Clock()
+    client = _SlowClaude(clock, 100, {"reels": [STORY]}, _links(8, 9, 0, 5, fits=[0.9, 0.7, 0.6, 0.4]))
+    result = asyncio.run(pick.pick_moments(_debate("after"), client=client, deadline=_deadline(clock, 250)))
+    assert [call["timeout"] for call in client.calls] == [250, 150]
+    assert [(m.claim_index, m.claim_fit) for m in result.moments] == [(8, 0.9), (9, 0.7), (0, 0.6), (5, 0.4)]
+
+
+def test_a_link_request_failing_at_the_deadline_keeps_the_reel_linked_by_words():
+    # The link call starts with 70 s left and fails as the time runs out: the deadline's final
+    # failure is a DecisionError, so the reel is kept with its clips linked by words in common.
+    clock = _Clock()
+    client = _SlowClaude(clock, 100, {"reels": [STORY]}, RuntimeError("overloaded"), _links(0, 5, 8, 9))
+    deadline = _deadline(clock, 170)
+    result = asyncio.run(pick.pick_moments(_said(_debate("after")), client=client, deadline=deadline))
+    assert len(client.calls) == 2 and client.calls[1]["timeout"] == 70 and deadline.left() == 0
+    assert [(m.claim_index, m.claim_fit) for m in result.moments] == [(8, 0.0), (9, 0.0), (0, 0.0), (5, 0.0)]
+
+
 # --- request timeouts ---------------------------------------------------------------------
 
 
@@ -221,6 +268,9 @@ def test_a_request_failing_with_time_left_stays_retryable():
         (_debate, ({"reels": [GOOD, OTHER]}, {"best": 1, "why": "Nico opens stronger."})),
         (_debate, ({"reels": [BROKEN]}, {"reels": [GOOD]})),
         (_soft_debate, ({"reels": [GOOD]}, {"reels": [GOOD]}, {"reels": [GOOD]})),
+        # Linked after the pick (GEO-3692): a link answer, and one sent back.
+        (lambda: _debate("after"), ({"reels": [STORY]}, _links(8, 9, 0, 5, fits=[0.9, 0.7, 0.6, 0.4]))),
+        (lambda: _debate("after"), ({"reels": [STORY]}, _links(0, 5, 0, 9), _links(0, 5, 8, 9))),
     ],
 )
 def test_a_normal_speed_pick_is_the_same_with_the_deadline(make, replies):

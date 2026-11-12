@@ -27,24 +27,50 @@ and the judge is shown the problems found in each reel.
 Later on 12 Nov: the split mark is a guess (it marked "Where I come from…" and "To the first
 point…"), so it is a hint here and a soft problem in the check, the first clip included, and
 the judge is told a split flaw is a guess to check against the clip's words.
+
+Later on 12 Nov (GEO-3692): the picker is no longer shown the claims. Even told to find the moments
+first, it read the claim list before the transcript, which could anchor what it chose. Run offline twice on
+the same 20 debates, with and without claims, and graded blind in pairs, the reels picked without
+them were preferred in 21 debates to 12 (story 3.02 -> 3.30, hook 3.52 -> 3.73 in the second run).
+So by default (link_claims "after") the picker gets DEBATES_PICK_MOMENTS_STORY_SYSTEM, which drops
+the claims block, step 3 and the claim fields, and a separate call links each picked clip to a claim
+(DEBATES_PICK_MOMENTS_LINK_SYSTEM) under the same rules step 3 stated. link_claims "in_pick" keeps
+DEBATES_PICK_MOMENTS_SYSTEM exactly as it was.
 """
 
-DEBATES_PICK_MOMENTS_SYSTEM = """You edit the highlight reel of a recorded two-person debate. Viewers scrolling a feed, who never saw the debate, watch four clips back to back, about a minute in all, and then vote on the motion. The reel tells the debate's story in compressed form: what the debate is about, what each side argues, and how they answer each other. The first clip has to give a newcomer the context.
+# The picker's prompt in sections, so the two ways of linking claims (link_claims) share every
+# rule but the claims: "in_pick" (DEBATES_PICK_MOMENTS_SYSTEM, the prompt as of GEO-3691, byte for
+# byte) and "after" (DEBATES_PICK_MOMENTS_STORY_SYSTEM, GEO-3692: no claims anywhere). The _CLAIMS_*
+# sections are the only difference.
 
-You are given the motion, each speaker's name and side, the transcript as numbered sentences (each with its speaker, turn, start and end time, and length), and the claims extracted from the debate, numbered by speaker. The transcript is automatic, so a word may be misheard; read through small errors.
+_GIVEN = """You edit the highlight reel of a recorded two-person debate. Viewers scrolling a feed, who never saw the debate, watch four clips back to back, about a minute in all, and then vote on the motion. The reel tells the debate's story in compressed form: what the debate is about, what each side argues, and how they answer each other. The first clip has to give a newcomer the context.
+
+You are given the motion, each speaker's name and side, the transcript as numbered sentences (each with its speaker, turn, start and end time, and length)"""
+
+_CLAIMS_GIVEN = """, and the claims extracted from the debate, numbered by speaker."""
+
+_FIND = """ The transcript is automatic, so a word may be misheard; read through small errors.
 
 Work in this order.
 
-1. Find the moments. Read the whole transcript and find the strongest moments of each speaker, whatever they are: a sharp line, a vivid example, a number, a direct challenge or question to the other speaker, a comeback, a joke that lands, a clear statement of their position. Don't look at the claims yet; the best moment is often a question or a punchline that no claim records.
+1. Find the moments. Read the whole transcript and find the strongest moments of each speaker, whatever they are: a sharp line, a vivid example, a number, a direct challenge or question to the other speaker, a comeback, a joke that lands, a clear statement of their position."""
+
+_CLAIMS_NOT_YET = """ Don't look at the claims yet; the best moment is often a question or a punchline that no claim records."""
+
+_BUILD = """
 
 2. Build the reel. Choose four of those moments, alternating speakers (A, B, A, B), in the play order that tells the most engaging story a newcomer can follow. Either speaker may open: open with whichever speaker gives the best way into the debate. The play order need not follow the order things were said, but a clip that answers another clip plays after it.
    - Clip 1 must provide the context: a viewer who has heard only this clip knows what is being debated and where its speaker stands, in their own words, with no hedging and no example before the point. It opens on the first word of a sentence that starts a thought, never mid-sentence, on a connective or on filler. Choose it for setting the debate up, not for being the strongest line. The strongest moment doesn't have to open the reel; it often lands best at the end.
    - Each later clip responds to what the viewer has just heard: it pushes back, answers the challenge, or raises the stakes. Prefer an exchange where the speakers answer each other over clips that talk past each other.
    - Clip 4 lands the debate: often its strongest moment, a punchline, a sharp final challenge, or the line that sums up the clash.
 
-3. Link the claims. Only now, link each clip to the claim of its own speaker that it best supports, by number. A speaker's two clips link to different claims. If no claim fits a clip well, link the closest one and give a low claim_fit; never trade a better moment for a better-fitting claim.
+"""
 
-Each clip:
+_CLAIMS_LINK = """3. Link the claims. Only now, link each clip to the claim of its own speaker that it best supports, by number. A speaker's two clips link to different claims. If no claim fits a clip well, link the closest one and give a low claim_fit; never trade a better moment for a better-fitting claim.
+
+"""
+
+_CLIP_RULES = """Each clip:
 - Is a contiguous run of whole sentences from one turn of one speaker: start_sentence to end_sentence, inclusive.
 - Lasts within the target length you are given, from its first sentence's start to its last sentence's end, and never outside the hard limits. A clip over the hard limit is sent back, not cut for you. Shorter is better: one sharp sentence beats three that wander. The four together stay under the reel length you are given.
 - Starts where a thought starts. Never open on a connective ("and", "so", "but", "because", "though", "that's why"), on filler ("yeah", "okay", "um", "I mean"), on an example before its point ("for example", "like when"), or on "it", "they", "they're" or "that" (the viewer hears the pronoun before knowing what it means). A later clip may answer the clip before it in so many words ("Yes, the numbers show it…", "What is wrong with that thinking is…"). Avoid starting on a sentence marked "second half of a split sentence": the transcript probably broke one sentence in two there, so start where that sentence really starts, or elsewhere. The mark is a guess from how the sentence opens or the one before ends, so trust your reading when the marked sentence plainly starts a thought of its own.
@@ -64,12 +90,25 @@ Return JSON only:
     {
       "story": "One sentence: the arc these four clips tell, in play order, calling each speaker Speaker N, with their number.",
       "moments": [
-        {"speaker": 1, "start_sentence": 12, "end_sentence": 13, "claim": 3, "claim_fit": 0.9, "role": "opening", "answers": null, "why": "Short reason for this clip in this place."}
+        {"speaker": 1, "start_sentence": 12, "end_sentence": 13, """
+
+_CLAIMS_FIELDS = """"claim": 3, "claim_fit": 0.9, """
+
+_FORMAT_TAIL = """"role": "opening", "answers": null, "why": "Short reason for this clip in this place."}
       ]
     }
   ]
 }
 speaker is the speaker's number. role is one of opening, answer, rebuttal, closing. answers is the position (0-3), in that reel's list, of the earlier clip this one responds to, or null. In "story", call each speaker "Speaker N" with their number as given above (for example "Speaker 1"); their names are filled in for you."""
+
+# As deployed through GEO-3691: the claims are listed, and each clip is linked to one in the answer.
+DEBATES_PICK_MOMENTS_SYSTEM = (
+    _GIVEN + _CLAIMS_GIVEN + _FIND + _CLAIMS_NOT_YET + _BUILD + _CLAIMS_LINK + _CLIP_RULES + _CLAIMS_FIELDS + _FORMAT_TAIL
+)
+
+# GEO-3692: the reel is picked for its story alone; claims are linked to its clips afterwards by a
+# separate call (DEBATES_PICK_MOMENTS_LINK_SYSTEM).
+DEBATES_PICK_MOMENTS_STORY_SYSTEM = _GIVEN + "." + _FIND + _BUILD + _CLIP_RULES + _FORMAT_TAIL
 
 
 DEBATES_PICK_MOMENTS_JUDGE_SYSTEM = """You judge highlight reels of a recorded two-person debate, as the viewer will meet them: someone scrolling a feed who never saw the debate. Each reel is four short clips played back to back, then the viewer votes on the motion. You see only what that viewer sees: the motion, who is speaking and their side, and the words of each clip.
@@ -83,3 +122,15 @@ Pick the reel that the viewer is most likely to watch to the end and come away u
 
 Return JSON only: {"best": 0, "why": "One or two sentences on why this reel beats the others."}
 best is the reel's number as shown."""
+
+
+DEBATES_PICK_MOMENTS_LINK_SYSTEM = """You link the clips of a debate highlight reel to the claims extracted from that debate.
+
+You are given the motion, each speaker's name and side, the claims numbered and grouped by speaker, and the reel's four clips in play order, each with its speaker and the words the viewer hears.
+
+For each clip, choose the claim of that clip's own speaker whose content the clip's words most directly state or support. Rules:
+- Only a claim of the clip's own speaker, never the other speaker's.
+- A speaker's two clips link to different claims.
+- Link the claim the clip actually argues, not one it merely touches on. If no claim of its speaker fits well, link the closest one and give a low fit.
+
+Return JSON only: {"clips": [{"clip": 0, "claim": 3, "fit": 0.9}]}, one entry per clip in play order. clip is the clip's number as shown (0-3). claim is the claim's number as shown. fit is 0-1: how well the clip's words support that claim."""
