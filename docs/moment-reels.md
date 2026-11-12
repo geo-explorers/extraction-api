@@ -11,7 +11,7 @@ Previously the reel was stitched together from clips cut around extracted claims
 
 Both tasks run on Claude, using the `moments_claude_*` settings. They write an answer rather than choosing among options, so they can't use the decision model.
 
-**Budgets.** Both count against the `claude` spend-guard key that the news Claude paths use, so one hourly budget covers every Claude call. They draw on the `claude_global` per-minute rate limit at one unit per call the run can make (2 for punctuate, 5 for pick: 3 answers and 2 judge answers), as the news tasks reserve. Punctuate runs one at a time and pick four at a time, so a backfill can't starve news. Each answer's token counts are logged (`… used input_tokens …, output_tokens …`).
+**Budgets.** Both count against the `claude` spend-guard key that the news Claude paths use, so one hourly budget covers every Claude call. They draw on the `claude_global` per-minute rate limit at one unit per call the run can make (2 for punctuate, 7 for pick: 3 answers, 2 judge answers and 2 link answers), as the news tasks reserve. Punctuate runs one at a time and pick four at a time, so a backfill can't starve news. Each answer's token counts are logged (`… used input_tokens …, output_tokens …`).
 
 **Asking again.** Each task checks the answer. Problems go back to Claude in the same conversation: punctuate gets 2 answers, pick gets 3. The first answer with no problems wins. An answer with only soft problems is kept if the later ones get worse. The system prompt and the transcript are prompt-cached, so a send-back rereads them from cache. Soft problems go back only once an answer has no hard ones, so the model isn't pulled in two directions at once.
 
@@ -70,8 +70,11 @@ The output shape is unchanged.
 - the transcript as sentences: speaker, turn, start and end in ms, text
 - the claims, with the caller's index and the speaker
 - the clip length bounds, which default to 6–22 s hard and 10–18 s target
+- `link_claims`: `"after"` (the default) or `"in_pick"`; see below
 
-**How the reel is chosen:** the moments come first and the claims after. Claude finds each speaker's strongest moments in the transcript, whatever they are (a punchline, a question, a comeback), builds the reel from them, and only then links each clip to the claim of its speaker it best supports. The first clip is chosen for providing the context (what the debate is about, where its speaker stands), not for strength; the strongest moment often lands best last. Claims were extracted to fill the knowledge graph, so a reel built around them missed the lines that aren't claims.
+**How the reel is chosen:** the moments come first and the claims after. Claude finds each speaker's strongest moments in the transcript, whatever they are (a punchline, a question, a comeback), and builds the reel from them. The first clip is chosen for providing the context (what the debate is about, where its speaker stands), not for strength; the strongest moment often lands best last. Claims were extracted to fill the knowledge graph, so a reel built around them missed the lines that aren't claims.
+
+By default (`link_claims: "after"`, GEO-3692) the picker never sees the claims: its prompt, the transcript it reads and its answer's schema have none, and no claim rule is checked on its reels. Once the reel is picked (and judged), a separate call links each clip to a claim (see "Linking claims after the pick" below). With `link_claims: "in_pick"` the picker works as it did before GEO-3692: it is shown the claims and links each clip in its own answer, after choosing the moments, and its reels are checked against the claim rules. That mode is an escape hatch, to restore the old behaviour for a request without a deploy; geo-chat doesn't send the field, so it gets the default.
 
 Claude offers up to three candidate reels in one answer. Each is checked on its own. When more than one passes, a second call judges them the way a viewer meets them: the motion, who speaks for which side, and each clip's words and length, with no transcript and no claims. The words are the ones the viewer hears, past the filler geo-chat cuts (see below). It picks the reel a newcomer can follow to the end; a first clip that gives the context comes before anything else it weighs, and a reel isn't favored for opening on its strongest line. When any passing reel has no soft problem, only those are judged; otherwise all that passed are, and under each reel the judge is shown the problems found in how its clips play ("Clip 3 opens on "but"…", "Clip 2 may start halfway through a sentence", a clip cut to fit, a reel over its length), so it can prefer the clean one. The split one is a guess, and the judge is told to check it against the clip's words. These are about what the viewer hears, so the judge still sees no transcript, claims or story. If the judge can't answer, the first reel is taken.
 
@@ -91,7 +94,7 @@ The task checks each of these rules before answering:
 - each clip is whole sentences from one turn of one speaker
 - each clip is within the hard length bounds (6–22 s)
 - no two clips overlap
-- each clip links to a claim by its own speaker, and a speaker's two clips link to different claims
+- each clip links to a claim by its own speaker, and a speaker's two clips link to different claims (under `"in_pick"`, on the picker's reels; under `"after"`, on the link call's answer, see below)
 - a clip only answers an earlier clip, by the other speaker
 - the first clip opens on a sentence that starts a thought: not mid-sentence (in a transcript with capitals, a sentence opening on a lowercase word ran on from the words before it, as in "and not just get completely overwhelmed…"), and not on a connective or filler ("but", "because", "though", "that's", "that", "they", "they're", "yeah", "okay", "like", "agree", "I mean", "for example"…: the soft rule's list below, except "it's", "it" and "yes", which often state a position ("It's time we…", "It is the death of…") and stay soft on the first clip too). This holds for a first clip cut to fit too, since the viewer meets the debate there.
 
@@ -111,7 +114,24 @@ The caller can pass `avoid`: sentence ranges an earlier reel used that the calle
 
 The order doesn't have to follow the order things were said, but an answer always plays after the clip it answers. The judgment rules (the first clip names the topic, ends after the point lands, argues its own side) are in the prompt, and the judge weighs the first clip's context before anything else. They're for the caller to check again, for example with `claims.score_clips`.
 
+### Linking claims after the pick (GEO-3692)
+
+Under `link_claims: "after"`, one more call links the picked reel's clips to claims. It reads the motion, the speakers, each speaker's claims under their name, and the four clips in play order, each with its speaker and the words the viewer hears (past the filler geo-chat cuts). It answers under a JSON schema (`LINK_SCHEMA`): for each clip, a claim number and a fit from 0 to 1.
+
+The links keep the rules geo-chat checks (`story_moments::story_reel`), so geo-chat, the apps, web and analytics need no change:
+- each clip links to a claim of its own speaker
+- a speaker's two clips link to different claims
+- every clip has a link (`claim_index` is never null)
+
+An answer that breaks one goes back with its problems, up to 2 answers. When two of a speaker's clips name the same claim, the one with the higher fit keeps it. A link still broken after the second answer, and every link when the call gives no answer at all (a failed request, a cut-off answer, the spend guard), is filled without a call (`closest_claims`): the clip gets its speaker's claim, not linked to their other clip, whose words it says most (the share of the claim's words, past common words like "the" and "would", found in the clip). A speaker's two clips take the pair of claims they say most between them. Ties go to the claim the caller listed first. Such a link has `claim_fit` 0, so it can be told apart from a judged one, and the log says which clips were linked this way ("linked clip(s) … by words in common"). Claims carry no times here, so the words are the only thing to match on. Matching on words alone is what mislinked clips before (8 of 19 reels in the 12 Nov review had a clip linked to a claim it doesn't match), so it is a fallback, not the way links are made.
+
+A link never fails the reel. The one case with no reel is a speaker with fewer than two claims: their two clips can't link different claims, so geo-chat would refuse any reel. Under `"after"` the run fails at once (`FinalDecisionError`), before any call. Under `"in_pick"` it fails as it always has, after every answer is refused for linking one claim twice. Either way geo-chat falls back to its own picker, as it did before.
+
+The output's shape is the same in both modes: `claim_index` and `claim_fit` on every moment.
+
 ## Evidence
+
+12 Nov 2026 (GEO-3692): the picker was run offline on the same 20 debates (ranks 30-56) with and without the claims in its prompt and rules, the claims linked afterwards for the reels picked without them, and graded blind in pairs by two graders per debate. Twice: on the picker before GEO-3691, and on GEO-3691's. Where the graders agreed, the reels picked without claims were preferred in 10 debates to 5 (2 ties), then 11 to 7: 21 to 12 in all. In the second run they scored better on story (3.02 to 3.30), hook (3.52 to 3.73), clear positions (3.33 to 3.58) and watching to the end (2.83 to 3.00), with substance flat and claim fit a little lower (4.62 to 4.50). Every reel was built both ways in the second run (20/20). In the first run's linking, with no rules at all, no clip was left unlinked, linked to the other speaker's claim, or linked to a claim another clip had (0 of 72 clips), so the link call keeps the old rules.
 
 12 Nov 2026 preview (ranks 30-56, 20 debates, 19 reels; GEO-3691): an adversarial review traced about 17 later clips that opened mid-thought: about 6 on connectives only clip 1 was checked for, 2 lowercase run-ons, 4 sentences the transcript split, 2 starts moved by a trim, and 4 unintroduced references. Trims from the start cut the payoff's setup in 6 of 36 checkable clips. Replayed on those reels' clips, the new opener rules flag a later clip in 13 of the 19 reels (the old list flagged 5).
 

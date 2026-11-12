@@ -173,6 +173,8 @@ _register("claims_score_clips.debate.opener", _clips.DEBATE_OPENER_INSTRUCTIONS,
 _register("transcript_punctuate.system", _punctuate.TRANSCRIPT_PUNCTUATE_SYSTEM, formatted=False, module=_punctuate)
 _register("debates_pick_moments.system", _pick_moments.DEBATES_PICK_MOMENTS_SYSTEM, formatted=False, module=_pick_moments)
 _register("debates_pick_moments.judge_system", _pick_moments.DEBATES_PICK_MOMENTS_JUDGE_SYSTEM, formatted=False, module=_pick_moments)
+_register("debates_pick_moments.story_system", _pick_moments.DEBATES_PICK_MOMENTS_STORY_SYSTEM, formatted=False, module=_pick_moments)
+_register("debates_pick_moments.link_system", _pick_moments.DEBATES_PICK_MOMENTS_LINK_SYSTEM, formatted=False, module=_pick_moments)
 
 _register("claims_extract.role", _ce_sections.ROLE_SECTION, formatted=True, module=_ce_sections)
 _register("claims_extract.core", _ce_core.CORE_CLAIM_RULES, formatted=False, module=_ce_core)

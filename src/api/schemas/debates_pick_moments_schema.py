@@ -13,6 +13,13 @@ turn, and is linked to the claim of its speaker it best supports, so a viewer
 still votes on a claim. The moments are chosen first and the claim linked after, so
 a punchline or a question that no claim records can still be picked.
 
+By default (`link_claims: "after"`, GEO-3692) the picker never sees the claims: the
+reel is picked for its story, then a separate call links each clip to a claim of its
+own speaker, a speaker's two clips to different claims. A clip that call cannot link
+gets its speaker's unused claim with the most words in common and `claim_fit` 0. The
+answer has the same shape either way. `link_claims: "in_pick"` restores the picker
+that is shown the claims and links them itself, per request.
+
 Claude offers up to three candidate reels; when more than one passes every rule, a
 second call judges them on the clips' words alone, as a viewer meets them.
 
@@ -27,6 +34,10 @@ from src.api.schemas.overrides_schema import OverridesMixin
 
 MediaType = Literal["debate"]
 Role = Literal["opening", "answer", "rebuttal", "closing"]
+# How the clips are linked to claims (GEO-3692). "after": the picker never sees the claims, and a
+# separate call links each picked clip. "in_pick": the picker is shown the claims and links them in
+# its own answer, as before GEO-3692.
+LinkClaims = Literal["after", "in_pick"]
 
 MOMENTS = 4
 MAX_SENTENCES = 1_500
@@ -78,6 +89,13 @@ class DebatesPickMomentsInput(OverridesMixin):
     # Clips the caller refused after checking an earlier answer itself (for example, judged by
     # claims.score_clips to argue the other side). The new reel avoids them.
     avoid: List[AvoidRange] = Field(default_factory=list, max_length=20)
+    link_claims: LinkClaims = Field(
+        default="after",
+        description='How clips are linked to claims. "after" (default): the reel is picked without '
+        "the claims, then each clip is linked to a claim of its own speaker by a separate call. "
+        '"in_pick": the picker is shown the claims and links them itself, as before GEO-3692. Either '
+        "way every moment has a claim_index of its own speaker, distinct between one speaker's clips.",
+    )
 
     @model_validator(mode="after")
     def _validate(self) -> "DebatesPickMomentsInput":
@@ -105,8 +123,13 @@ class PickedMoment(BaseModel):
     end_sentence: int = Field(description="Position of its last sentence, inclusive.")
     start_ms: int
     end_ms: int
-    claim_index: int = Field(description="The linked claim's caller index.")
-    claim_fit: float = Field(ge=0.0, le=1.0, description="How well the clip supports the linked claim.")
+    claim_index: int = Field(description="The linked claim's caller index: always one of this speaker's claims, different from their other clip's.")
+    claim_fit: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="How well the clip supports the linked claim. 0 when, under link_claims \"after\", "
+        "the link call gave no usable link and the claim was chosen by words in common.",
+    )
     role: Role
     answers: Optional[int] = Field(
         default=None, description="Position in `moments` of the earlier clip this one answers, or null."
@@ -115,15 +138,17 @@ class PickedMoment(BaseModel):
     trimmed_from_sentence: Optional[int] = Field(
         default=None,
         description="The model picked this clip from an earlier sentence, over the hard limit; it "
-        "was shortened from its start to fit, because no earlier end fitted cleanly. claim, "
-        "claim_fit, role and why were given for the longer clip. Only on a reel kept as a last "
+        "was shortened from its start to fit, because no earlier end fitted cleanly. role and "
+        "why (and claim and claim_fit under link_claims \"in_pick\") were given for the longer "
+        "clip. Only on a reel kept as a last "
         "resort: an over-long clip is sent back to be picked again.",
     )
     trimmed_to_sentence: Optional[int] = Field(
         default=None,
         description="The model picked this clip to a later sentence, over the hard limit; it was "
-        "shortened from its end to fit, keeping its setup. claim, claim_fit, role and why were "
-        "given for the longer clip. Only on a reel kept as a last resort.",
+        "shortened from its end to fit, keeping its setup. role and why (and claim and claim_fit "
+        "under link_claims \"in_pick\") were given for the longer clip. Only on a reel kept as a "
+        "last resort.",
     )
 
 

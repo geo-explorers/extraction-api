@@ -10,7 +10,16 @@ how they play, and its pick is returned (`judge`).
 Every rule the prompt states that can be checked mechanically is checked here:
 four clips, alternating speakers, whole sentences from one turn, length bounds,
 no overlap, each clip linked to a different claim of its own speaker, and an
-answer playing after what it answers. A broken answer is sent back with its
+answer playing after what it answers.
+
+Claims are linked one of two ways (the input's `link_claims`, GEO-3692). By default
+("after") the picker never sees them: its prompt, the transcript it reads and its
+answer's schema carry no claims, and `check` holds it to no claim rule. Once a reel is
+picked, a separate call links each clip to a claim (`link_claims`): one of its own
+speaker's, a speaker's two clips to different ones, checked here and sent back like a
+reel. A clip it cannot link gets its speaker's unused claim with the most words in
+common (`closest_claims`), so a reel is never lost to its links. "in_pick" is the
+picker as before: shown the claims, it links them in its own answer. A broken answer is sent back with its
 problems (claude_json.ask_json), so Claude fixes it rather than the run failing.
 A clip over the hard limit is sent back with how long it runs to each sentence
 (over_limit_problem); cut to fit, from its end first (fit_to_limit), its reel is a
@@ -36,6 +45,7 @@ alone (`REELS_SCHEMA`, `JUDGE_SCHEMA`).
 from __future__ import annotations
 
 import re
+from itertools import permutations
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.api.schemas.debates_pick_moments_schema import (
@@ -47,7 +57,7 @@ from src.api.schemas.debates_pick_moments_schema import (
 from src.config.overrides import prompts
 from src.decisions.base import DecisionError
 from src.infrastructure.logger import get_logger
-from src.pipeline.claude_json import PROVIDER, ask_json
+from src.pipeline.claude_json import PROVIDER, FinalDecisionError, ask_json
 
 logger = get_logger(__name__)
 
@@ -56,8 +66,21 @@ TASK = "debates.pick_moments"
 ATTEMPTS = 3
 # Judge answers per run, when more than one candidate reel passes.
 JUDGE_ATTEMPTS = 2
-# Claude calls one run can make: what it reserves of the shared budget, and times out by.
-CALLS = ATTEMPTS + JUDGE_ATTEMPTS
+# Link answers per run, under link_claims "after" (GEO-3692).
+LINK_ATTEMPTS = 2
+# Claude calls one run can make: what it reserves of the shared budget, and times out by. Under
+# link_claims "in_pick" the link call is never made, so a run makes at most ATTEMPTS + JUDGE_ATTEMPTS.
+CALLS = ATTEMPTS + JUDGE_ATTEMPTS + LINK_ATTEMPTS
+# The claim_index a moment holds between the pick and its link under link_claims "after": never
+# returned (link_claims replaces it on every moment).
+UNLINKED = -1
+# Words that say nothing about what a clip argues, skipped when closest_claims counts the words a
+# clip and a claim share.
+COMMON_WORDS = frozenset(
+    "a an the and or but so of to in on at for with by from as is are was were be been being it its "
+    "this that these those i we you he she they them our your their my me us not no do does did have "
+    "has had will would should could can just than then there here what which who".split()
+)
 # Candidate reels asked for in one answer; more are ignored.
 CANDIDATES = 3
 # Titles a speaker's short name skips: "Dr. Jane Smith" is Jane.
@@ -142,7 +165,8 @@ _MOMENT_SCHEMA = {
     "additionalProperties": False,
 }
 # The picker's answer, as the prompt asks for it. Counts (three reels, four clips) and ranges are
-# not expressible in structured outputs' schemas; `check` enforces them.
+# not expressible in structured outputs' schemas; `check` enforces them. REELS_SCHEMA is the
+# link_claims "in_pick" answer, each clip with its claim; STORY_REELS_SCHEMA the "after" one, without.
 REELS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -162,10 +186,44 @@ REELS_SCHEMA = {
     "required": ["reels"],
     "additionalProperties": False,
 }
+_STORY_MOMENT_SCHEMA = {
+    **_MOMENT_SCHEMA,
+    "properties": {k: v for k, v in _MOMENT_SCHEMA["properties"].items() if k not in ("claim", "claim_fit")},
+    "required": [k for k in _MOMENT_SCHEMA["required"] if k not in ("claim", "claim_fit")],
+}
+STORY_REELS_SCHEMA = {
+    **REELS_SCHEMA,
+    "properties": {
+        "reels": {
+            "type": "array",
+            "items": {
+                **REELS_SCHEMA["properties"]["reels"]["items"],
+                "properties": {"story": {"type": "string"}, "moments": {"type": "array", "items": _STORY_MOMENT_SCHEMA}},
+            },
+        }
+    },
+}
 JUDGE_SCHEMA = {
     "type": "object",
     "properties": {"best": {"type": "integer"}, "why": {"type": "string"}},
     "required": ["best", "why"],
+    "additionalProperties": False,
+}
+# The link call's answer: one claim per clip, in play order (link_check enforces the rest).
+LINK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "clips": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"clip": {"type": "integer"}, "claim": {"type": "integer"}, "fit": {"type": "number"}},
+                "required": ["clip", "claim", "fit"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["clips"],
     "additionalProperties": False,
 }
 # Cut-off answers sent back to be answered shorter, per call.
@@ -205,7 +263,15 @@ def short_names(input: DebatesPickMomentsInput) -> Dict[int, str]:
     return shorts
 
 
+def links_in_pick(input: DebatesPickMomentsInput) -> bool:
+    """Whether the picker is shown the claims and links them itself (link_claims "in_pick"), rather
+    than a separate call linking them after the pick ("after", the default)."""
+    return input.link_claims == "in_pick"
+
+
 def render(input: DebatesPickMomentsInput) -> str:
+    """What the picker reads: the motion, the speakers, the lengths, the claims under link_claims
+    "in_pick" only, the stretches to avoid, and the numbered transcript by turn."""
     names = {s.slot: s.name for s in input.speakers}
     lines = [f"Motion: {input.title}", ""]
     lines += [f"Speaker {s.slot} ({s.name}){_side(s)}" for s in input.speakers]
@@ -214,10 +280,10 @@ def render(input: DebatesPickMomentsInput) -> str:
         f"Target clip length: {_seconds(input.target_min_ms)}-{_seconds(input.target_max_ms)} s. "
         f"Hard limits: {_seconds(input.clip_min_ms)}-{_seconds(input.clip_max_ms)} s. "
         f"The whole reel: under {_seconds(reel_max_ms(input))} s.",
-        "",
-        "Claims:",
     ]
-    lines += [f"[{c.index}] Speaker {c.speaker}: {c.text}" for c in input.claims]
+    if links_in_pick(input):
+        lines += ["", "Claims:"]
+        lines += [f"[{c.index}] Speaker {c.speaker}: {c.text}" for c in input.claims]
     if input.avoid:
         lines += ["", "Do not use these stretches; an earlier reel used them and they were refused:"]
         lines += [f"- sentences {a.start_sentence}-{a.end_sentence}: {a.reason}" for a in input.avoid]
@@ -541,7 +607,8 @@ def check(
     """The answer as (story, moments), its problems, and its soft problems. A reel whose only
     problems are its first clip's opening (first_clip_problems) or clips over the hard limit
     (over_limit_problem) comes back with them, those clips cut to fit (fit_to_limit): refused, but
-    usable as a last resort."""
+    usable as a last resort. Under link_claims "after" no claim is asked for or checked: each
+    moment holds UNLINKED until link_claims links it."""
     if not isinstance(answer, dict) or not isinstance(answer.get("moments"), list):
         return None, ['The answer needs a "moments" list.'], []
     rows = answer["moments"]
@@ -553,6 +620,7 @@ def check(
     if len(rows) != MOMENTS:
         problems.append(f"There are {len(rows)} clips; there must be exactly {MOMENTS}.")
     claims = {c.index: c for c in input.claims}
+    in_pick = links_in_pick(input)
     sentences = input.sentences
     moments: List[PickedMoment] = []
     for position, row in enumerate(rows):
@@ -561,9 +629,10 @@ def check(
             problems.append(f"{name} is not an object.")
             continue
         speaker, start, end = _int(row.get("speaker")), _int(row.get("start_sentence")), _int(row.get("end_sentence"))
-        claim = _int(row.get("claim"))
+        claim = _int(row.get("claim")) if in_pick else UNLINKED
         if speaker is None or start is None or end is None or claim is None:
-            problems.append(f"{name} needs integer speaker, start_sentence, end_sentence and claim.")
+            needs = "speaker, start_sentence, end_sentence and claim" if in_pick else "speaker, start_sentence and end_sentence"
+            problems.append(f"{name} needs integer {needs}.")
             continue
         if not 0 <= start <= end < len(sentences):
             problems.append(f"{name}: sentences {start}-{end} are not a range inside 0-{len(sentences) - 1}.")
@@ -598,13 +667,16 @@ def check(
                 f"{name} lasts {_seconds(length)} s; it must be {_seconds(input.clip_min_ms)}-"
                 f"{_seconds(input.clip_max_ms)} s (aim for {_seconds(input.target_min_ms)}-{_seconds(input.target_max_ms)} s)."
             )
-        linked = claims.get(claim)
-        if linked is None:
-            problems.append(f"{name}: there is no claim [{claim}].")
-        elif linked.speaker != speaker:
-            problems.append(f"{name}: claim [{claim}] is Speaker {linked.speaker}'s, not Speaker {speaker}'s.")
-        fit = row.get("claim_fit")
-        fit = min(1.0, max(0.0, float(fit))) if isinstance(fit, (int, float)) and not isinstance(fit, bool) else 0.5
+        if in_pick:
+            linked = claims.get(claim)
+            if linked is None:
+                problems.append(f"{name}: there is no claim [{claim}].")
+            elif linked.speaker != speaker:
+                problems.append(f"{name}: claim [{claim}] is Speaker {linked.speaker}'s, not Speaker {speaker}'s.")
+            fit = row.get("claim_fit")
+            fit = min(1.0, max(0.0, float(fit))) if isinstance(fit, (int, float)) and not isinstance(fit, bool) else 0.5
+        else:
+            fit = 0.0
         role = row.get("role") if row.get("role") in ROLES else ("opening" if position == 0 else "answer")
         answers = _int(row.get("answers"))
         if answers is not None and not 0 <= answers < position:
@@ -635,7 +707,7 @@ def check(
                 b = moments[j]
                 if a.start_sentence <= b.end_sentence and b.start_sentence <= a.end_sentence:
                     problems.append(f"Clips {i} and {j} overlap.")
-                elif a.speaker == b.speaker and a.claim_index == b.claim_index:
+                elif in_pick and a.speaker == b.speaker and a.claim_index == b.claim_index:
                     problems.append(f"Clips {i} and {j} are the same speaker's and link the same claim.")
         for i, m in enumerate(moments):
             # An out-of-range `answers` is already a problem above; only an earlier clip is read.
@@ -807,15 +879,184 @@ async def judge(input: DebatesPickMomentsInput, reels: List[Reel], *, client: An
         return 0, ""
 
 
+
+# --- linking claims after the pick (link_claims "after", GEO-3692) ---------------------------
+
+# A link per clip in play order: (claim index, fit), or None where none is usable yet.
+Links = List[Optional[Tuple[int, float]]]
+
+
+def claims_short(input: DebatesPickMomentsInput) -> List[str]:
+    """Why each speaker who cannot be linked a claim per clip cannot (fewer claims than the
+    MOMENTS // 2 clips each speaker plays): empty when every speaker can. Under link_claims
+    "in_pick" such a debate is refused clip by clip on every answer (a speaker's two clips need
+    different claims) and the run fails; under "after" it fails before any call (pick_moments)."""
+    return [
+        f"Speaker {s.slot} has {count} claim(s); each speaker's {MOMENTS // 2} clips need different claims."
+        for s in input.speakers
+        if (count := sum(c.speaker == s.slot for c in input.claims)) < MOMENTS // 2
+    ]
+
+
+def render_for_link(input: DebatesPickMomentsInput, moments: List[PickedMoment]) -> str:
+    """What the link call reads: the motion, the speakers, each speaker's claims, and the reel's
+    clips in play order with their speaker and the words the viewer hears (heard_text)."""
+    lines = [f"Motion: {input.title}", ""]
+    lines += [f"Speaker {s.slot} ({s.name}){_side(s)}" for s in input.speakers]
+    for s in input.speakers:
+        lines += ["", f"Speaker {s.slot}'s claims:"]
+        lines += [f"[{c.index}] {c.text}" for c in input.claims if c.speaker == s.slot]
+    lines += ["", "Clips, in play order:"]
+    names = {s.slot: s.name for s in input.speakers}
+    for position, m in enumerate(moments):
+        words = heard_text(input, m.start_sentence, m.end_sentence)
+        lines.append(f"Clip {position}, Speaker {m.speaker} ({names[m.speaker]}): {words}")
+    return "\n".join(lines)
+
+
+def _words(text: str) -> set:
+    """`text`'s words that say something (not COMMON_WORDS), lowercased."""
+    return {w for w in re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")) if w not in COMMON_WORDS}
+
+
+def closest_claims(input: DebatesPickMomentsInput, moments: List[PickedMoment], links: Links) -> Tuple[Links, List[int]]:
+    """`links` with every gap filled, and the positions filled. Each gap gets a claim of its clip's
+    speaker that speaker's other clip does not link, the one whose words the clip says most (the
+    share of the claim's words, past COMMON_WORDS, in the clip's heard words), with fit 0: chosen
+    by words, not judged. A speaker's two gaps take the pair that says most in all; ties go to the
+    claim the caller listed first. The fallback when the link call gives no usable link, so a reel
+    is never lost to its links. Raises when a speaker has too few claims (claims_short)."""
+    links = list(links)
+    filled: List[int] = []
+    for speaker in {m.speaker for m in moments}:
+        mine = [p for p, m in enumerate(moments) if m.speaker == speaker]
+        gaps = [p for p in mine if links[p] is None]
+        if not gaps:
+            continue
+        taken = {links[p][0] for p in mine if links[p] is not None}
+        free = [c for c in input.claims if c.speaker == speaker and c.index not in taken]
+        if len(free) < len(gaps):
+            raise FinalDecisionError(f"{TASK}: Speaker {speaker} has too few claims to link a different one to each clip")
+        said = {p: _words(heard_text(input, moments[p].start_sentence, moments[p].end_sentence)) for p in gaps}
+
+        def share(claim, p) -> float:
+            words = _words(claim.text)
+            return len(words & said[p]) / len(words) if words else 0.0
+
+        best, best_score = None, -1.0
+        for choice in permutations(free, len(gaps)):
+            score = sum(share(claim, p) for claim, p in zip(choice, gaps))
+            if score > best_score:
+                best, best_score = choice, score
+        for claim, p in zip(best, gaps):
+            links[p] = (claim.index, 0.0)
+            filled.append(p)
+    return links, sorted(filled)
+
+
+def read_links(input: DebatesPickMomentsInput, moments: List[PickedMoment], answer: Any) -> Tuple[Links, List[str]]:
+    """The link call's answer as a link per clip, and its problems. A link breaks a rule when its
+    clip is missing or named twice, or its claim does not exist or is the other speaker's; of a
+    speaker's two clips that link the same claim, the one with the lower fit (the later on a tie)
+    breaks it. A link that breaks a rule is None."""
+    links: Links = [None] * len(moments)
+    rows = answer.get("clips") if isinstance(answer, dict) else None
+    if not isinstance(rows, list):
+        return links, ['The answer needs a "clips" list.']
+    problems: List[str] = []
+    if len(rows) != len(moments):
+        problems.append(f"There are {len(rows)} entries; there must be exactly {len(moments)}, one per clip.")
+    claims = {c.index: c for c in input.claims}
+    seen = set()
+    for row in rows:
+        position = _int(row.get("clip")) if isinstance(row, dict) else None
+        if position is None or not 0 <= position < len(moments):
+            problems.append(f"An entry names no clip from 0 to {len(moments) - 1}.")
+            continue
+        if position in seen:
+            problems.append(f"Clip {position} has more than one entry.")
+            links[position] = None
+            continue
+        seen.add(position)
+        speaker = moments[position].speaker
+        claim = _int(row.get("claim"))
+        linked = claims.get(claim)
+        if linked is None:
+            problems.append(f"Clip {position}: there is no claim [{row.get('claim')}].")
+            continue
+        if linked.speaker != speaker:
+            problems.append(f"Clip {position}: claim [{claim}] is Speaker {linked.speaker}'s, not Speaker {speaker}'s.")
+            continue
+        fit = row.get("fit")
+        fit = min(1.0, max(0.0, float(fit))) if isinstance(fit, (int, float)) and not isinstance(fit, bool) else 0.5
+        links[position] = (claim, fit)
+    problems += [f"Clip {p} has no entry." for p in range(len(moments)) if p not in seen]
+    for i in range(len(moments)):
+        for j in range(i + 1, len(moments)):
+            a, b = links[i], links[j]
+            if a is not None and b is not None and moments[i].speaker == moments[j].speaker and a[0] == b[0]:
+                problems.append(f"Clips {i} and {j} are the same speaker's and link the same claim [{a[0]}]; link different claims.")
+                links[j if b[1] <= a[1] else i] = None
+    return links, problems
+
+
+def link_check(input: DebatesPickMomentsInput, moments: List[PickedMoment]):
+    """claude_json's check for the link call. An answer that breaks a rule is sent back, and kept
+    as a last resort with its broken links filled by closest_claims; among those, the one with the
+    fewest filled is kept (link_rank)."""
+
+    def check_links(answer: Any) -> Tuple[Optional[Tuple[Links, List[int]]], List[str], List[str]]:
+        links, problems = read_links(input, moments, answer)
+        return closest_claims(input, moments, links), problems, []
+
+    return check_links
+
+
+def link_rank(value: Tuple[Links, List[int]]) -> int:
+    """How a last-resort link answer ranks (lower is better): how many clips it left to be filled."""
+    return len(value[1])
+
+
+async def link_claims(input: DebatesPickMomentsInput, moments: List[PickedMoment], *, client: Any = None) -> List[PickedMoment]:
+    """`moments` each linked to a claim of its own speaker, a speaker's two clips to different
+    claims, by a call that sees the claims and the clips as heard (render_for_link). Links the call
+    gets wrong after LINK_ATTEMPTS, and every link when it gives no answer (a failed request, the
+    spend guard), are filled by closest_claims: the reel is never lost to its links."""
+    try:
+        (links, filled), _, _ = await ask_json(
+            prompts.get("debates_pick_moments.link_system"),
+            render_for_link(input, moments),
+            link_check(input, moments),
+            task=f"{TASK} link",
+            attempts=LINK_ATTEMPTS,
+            client=client,
+            schema=LINK_SCHEMA,
+            cut_off_retries=CUT_OFF_RETRIES,
+            rank=link_rank,
+        )
+    except DecisionError as e:
+        logger.warning(f"{TASK}: the link call gave no answer; linking every clip by words in common: {e}")
+        links, filled = closest_claims(input, moments, [None] * len(moments))
+    if filled:
+        logger.warning(f"{TASK}: linked clip(s) {filled} by words in common; the link call gave none usable")
+    return [m.model_copy(update={"claim_index": claim, "claim_fit": fit}) for m, (claim, fit) in zip(moments, links)]
+
+
 async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) -> DebatesPickMomentsResult:
+    """The reel: picked (and judged among candidates), then, under link_claims "after", its clips
+    linked to claims (link_claims). A debate where a speaker has too few claims for a different one
+    per clip fails before any call under "after" (claims_short): no reel could be linked."""
+    in_pick = links_in_pick(input)
+    if not in_pick and (short := claims_short(input)):
+        raise FinalDecisionError(f"{TASK}: no reel can be linked: {' '.join(short)}")
     passed, model, attempts = await ask_json(
-        prompts.get("debates_pick_moments.system"),
+        prompts.get("debates_pick_moments.system" if in_pick else "debates_pick_moments.story_system"),
         render(input),
         lambda answer: check_reels(input, answer),
         task=TASK,
         attempts=ATTEMPTS,
         client=client,
-        schema=REELS_SCHEMA,
+        schema=REELS_SCHEMA if in_pick else STORY_REELS_SCHEMA,
         cut_off_retries=CUT_OFF_RETRIES,
         rank=answer_rank,
     )
@@ -837,6 +1078,8 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
     cut = [i for i, m in enumerate(moments) if m.trimmed_from_sentence is not None or m.trimmed_to_sentence is not None]
     if cut:
         logger.warning(f"{TASK}: no reel kept every clip within the limit; kept one with clips {cut} cut to fit")
+    if not in_pick:
+        moments = await link_claims(input, moments, client=client)
     return DebatesPickMomentsResult(
         story=story,
         moments=moments,
@@ -852,12 +1095,16 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
 __all__ = [
     "CALLS",
     "JUDGE_SCHEMA",
+    "LINK_SCHEMA",
     "REELS_SCHEMA",
+    "STORY_REELS_SCHEMA",
     "TASK",
     "answer_rank",
     "check",
     "check_reels",
+    "claims_short",
     "clip_flaws",
+    "closest_claims",
     "continues",
     "filler_lead",
     "first_clip_problems",
@@ -866,9 +1113,12 @@ __all__ = [
     "heard_text",
     "judge",
     "later_clip_problems",
+    "link_claims",
     "pick_moments",
+    "read_links",
     "reel_ms",
     "render",
     "render_for_judge",
+    "render_for_link",
     "split_start",
 ]
