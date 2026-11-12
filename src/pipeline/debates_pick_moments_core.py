@@ -233,16 +233,25 @@ def heard_start(input: DebatesPickMomentsInput, start: int, end: int) -> Tuple[i
     """Where the viewer starts hearing a clip of sentences `start`-`end`, once geo-chat has cut its
     filler: the sentence, and its words from the first one heard. Sentences that are nothing but
     filler ("Um.") are skipped, then the filler the next one opens on, unless that leaves fewer than
-    FILLER_KEEP_WORDS of it. geo-chat's story_moments::filler_lead. (geo-chat also keeps the filler
-    when the clip would drop under its minimum length without it; a few filler words never decide
-    that for a clip inside the limits.)"""
+    FILLER_KEEP_WORDS of it. geo-chat's story_moments::filler_lead.
+
+    geo-chat keeps all of it when the clip would run under the minimum length without it
+    (story_reel, CLIP_MIN_MS, sent as clip_min_ms): "Um. We need rules." at 6.5 s, "Um." taking
+    1 s, plays as said. A skipped sentence's time is known; filler inside a sentence is timed as its
+    share of the sentence's words, since sentences carry no word times."""
+    sentences = input.sentences
     for k in range(start, end + 1):
-        words = input.sentences[k].text.split()
+        words = sentences[k].text.split()
         lead = filler_lead(words)
         if lead == len(words) and k < end:
             continue
-        return k, (words if len(words) - lead < FILLER_KEEP_WORDS else words[lead:])
-    return end, input.sentences[end].text.split()
+        if len(words) - lead < FILLER_KEEP_WORDS:
+            lead = 0
+        heard_ms = sentences[k].start_ms + (sentences[k].end_ms - sentences[k].start_ms) * lead // max(len(words), 1)
+        if (k > start or lead) and sentences[end].end_ms - heard_ms < input.clip_min_ms:
+            return start, sentences[start].text.split()
+        return k, words[lead:]
+    return end, sentences[end].text.split()
 
 
 def _opener(words: List[str]) -> Optional[str]:

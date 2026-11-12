@@ -1019,6 +1019,7 @@ def test_the_filler_list_is_geo_chats():
 def _heard(*sentences):
     """Sentences `sentences` as one clip's turn: where the viewer starts hearing it, as words."""
     debate = _debate()
+    debate.clip_min_ms = 1_000  # long enough that geo-chat cuts the filler (see the minimum test below)
     for k, text in enumerate(sentences):
         debate.sentences[k].text = text
     k, words = pick.heard_start(debate, 0, len(sentences) - 1)
@@ -1037,10 +1038,34 @@ def test_a_clip_is_heard_from_where_geo_chat_cuts_its_filler():
     assert _heard("You know nothing about it.") == (0, "You know nothing about it.")
     assert _heard("But for that law we'd lose.") == (0, "But for that law we'd lose.")
     assert _heard("Soon we will see.") == (0, "Soon we will see.")
+    # A comma ends the phrase (clip_ranges::runs_on): "So, many…" and "You know, what…" are filler.
+    assert _heard("So, many people disagree.") == (0, "many people disagree.")
+    assert _heard("You know, what matters is turnout.") == (0, "what matters is turnout.")
     # A_first_sentence_of_nothing_but_filler_is_dropped_whole.
     assert _heard("Um.", "The data shows it.") == (1, "The data shows it.")
     assert _heard("Uh.", "Um, so the data shows it.") == (1, "the data shows it.")
     assert _heard("Um.", "So what now?") == (1, "So what now?")
+
+
+def test_filler_stays_when_cutting_it_would_leave_the_clip_under_the_minimum():
+    # geo-chat's story_reel keeps the filler when the clip would run under CLIP_MIN_MS without it,
+    # so the viewer hears "Um." and the first clip is refused on it.
+    debate = _debate()
+    timed = [(0, 1_000, "Um."), (1_100, 3_500, "We need"), (3_600, 6_500, "rules now.")]  # 6.5 s, 5.4 s past "Um."
+    for k, (start_ms, end_ms, text) in enumerate(timed):
+        debate.sentences[k].start_ms, debate.sentences[k].end_ms, debate.sentences[k].text = start_ms, end_ms, text
+    assert pick.heard_start(debate, 0, 2) == (0, ["Um."])
+    assert any('opens on "um"' in p for p in pick.check(debate, GOOD)[1])
+    # Long enough without it: cut, as before.
+    debate.sentences[2].end_ms = 8_000
+    assert pick.heard_start(debate, 0, 2) == (1, ["We", "need"])
+    # Filler inside a sentence is timed as its share of the words: "And" is a quarter of a 6.4 s
+    # sentence, 1.6 s, leaving 4.8 s, so it stays; at 9.6 s it would leave 7.2 s and is cut.
+    debate = _debate()
+    debate.sentences[0].start_ms, debate.sentences[0].end_ms, debate.sentences[0].text = 0, 6_400, "And we need rules."
+    assert pick.heard_start(debate, 0, 0) == (0, ["And", "we", "need", "rules."])
+    debate.sentences[0].end_ms = 9_600
+    assert pick.heard_start(debate, 0, 0) == (0, ["we", "need", "rules."])
 
 
 def test_a_filler_sentence_before_a_run_on_still_refuses_the_first_clip():
