@@ -1893,6 +1893,14 @@ def test_links_still_broken_after_the_send_back_keep_the_good_ones_and_fill_the_
     assert [(m.claim_index, m.claim_fit) for m in result.moments] == [(0, 0.9), (9, 0.8), (8, 0.0), (5, 0.7)]
 
 
+def test_a_speakers_two_clips_naming_one_claim_at_the_same_fit_leave_it_to_the_earlier_clip():
+    # A tie in fit: the earlier clip keeps the claim and the later one is filled.
+    tied = _links(0, 9, 0, 5, fits=[0.8, 0.8, 0.8, 0.8])
+    client = _FakeClaude({"reels": [STORY]}, tied, tied)
+    result = asyncio.run(pick.pick_moments(_debate("after"), client=client))
+    assert [(m.claim_index, m.claim_fit) for m in result.moments] == [(0, 0.8), (9, 0.8), (8, 0.0), (5, 0.8)]
+
+
 def _said(debate):
     """The clips of GOOD saying words of the claims, crossed: clip 0 (speaker 1) argues claim 8,
     clip 2 claim 0; clip 1 (speaker 2) claim 9, clip 3 claim 5."""
