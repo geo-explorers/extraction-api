@@ -1351,6 +1351,41 @@ def test_a_reel_with_only_soft_problems_beats_one_with_a_clip_cut_to_fit():
     assert result.attempts == 1 and result.moments[0].end_sentence == 1
 
 
+def test_a_send_back_that_comes_back_worse_does_not_replace_the_better_answer():
+    # Every soft answer is sent back now, so the answer kept is the one whose best reel has the
+    # fewest problems, not the latest (review of GEO-3691).
+    debate = _debate()
+    debate.sentences[6].text = "Because it is a state matter."
+    debate.sentences[9].text = "But every president tips it."
+    better = _with(2, start_sentence=7)  # only clip 3 opens on "but"
+    result = asyncio.run(pick.pick_moments(debate, client=_FakeClaude(better, GOOD, BROKEN)))
+    assert result.attempts == 1 and result.moments[2].start_sentence == 7
+    # Two reels to judge, then a single worse one: the two still reach the judge.
+    other = json.loads(json.dumps(better))
+    other["moments"][3].update(start_sentence=10)  # clip 4 at 10-11, clean; clip 3 at 7-8, clean
+    other["moments"][1].update(start_sentence=3, end_sentence=4)
+    debate.sentences[3].text = "And so but the states differ."  # clip 2 of `other` opens on "but"
+    client = _FakeClaude({"reels": [better, other]}, GOOD, BROKEN, {"best": 1, "why": "x"})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 1 and result.candidates == 2 and len(client.calls) == 4
+    assert result.moments[3].start_sentence == 10
+    # Equal answers: the later one, as before.
+    debate = _debate()
+    debate.sentences[3].text = "But it is a federal problem."
+    result = asyncio.run(pick.pick_moments(debate, client=_FakeClaude(GOOD, GOOD, GOOD)))
+    assert result.attempts == 3
+
+
+def test_a_last_resort_that_comes_back_worse_does_not_replace_the_better_one():
+    debate = _debate()
+    debate.sentences[0].text = "but states run it."  # mid-sentence and on "but": two problems
+    debate.sentences[1].text = "But states run it well."  # on "but" alone: one
+    better = _with(0, start_sentence=1)
+    result = asyncio.run(pick.pick_moments(debate, client=_FakeClaude(better, GOOD, BROKEN)))
+    assert result.attempts == 1 and result.moments[0].start_sentence == 1
+    assert len(result.first_clip_problems) == 1
+
+
 def test_a_reel_whose_only_problems_are_later_openers_is_kept_when_never_fixed():
     debate = _debate()
     debate.sentences[3].text = "But it is a federal problem."

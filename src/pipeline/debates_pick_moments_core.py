@@ -658,7 +658,8 @@ def check_reels(
     every passing reel has one (a later clip opening on "But…", a reel over its length), the answer
     is sent back to fix them, however many passed: in the 12 Nov preview about 17 clips past the
     first opened mid-thought, and reels that passed together were never asked again. ask_json
-    keeps the answer regardless, so a send-back that comes back worse costs nothing.
+    keeps whichever answer's best reel has the fewest problems (answer_rank), so a send-back that
+    comes back worse does not replace a better answer.
 
     When none passes, the reels whose only problems are fixable (their first clip's opening, a clip
     cut to fit) come back with the problems, each with its own: the answer is sent back, but they
@@ -694,6 +695,14 @@ def check_reels(
     # Every reel that passed has a soft problem: they go back with the others' problems too, so the
     # next answer can fix them as well as improve them.
     return passed, [], softs + problems
+
+
+def answer_rank(candidates: List[Candidate]) -> int:
+    """How an answer with no clean reel ranks against another (claude_json.ask_json's `rank`, lower
+    is better): the fewest problems of any of its reels, soft ones for reels that passed, fixable
+    ones for last resorts. Before, the latest answer always won, and once every soft answer was
+    sent back (GEO-3691) a worse second answer replaced a better first one."""
+    return min(len(problems) for _, problems in candidates)
 
 
 def clip_flaws(input: DebatesPickMomentsInput, position: int, moment: PickedMoment, is_cased: bool) -> List[str]:
@@ -780,6 +789,7 @@ async def pick_moments(input: DebatesPickMomentsInput, *, client: Any = None) ->
         client=client,
         schema=REELS_SCHEMA,
         cut_off_retries=CUT_OFF_RETRIES,
+        rank=answer_rank,
     )
     # Judged among the reels with no soft problem when there are any, else among all that passed,
     # with their problems shown (render_for_judge). (Last-resort reels all carry their fixable
@@ -816,6 +826,7 @@ __all__ = [
     "JUDGE_SCHEMA",
     "REELS_SCHEMA",
     "TASK",
+    "answer_rank",
     "check",
     "check_reels",
     "clip_flaws",
