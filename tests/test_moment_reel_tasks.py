@@ -647,9 +647,10 @@ def test_both_tasks_are_registered_with_their_contracts_on_the_claude_budget():
         (TRANSCRIPT_PUNCTUATE_SPEC, punct.ATTEMPTS, 1),
     ):
         assert spec.rate_limit_key == "claude_global" and spec.concurrency == concurrency
-        # One rate unit per Claude call the run can make, and time for every one of them.
+        # One rate unit per Claude call the run can make.
         assert spec.rate_limit_units == attempts
-        assert spec.execution_timeout.total_seconds() >= attempts * REQUEST_TIMEOUT_S
+    # Punctuate has time for every call; pick is held to its deadline (tests/test_pick_deadline.py).
+    assert TRANSCRIPT_PUNCTUATE_SPEC.execution_timeout.total_seconds() >= punct.ATTEMPTS * REQUEST_TIMEOUT_S
 
 
 # --- candidate reels and the judge (11 Nov grading) -------------------------------------
