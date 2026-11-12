@@ -22,6 +22,7 @@ also serves the sync extraction endpoints).
 import asyncio
 import json
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
@@ -70,7 +71,13 @@ def enqueue_task(req: EnqueueRequest, request: Request) -> dict:
             detail=f"Invalid payload for {req.type}: {e.errors()}",
         )
 
-    ref = entry.runnable.run(input_obj, wait_for_result=False)
+    from src.pipeline.deadline import ENQUEUED_AT
+
+    # Stamped so a run's deadline counts from here, queue time and retries included, as its
+    # caller's wait does (debates.pick_moments, GEO-3697).
+    ref = entry.runnable.run(
+        input_obj, wait_for_result=False, additional_metadata={ENQUEUED_AT: str(time.time())}
+    )
     caller = getattr(request.state, "api_caller", "unknown")
     logger.info(f"Enqueued {req.type} -> run {ref.workflow_run_id} (caller={caller})")
     return {"id": ref.workflow_run_id, "type": req.type, "status": "queued"}

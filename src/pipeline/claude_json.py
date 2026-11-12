@@ -35,6 +35,13 @@ stays retryable, so the engine runs the task again. Once an answer is held
 (acceptable, or a last resort), a later spend-guard trip or failed request ends
 the conversation and returns that answer instead: a rerun would throw it away.
 
+A caller that passes a `deadline` (deadline.Deadline, GEO-3697) gets an answer by
+then or a final failure: no answer is asked for once too little time is left
+(deadline.MIN_REQUEST_S), so the run keeps what it holds, and each request's
+timeout is capped at the time left. With nothing held at that point, or when a
+request fails with too little time left, the run fails as final: a rerun would
+have no time to answer in. Each such stop is logged as "shortened by the deadline".
+
 The model and its knobs are the `moments_claude_*` settings, overridable per run.
 The system prompt and the first message are marked for prompt caching, so a send
 back or an engine retry within minutes reads the transcript from cache.
@@ -42,6 +49,7 @@ back or an engine retry within minutes reads the transcript from cache.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Callable, List, Optional, Tuple, TypeVar
 
 from hatchet_sdk.exceptions import NonRetryableException
@@ -52,6 +60,7 @@ from src.decisions.base import DecisionError
 from src.infrastructure.claude import claude_text, parse_json
 from src.infrastructure.logger import get_logger
 from src.infrastructure.spend_guard import SpendLimitExceeded, spend_guard
+from src.pipeline.deadline import Deadline
 
 logger = get_logger(__name__)
 
@@ -132,13 +141,15 @@ async def ask_json(
     schema: Optional[dict] = None,
     cut_off_retries: int = 0,
     rank: Optional[Callable[[T], Any]] = None,
+    deadline: Optional[Deadline] = None,
 ) -> Tuple[T, str, int]:
     """Ask until an answer has no problems, or `attempts` run out. Returns (value, model, answers
     asked for); the value is the best answer seen (see the module doc). `schema`, a JSON schema,
     constrains the reply to it (structured outputs); `cut_off_retries` is how many answers cut off
     at the token limit are sent back to be answered shorter, within `attempts`. `rank` (lower is
     better) chooses among answers with only soft problems, and among last resorts; without it the
-    latest wins."""
+    latest wins. `deadline` stops asking once too little time is left and caps each request's
+    timeout at the time left (see the module doc)."""
 
     def no_worse(value: T, held: Optional[Tuple[Any, ...]]) -> bool:
         return held is None or rank is None or rank(value) <= rank(held[0])
@@ -152,6 +163,18 @@ async def ask_json(
     last_resort: Optional[Tuple[T, int, List[str]]] = None
     problems: List[str] = []
     for attempt in range(1, attempts + 1):
+        if deadline is not None and not deadline.allows_request():
+            left = deadline.left()
+            if best is not None or last_resort is not None:
+                logger.warning(
+                    f"{task}: shortened by the deadline: {left:.0f} s left, so answer {attempt} was "
+                    "not asked for; keeping what is held"
+                )
+                break
+            raise FinalDecisionError(
+                f"{task}: shortened by the deadline: {left:.0f} s left before answer {attempt} and no "
+                f"acceptable answer held: {problems}"
+            )
         try:
             spend_guard.check_and_record(SPEND_KEY)
         except SpendLimitExceeded as e:
@@ -160,20 +183,34 @@ async def ask_json(
                 logger.warning(f"{task}: spend guard tripped before answer {attempt}; keeping what is held: {e}")
                 break
             raise FinalDecisionError(f"{task}: spend guard tripped: {e}") from e
+        # Under a deadline the request may take only the time left: the client's own timeout, and
+        # a wall-clock cap around the whole call (the client's timeout bounds each read, not the
+        # call).
+        timeout = deadline.request_timeout(REQUEST_TIMEOUT_S) if deadline is not None else None
         try:
-            message = await client.messages.create(
+            request = client.messages.create(
                 model=model,
                 max_tokens=llm.get("moments_claude_max_tokens"),
                 temperature=llm.get("moments_claude_temperature"),
                 system=_cached(system),
                 messages=messages,
                 **shape,
+                **({"timeout": timeout} if timeout is not None else {}),
             )
+            message = await (asyncio.wait_for(request, timeout) if timeout is not None else request)
         except Exception as e:  # network, rate limit, overload: the engine retries the run
+            out_of_time = deadline is not None and not deadline.allows_request()
             # A send-back that fails leaves the answer already held, which a rerun would throw away.
             if best is not None or last_resort is not None:
-                logger.warning(f"{task}: answer {attempt} request failed; keeping what is held: {e}")
+                note = "shortened by the deadline: " if out_of_time else ""
+                logger.warning(f"{task}: {note}answer {attempt} request failed; keeping what is held: {e}")
                 break
+            # A rerun would start with no time left.
+            if out_of_time:
+                raise FinalDecisionError(
+                    f"{task}: shortened by the deadline: answer {attempt} request failed with "
+                    f"{deadline.left():.0f} s left and no acceptable answer held: {e!r}"
+                ) from e
             if _rejected(e):
                 raise FinalDecisionError(f"{task}: Claude rejected the request: {e}") from e
             raise DecisionError(f"{task}: Claude request failed: {e}", retryable=True) from e
