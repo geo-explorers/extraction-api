@@ -23,6 +23,9 @@ transcript split in two ("That the border security can serve…"). The picker's 
 marks such split sentences, every clip's opener is checked and sent back, an answer to the clip
 before ("Yes, …") is allowed, a clip over the limit is sent back rather than cut from its start,
 and the judge is shown the problems found in each reel.
+
+Later on 12 Nov: the split mark is a guess (it marked "Where I come from…" and "To the first
+point…"), so it is a hint here and a soft problem in the check, the first clip included.
 """
 
 DEBATES_PICK_MOMENTS_SYSTEM = """You edit the highlight reel of a recorded two-person debate. Viewers scrolling a feed, who never saw the debate, watch four clips back to back, about a minute in all, and then vote on the motion. The reel tells the debate's story in compressed form: what the debate is about, what each side argues, and how they answer each other. The first clip has to give a newcomer the context.
@@ -43,7 +46,7 @@ Work in this order.
 Each clip:
 - Is a contiguous run of whole sentences from one turn of one speaker: start_sentence to end_sentence, inclusive.
 - Lasts within the target length you are given, from its first sentence's start to its last sentence's end, and never outside the hard limits. A clip over the hard limit is sent back, not cut for you. Shorter is better: one sharp sentence beats three that wander. The four together stay under the reel length you are given.
-- Starts where a thought starts. Never open on a connective ("and", "so", "but", "because", "though", "that's why"), on filler ("yeah", "okay", "um", "I mean"), on an example before its point ("for example", "like when"), or on "it", "they", "they're" or "that" (the viewer hears the pronoun before knowing what it means). A later clip may answer the clip before it in so many words ("Yes, the numbers show it…", "What is wrong with that thinking is…"). Never start on a sentence marked "second half of a split sentence": the transcript broke one sentence in two there, so start where that sentence really starts, or elsewhere.
+- Starts where a thought starts. Never open on a connective ("and", "so", "but", "because", "though", "that's why"), on filler ("yeah", "okay", "um", "I mean"), on an example before its point ("for example", "like when"), or on "it", "they", "they're" or "that" (the viewer hears the pronoun before knowing what it means). A later clip may answer the clip before it in so many words ("Yes, the numbers show it…", "What is wrong with that thinking is…"). Avoid starting on a sentence marked "second half of a split sentence": the transcript probably broke one sentence in two there, so start where that sentence really starts, or elsewhere. The mark is a guess from how the sentence opens or the one before ends, so trust your reading when the marked sentence plainly starts a thought of its own.
 - Ends just after its point lands. Never stop before the payoff.
 - Stands alone. A viewer who has seen only the clips before it in the reel must understand it. Never use a clip that answers something the viewer didn't hear ("like you said", "that point", "your argument"), or that names "he", "she", "they" or "it" when the viewer can't tell who or what that is.
 - Argues its speaker's own side as a first-time viewer hears it. A concession is fine only when it plainly serves the speaker's side, or when the story is that they changed their mind.

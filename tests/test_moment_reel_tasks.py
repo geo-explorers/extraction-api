@@ -1244,13 +1244,18 @@ def test_a_later_clip_starting_mid_sentence_is_sent_back():
     assert soft == ["Clip 1 starts mid-sentence (its first sentence opens on a lowercase word). Start it on a sentence that opens a thought."]
 
 
+def _split_soft(position):
+    return (
+        f'Clip {position} starts on a sentence marked "second half of a split sentence": the transcript may have '
+        "broken a sentence in two there. If it did, start the clip where that sentence starts, or pick another stretch."
+    )
+
+
 @pytest.mark.parametrize(
     "before, text",
     [
-        # The 12 Nov split errors.
+        # 12 Nov split errors.
         ("Policy is how we got in this situation in the first place.", "Where corporations argued for sugar in soft drinks."),
-        ("There is a difference between migrants and cartel members.", "And that the border security can serve a useful purpose."),
-        ("That is how it feels in my head.", "To the, like, to the idea of a human relationship."),
         # A sentence the transcript ended mid-phrase: the next one is its second half.
         ("I think legal immigration is a.", "National security risk for everyone."),
         ("We should ask whether.", "States can run their own rolls."),
@@ -1258,27 +1263,41 @@ def test_a_later_clip_starting_mid_sentence_is_sent_back():
         ("Because.", "States can run their own rolls."),
     ],
 )
-def test_a_sentence_the_transcript_split_off_the_one_before_is_marked_and_not_started_on(before, text):
+def test_a_sentence_the_transcript_split_off_the_one_before_is_marked_and_sent_back_on_any_clip(before, text):
     debate = _debate()
     debate.sentences[3].text, debate.sentences[4].text = before, text  # turn 1
     assert pick.continues(debate, 4) and not pick.continues(debate, 3)
     assert f"[4] 20.0-24.8 s (4.8 s, second half of a split sentence): {text}" in pick.render(debate)
     assert "[3] 15.0-19.8 s (4.8 s): " in pick.render(debate)
     # A later clip starting there is sent back, softly.
-    later = _with(1, start_sentence=4)
-    value, problems, soft = pick.check(debate, later)
+    value, problems, soft = pick.check(debate, _with(1, start_sentence=4))
     assert problems == [] and value is not None
-    assert soft == ["Clip 1 starts on the second half of a split sentence: the transcript broke a sentence in two there. Start it on a sentence that opens a thought."]
-    # The first clip may not start there: a last resort at best.
+    assert soft == [_split_soft(1)]
+    # So is the first clip: the mark is a guess, so it never refuses a reel.
+    debate = _debate()
     for k, sentence in enumerate((before, text)):
         debate.sentences[k].text = sentence
-    value, problems, _ = pick.check(debate, _with(0, start_sentence=1))
-    assert value is not None
-    assert problems == [
-        "Clip 0, the reel's first clip, opens on sentence 1, which is the second half of a split sentence: "
-        "the transcript broke a sentence in two there. The first clip is where a newcomer meets the debate: "
-        "start it on a sentence that begins a thought, or pick another first clip."
+    value, problems, soft = pick.check(debate, _with(0, start_sentence=1))
+    assert problems == [] and value is not None
+    assert soft == [_split_soft(0)]
+    assert pick.first_clip_problems(debate, 1, 2, 1) == []
+
+
+def test_a_split_half_opening_on_that_is_held_to_the_that_opener_rule_not_the_mark():
+    # "And that the border security…" (12 Nov) is marked, but what refuses it as a first clip is
+    # its opener "that", a rule of its own; the mark adds no second problem.
+    debate = _debate()
+    debate.sentences[3].text = "There is a difference between migrants and cartel members."
+    debate.sentences[4].text = "And that the border security can serve a useful purpose."
+    assert pick.continues(debate, 4)
+    value, problems, soft = pick.check(debate, _with(1, start_sentence=4))
+    assert problems == [] and soft == [
+        'Clip 1 opens on "that", which leans on what came before or is filler. Start it on a sentence that opens a thought.'
     ]
+    debate.sentences[0].text, debate.sentences[1].text = debate.sentences[3].text, debate.sentences[4].text
+    value, problems, soft = pick.check(debate, _with(0, start_sentence=1))
+    assert value is not None and soft == []
+    assert len(problems) == 1 and 'which opens on "that", a connective or filler' in problems[0]
 
 
 @pytest.mark.parametrize(
@@ -1286,25 +1305,13 @@ def test_a_sentence_the_transcript_split_off_the_one_before_is_marked_and_not_st
     [
         ("Policy got us here.", "Where do we draw the line?"),
         ("Policy got us here.", "That argument falls apart."),
-        ("Policy got us here.", "To be fair, states run it well."),
-        ("Policy got us here.", "To me, it is federal."),
         ("Policy got us here.", "Federal rules win."),
-        # Idioms that open a sentence of their own.
-        ("Policy got us here.", "To the extent states run rolls, they run them well."),
-        ("Policy got us here.", "To the best of my knowledge, states do fine."),
-        ("Policy got us here.", "To a certain extent, I agree with the states."),
-        ("Policy got us here.", "To a degree, I agree with the states."),
-        ("Policy got us here.", "To the degree that states run rolls, they run them well."),
-        ("Policy got us here.", "To a point, the states are right."),
-        # A debater taking the other side's points in turn.
+        # No rule for "To …": it opens a sentence of its own as often as not.
         ("Policy got us here.", "To the first point, states run rolls well."),
-        ("Policy got us here.", "To the last question, I say no."),
-        ("Policy got us here.", "To the other side's argument, look at Georgia."),
+        ("That is how it feels in my head.", "To the, like, to the idea of a human relationship."),
         # A question is no clause of the sentence before, whatever its second word.
         ("Policy got us here.", "Where in the Constitution does it say that?"),
         ("Policy got us here.", "Where exactly is the line?"),
-        ("Policy got us here.", "Where, in your view, should it stop?"),
-        ("Policy got us here.", "To the people at home, what would you do?"),
         # A capital past the first word is a letter or a name, not a hanging article.
         ("We need Plan A.", "Federal rules failed."),
         ("They give the plan an A.", "States run it well."),
@@ -1315,7 +1322,6 @@ def test_a_sentence_the_transcript_split_off_the_one_before_is_marked_and_not_st
         # turn's first sentence is no clause of the other speaker's.
         (None, "Federal rules win."),
         (None, "That the states run their rolls well is plain."),
-        (None, "To the question of rolls, states answer it."),
         (None, "Where corporations argued for sugar, states pushed back."),
     ],
 )
@@ -1343,11 +1349,53 @@ def test_a_split_is_found_past_a_sentence_of_nothing_but_filler():
     # A later clip starting on the filler is heard from the half, and sent back.
     value, problems, soft = pick.check(debate, _with(1, start_sentence=4))
     assert problems == [] and value is not None
-    assert soft == ["Clip 1 starts on the second half of a split sentence: the transcript broke a sentence in two there. Start it on a sentence that opens a thought."]
+    assert soft == [_split_soft(1)]
     # A turn of filler before a clause is still a turn start.
     debate.sentences[3].text = "Um."
     debate.sentences[5].text = "That the states run their rolls well is plain."
     assert not pick.continues(debate, 5)
+
+
+def _split_first_clip(debate):
+    """GOOD with its first clip starting on sentence 1, which the transcript marks as a split half."""
+    debate.sentences[0].text = "Policy is how we got in this situation in the first place."
+    debate.sentences[1].text = "Where corporations argued for sugar in soft drinks."
+    return _with(0, start_sentence=1)
+
+
+def test_a_reel_whose_only_problem_is_a_split_first_clip_is_sent_back_but_still_usable():
+    debate = _debate()
+    marked = _split_first_clip(debate)
+    client = _FakeClaude({"reels": [marked]}, {"reels": [marked]}, {"reels": [marked]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    # Sent back each time with the mark, never refused: the reel is kept, as passing, not as a
+    # last resort, so no first-clip problem is reported.
+    assert result.attempts == 3 and len(client.calls) == 3
+    assert all(_split_soft(0) in call["messages"][-1]["content"] for call in client.calls[1:])
+    assert result.moments[0].start_sentence == 1 and result.first_clip_problems == []
+
+
+def test_a_clean_reel_is_taken_over_one_with_a_split_first_clip():
+    debate = _debate()
+    marked = _split_first_clip(debate)
+    client = _FakeClaude({"reels": [marked, GOOD]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 1 and result.candidates == 1 and result.moments[0].start_sentence == 0
+    # And a split first clip beats a first clip that breaks a hard rule.
+    debate = _debate()
+    marked = _split_first_clip(debate)
+    debate.sentences[3].text = "But it is a federal problem."  # OTHER's first clip: hard
+    client = _FakeClaude({"reels": [OTHER, marked]})
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.moments[0].start_sentence == 1 and result.first_clip_problems == []
+
+
+def test_a_trim_prefers_a_split_start_to_one_the_first_clip_may_not_open_on():
+    debate = _debate()
+    _long_first_turn(debate, [12, 6, 6], ["Voter ID is a state matter.", "But states differ.", "Where states argued for it."])
+    # 0-2 runs 24 s, over the 22 s limit; 1-2 and 2 fit. 1 opens on "but" (hard on the first clip),
+    # 2 is a split half (soft): the trim starts at 2.
+    assert pick.trim_to_fit(debate, 0, 2) == 2
 
 
 def test_a_clip_over_the_limit_is_cut_from_its_end_only_where_it_ends_a_whole_sentence():

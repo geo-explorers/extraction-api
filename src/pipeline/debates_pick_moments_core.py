@@ -17,10 +17,12 @@ A clip over the hard limit is sent back with how long it runs to each sentence
 last resort.
 
 The first clip has hard rules of its own (`first_clip_problems`): it starts a sentence
-and a thought, not mid-sentence, on the second half of a sentence the transcript split
-(`split_start`), on a connective or on filler. Later clips keep the same rules softly
-(`later_clip_problems`): a reel that breaks them is sent back, but kept over no reel; an
-answer that goes on to a thought ("Yes, the rolls are clean.") is fine there. Every opener
+and a thought, not mid-sentence, on a connective or on filler. Later clips keep the same
+rules softly (`later_clip_problems`): a reel that breaks them is sent back, but kept over
+no reel; an answer that goes on to a thought ("Yes, the rolls are clean.") is fine there.
+A clip that starts on a sentence marked as the second half of a split sentence
+(`split_start`, a guess from how it opens) is a soft problem on every clip, the first
+included: the guess is wrong often enough that it never refuses a reel. Every opener
 rule reads a clip as the viewer hears it, past the filler geo-chat cuts before it plays
 (`heard_start`), and whether or not it was cut to fit. A reel that breaks only the first
 clip's rules or ran a clip over the limit is sent back like any other, but kept as a last
@@ -101,9 +103,11 @@ ANSWER_OPENERS = ("yes", "yeah", "agree", "agreed")
 # comes before its point.
 DANGLING_PAIRS = {("i", "mean"): False, ("you", "know"): True, ("for", "example"): False, ("for", "instance"): False}
 # The transcript sometimes breaks one sentence in two and capitalises the second half: Whisper put a
-# full stop mid-sentence ("…in the first place. Where corporations argued…"). Such a half is told
-# apart by how it opens: one of these words, followed by the words that make it a clause of the
-# sentence before rather than a sentence of its own (split_start).
+# full stop mid-sentence ("…in the first place. Where corporations argued…"). split_start guesses
+# at such a half by how it opens: one of these words, followed by the words that make it a clause
+# of the sentence before rather than a sentence of its own. A guess: "Where I come from, …" opens a
+# sentence too. So the mark is a hint to the picker and a soft problem, never a refusal; the real
+# fix is in the punctuation step (GEO-3694).
 # "Where corporations argued…", but not a question: "Where do we draw the line?".
 WHERE_QUESTION_NEXT = ("is", "are", "was", "were", "do", "does", "did", "can", "could", "would", "should", "will", "has", "have", "had", "else")
 # "That the border security can serve…": "that" before its clause's subject, not "That argument…".
@@ -111,16 +115,8 @@ THAT_CLAUSE_NEXT = (
     "the", "a", "an", "we", "they", "he", "she", "i", "you", "there", "this", "these", "those",
     "our", "their", "his", "my", "your", "it", "if", "when", "people",
 )
-# "To the, like, to the idea of…": "to" before a noun phrase, not "To be fair" or "To me".
-TO_PHRASE_NEXT = ("the", "a", "an")
-# ...unless the noun phrase is an idiom that opens a sentence of its own: "To the extent states run
-# their rolls…", "To the best of my knowledge…", "To a certain extent…", "To the contrary…", "To a
-# degree, …", "To the degree that…", "To a point, …", and a debater taking points in turn: "To the
-# first point, …", "To the other side's argument, …".
-TO_IDIOM_NEXT = (
-    "extent", "degree", "point", "best", "contrary", "certain", "large", "great",
-    "first", "second", "third", "last", "final", "next", "other",
-)
+# No rule for "To the …" ("To the, like, to the idea of…"): it opens a sentence of its own as often
+# as not ("To the extent…", "To the first point, …"), and an idiom list chasing it grew each review.
 # The other half of the same mistake: a sentence that ends on one of these words stopped mid-phrase
 # ("…legal immigration is a."), so the next sentence of its turn is its second half. Not one ending on
 # a question or exclamation mark: "What if?" and "Oh my!" were finished as said.
@@ -349,11 +345,11 @@ def _ends_on(text: str, marks: Tuple[str, ...]) -> bool:
 
 
 def split_start(input: DebatesPickMomentsInput, k: int, words: List[str]) -> bool:
-    """Whether sentence `k`, opening on `words`, is the second half of a sentence the transcript
-    broke in two: the sentence before it in its turn ends mid-phrase (OPEN_ENDS), or `words` open
-    as a clause of the sentence before ("Where corporations argued…", "That the border security
-    can serve…", "To the idea of…"). A clip that starts there starts mid-sentence, though the
-    transcript gave it a capital. A turn's first sentence is never one: it cannot be the second half
+    """Whether sentence `k`, opening on `words`, looks like the second half of a sentence the
+    transcript broke in two: the sentence before it in its turn ends mid-phrase (OPEN_ENDS), or
+    `words` open as a clause of the sentence before ("Where corporations argued…", "That the border
+    security can serve…"). A clip that starts there likely starts mid-sentence, though the
+    transcript gave it a capital. A guess, so only ever a soft problem. A turn's first sentence is never one: it cannot be the second half
     of the other speaker's sentence. A sentence of nothing but filler ("Um.") between the halves is
     looked past, as heard_start skips it. A sentence that ends on "?" is no clause of the one before
     ("Where in the Constitution does it say that?")."""
@@ -375,11 +371,9 @@ def split_start(input: DebatesPickMomentsInput, k: int, words: List[str]) -> boo
         return True
     if _ends_on(sentences[k].text.strip(), ("?",)):
         return False
-    first, following, third = (_bare(w) for w in (words + ["", "", ""])[:3])
+    first, following = (_bare(w) for w in (words + ["", ""])[:2])
     if first == "where":
         return following not in WHERE_QUESTION_NEXT
-    if first == "to":
-        return following in TO_PHRASE_NEXT and third not in TO_IDIOM_NEXT
     return first == "that" and following in THAT_CLAUSE_NEXT
 
 
@@ -402,33 +396,34 @@ def _opening(
     input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool, later: bool = False
 ) -> Tuple[bool, bool, Optional[str]]:
     """How a clip of sentences `start`-`end` opens, as the viewer hears it (heard_start): whether it
-    starts mid-sentence (in a cased transcript), whether it starts on the second half of a split
-    sentence (split_start), and otherwise the dangling word or filler it opens on. A `later` clip
-    (not the first) may answer the one before it: "Yes, the rolls are clean." (ANSWER_OPENERS)."""
+    starts mid-sentence (in a cased transcript), the dangling word or filler it opens on, and
+    otherwise whether it starts on what looks like the second half of a split sentence
+    (split_start). The opener wins over the split mark, which is only a guess: "That the border
+    security…" opens on "that" whether or not it is a split half. A `later` clip (not the first)
+    may answer the one before it: "Yes, the rolls are clean." (ANSWER_OPENERS)."""
     k, words = heard_start(input, start, end)
     mid = is_cased and opens_mid_sentence(input.sentences[k])
-    if split_start(input, k, words):
-        return mid, True, None
     opener = _opener(words)
     if later and opener in ANSWER_OPENERS and _answers_on(words):
         opener = None
-    return mid, False, opener
+    return mid, opener is None and split_start(input, k, words), opener
 
 
 def _start_rank(input: DebatesPickMomentsInput, start: int, end: int, is_cased: bool) -> int:
     """How well sentence `start` opens a clip ending at `end`, best first: clean (0); only a soft
-    opener, which the first clip may keep (1); breaking the first clip's rules (2)."""
+    problem, which the first clip may keep (a soft opener or a split mark, 1); breaking the first
+    clip's rules (2)."""
     mid, split, opener = _opening(input, start, end, is_cased)
-    if mid or split or (opener and opener not in FIRST_CLIP_SOFT_OPENERS):
+    if mid or (opener and opener not in FIRST_CLIP_SOFT_OPENERS):
         return 2
-    return 1 if opener else 0
+    return 1 if opener or split else 0
 
 
 def first_clip_problems(input: DebatesPickMomentsInput, start: int, end: int, picked_start: int) -> List[str]:
     """Why a first clip of sentences `start`-`end` cannot open the reel: what the viewer hears of it
-    (heard_start) starts mid-sentence, on the second half of a split sentence, or on a connective or
-    filler. A newcomer meets the debate there. `picked_start` is where the model started it, when a
-    trim moved the start."""
+    (heard_start) starts mid-sentence or on a connective or filler. A newcomer meets the debate
+    there. A split mark is not one of these: it is a guess, soft on every clip (later_clip_problems).
+    `picked_start` is where the model started it, when a trim moved the start."""
     where = (
         f"Clip 0, the reel's first clip, opens on sentence {start}"
         + (f" (cut to fit from sentence {picked_start})" if start != picked_start else "")
@@ -438,11 +433,9 @@ def first_clip_problems(input: DebatesPickMomentsInput, start: int, end: int, pi
         "thought, or pick another first clip."
     )
     problems = []
-    mid, split, opener = _opening(input, start, end, cased(input))
+    mid, _, opener = _opening(input, start, end, cased(input))
     if mid:
         problems.append(f"{where}, which starts mid-sentence (it opens on a lowercase word). {fix}")
-    if split:
-        problems.append(f"{where}, which is the {SPLIT_MARK}: the transcript broke a sentence in two there. {fix}")
     if opener and opener not in FIRST_CLIP_SOFT_OPENERS:
         problems.append(f'{where}, which opens on "{opener}", a connective or filler. {fix}')
     return problems
@@ -450,21 +443,25 @@ def first_clip_problems(input: DebatesPickMomentsInput, start: int, end: int, pi
 
 def later_clip_problems(input: DebatesPickMomentsInput, position: int, start: int, end: int, is_cased: bool) -> List[str]:
     """How a clip of sentences `start`-`end` at `position` opens badly, short of the first clip's
-    hard rules: on a soft opener for the first clip; for a later one, mid-sentence, on the second
-    half of a split sentence, or on a dangling word or filler, except an answer that goes on to a
-    thought ("Yes, the rolls are clean."). Soft: sent back for a fix, and a reel without them is
-    taken first, but a reel with them still beats none."""
+    hard rules: on a sentence marked as the second half of a split sentence (any clip, the first
+    included); on a soft opener for the first clip; for a later one, mid-sentence or on a dangling
+    word or filler, except an answer that goes on to a thought ("Yes, the rolls are clean."). Soft:
+    sent back for a fix, and a reel without them is taken first, but a reel with them still beats
+    none."""
     name = f"Clip {position}"
     fix = "Start it on a sentence that opens a thought."
     mid, split, opener = _opening(input, start, end, is_cased, later=position > 0)
     if position == 0:
-        mid = split = False
+        mid = False
         opener = opener if opener in FIRST_CLIP_SOFT_OPENERS else None
     problems = []
     if mid:
         problems.append(f"{name} starts mid-sentence (its first sentence opens on a lowercase word). {fix}")
     if split:
-        problems.append(f"{name} starts on the {SPLIT_MARK}: the transcript broke a sentence in two there. {fix}")
+        problems.append(
+            f'{name} starts on a sentence marked "{SPLIT_MARK}": the transcript may have broken a sentence in two '
+            "there. If it did, start the clip where that sentence starts, or pick another stretch."
+        )
     if opener:
         problems.append(f'{name} opens on "{opener}", which leans on what came before or is filler. {fix}')
     return problems
@@ -586,7 +583,8 @@ def check(
             start, end = fit
         run = sentences[start : end + 1]
         # Every opener rule reads the clip as it plays, cut to fit or not, past the filler geo-chat
-        # cuts: the first clip's are hard (a newcomer meets the debate there), the rest soft.
+        # cuts: the first clip's are hard (a newcomer meets the debate there), the rest soft, and
+        # a split mark soft on every clip.
         if position == 0:
             fixable += first_clip_problems(input, start, end, picked_start)
         soft += later_clip_problems(input, position, start, end, is_cased)
@@ -738,7 +736,7 @@ def clip_flaws(input: DebatesPickMomentsInput, position: int, moment: PickedMome
     if mid:
         flaws.append("starts mid-sentence")
     if split:
-        flaws.append("starts halfway through a sentence")
+        flaws.append("may start halfway through a sentence")
     if opener:
         flaws.append(f'opens on "{opener}", which leans on something the viewer did not hear or is filler')
     if moment.trimmed_from_sentence is not None:
