@@ -114,8 +114,9 @@ THAT_CLAUSE_NEXT = (
 # "To the, like, to the idea of…": "to" before a noun phrase, not "To be fair" or "To me".
 TO_PHRASE_NEXT = ("the", "a", "an")
 # ...unless the noun phrase is an idiom that opens a sentence of its own: "To the extent states run
-# their rolls…", "To the best of my knowledge…", "To a certain extent…", "To the contrary…".
-TO_IDIOM_NEXT = ("extent", "best", "contrary", "certain", "large", "great")
+# their rolls…", "To the best of my knowledge…", "To a certain extent…", "To the contrary…", "To a
+# degree, …", "To the degree that…", "To a point, …".
+TO_IDIOM_NEXT = ("extent", "degree", "point", "best", "contrary", "certain", "large", "great")
 # The other half of the same mistake: a sentence that ends on one of these words stopped mid-phrase
 # ("…legal immigration is a."), so the next sentence of its turn is its second half. Not one ending on
 # a question or exclamation mark: "What if?" and "Oh my!" were finished as said.
@@ -348,8 +349,13 @@ def split_start(input: DebatesPickMomentsInput, k: int, words: List[str]) -> boo
     sentences = input.sentences
     if k == 0 or sentences[k - 1].turn != sentences[k].turn:
         return False
-    last = sentences[k - 1].text.split()[-1:]
-    if last and _bare(last[0]) in OPEN_ENDS and not last[0].rstrip("\"'”’)").endswith(("?", "!")):
+    before = sentences[k - 1].text.split()
+    last = before[-1] if before else ""
+    if (
+        _bare(last) in OPEN_ENDS
+        and not last.rstrip("\"'”’)").endswith(("?", "!"))
+        and (len(before) == 1 or not any(c.isupper() for c in last))
+    ):
         return True
     first, following, third = (_bare(w) for w in (words + ["", "", ""])[:3])
     if first == "where":

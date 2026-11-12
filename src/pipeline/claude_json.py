@@ -140,7 +140,7 @@ async def ask_json(
     better) chooses among answers with only soft problems, and among last resorts; without it the
     latest wins."""
 
-    def no_worse(value: T, held: Optional[Tuple[T, int]]) -> bool:
+    def no_worse(value: T, held: Optional[Tuple[Any, ...]]) -> bool:
         return held is None or rank is None or rank(value) <= rank(held[0])
 
     model = llm.get("moments_claude_model")
@@ -148,7 +148,8 @@ async def ask_json(
     messages: List[dict] = [{"role": "user", "content": _cached(user)}]
     shape = {"output_config": {"format": {"type": "json_schema", "schema": schema}}} if schema else {}
     best: Optional[Tuple[T, int]] = None
-    last_resort: Optional[Tuple[T, int]] = None
+    # The last resort kept, with the problems it was refused for (logged if it is returned).
+    last_resort: Optional[Tuple[T, int, List[str]]] = None
     problems: List[str] = []
     for attempt in range(1, attempts + 1):
         try:
@@ -208,7 +209,7 @@ async def ask_json(
             if no_worse(value, best):
                 best = (value, attempt)
         elif value is not None and no_worse(value, last_resort):
-            last_resort = (value, attempt)
+            last_resort = (value, attempt, hard)
         # Hard problems alone while there are any: soft nudges sent with them pull the answer
         # in more directions at once (an earlier opener makes a clip longer).
         problems = hard or soft
@@ -223,7 +224,7 @@ async def ask_json(
     if last_resort is not None:
         logger.warning(
             f"{task}: no answer kept every rule; keeping answer {last_resort[1]} as a last "
-            f"resort: {problems}"
+            f"resort: {last_resort[2]}"
         )
         return last_resort[0], model, last_resort[1]
     raise FinalDecisionError(f"{task}: no acceptable answer after {attempts} attempts: {problems}")

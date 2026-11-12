@@ -1254,6 +1254,8 @@ def test_a_later_clip_starting_mid_sentence_is_sent_back():
         # A sentence the transcript ended mid-phrase: the next one is its second half.
         ("I think legal immigration is a.", "National security risk for everyone."),
         ("We should ask whether.", "States can run their own rolls."),
+        # A one-word sentence is all hanging, capital or not.
+        ("Because.", "States can run their own rolls."),
     ],
 )
 def test_a_sentence_the_transcript_split_off_the_one_before_is_marked_and_not_started_on(before, text):
@@ -1291,6 +1293,12 @@ def test_a_sentence_the_transcript_split_off_the_one_before_is_marked_and_not_st
         ("Policy got us here.", "To the extent states run rolls, they run them well."),
         ("Policy got us here.", "To the best of my knowledge, states do fine."),
         ("Policy got us here.", "To a certain extent, I agree with the states."),
+        ("Policy got us here.", "To a degree, I agree with the states."),
+        ("Policy got us here.", "To the degree that states run rolls, they run them well."),
+        ("Policy got us here.", "To a point, the states are right."),
+        # A capital past the first word is a letter or a name, not a hanging article.
+        ("We need Plan A.", "Federal rules failed."),
+        ("They give the plan an A.", "States run it well."),
         # A question or an exclamation was finished as said, whatever word it ends on.
         ("What if?", "States ran every roll themselves."),
         ("Oh my!", "States ran every roll themselves."),
@@ -1384,6 +1392,23 @@ def test_a_last_resort_that_comes_back_worse_does_not_replace_the_better_one():
     result = asyncio.run(pick.pick_moments(debate, client=_FakeClaude(better, GOOD, BROKEN)))
     assert result.attempts == 1 and result.moments[0].start_sentence == 1
     assert len(result.first_clip_problems) == 1
+
+
+def test_the_last_resort_log_names_the_problems_of_the_answer_it_keeps(monkeypatch):
+    # Ranked, the last resort kept can be an earlier answer than the last: the log gives its own
+    # problems, not the last answer's (review of GEO-3691).
+    from src.pipeline import claude_json
+
+    lines = []
+    monkeypatch.setattr(claude_json.logger, "warning", lines.append)
+    debate = _debate()
+    debate.sentences[0].text = "but states run it."
+    debate.sentences[1].text = "But states run it well."
+    better = _with(0, start_sentence=1)
+    asyncio.run(pick.pick_moments(debate, client=_FakeClaude(better, GOOD, BROKEN)))
+    kept = [line for line in lines if "as a last resort" in line]
+    assert len(kept) == 1 and "keeping answer 1" in kept[0]
+    assert 'opens on sentence 1, which opens on "but"' in kept[0] and "exactly 4" not in kept[0]
 
 
 def test_a_reel_whose_only_problems_are_later_openers_is_kept_when_never_fixed():
