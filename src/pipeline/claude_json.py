@@ -29,7 +29,9 @@ Failures are final (`FinalDecisionError`, which Hatchet does not retry) when
 asking again cannot help: no acceptable answer, an answer cut off at the token
 limit, no API key, the spend guard, a request Claude rejects (a 4xx such as a
 schema it cannot compile). A failed request (network, rate limit, overload)
-stays retryable, so the engine runs the task again.
+stays retryable, so the engine runs the task again. Once an answer is held
+(acceptable, or a last resort), a later spend-guard trip or failed request ends
+the conversation and returns that answer instead: a rerun would throw it away.
 
 The model and its knobs are the `moments_claude_*` settings, overridable per run.
 The system prompt and the first message are marked for prompt caching, so a send
@@ -143,6 +145,10 @@ async def ask_json(
         try:
             spend_guard.check_and_record(SPEND_KEY)
         except SpendLimitExceeded as e:
+            # An answer already held is still the best seen: keep it rather than fail the run.
+            if best is not None or last_resort is not None:
+                logger.warning(f"{task}: spend guard tripped before answer {attempt}; keeping what is held: {e}")
+                break
             raise FinalDecisionError(f"{task}: spend guard tripped: {e}") from e
         try:
             message = await client.messages.create(
@@ -154,6 +160,10 @@ async def ask_json(
                 **shape,
             )
         except Exception as e:  # network, rate limit, overload: the engine retries the run
+            # A send-back that fails leaves the answer already held, which a rerun would throw away.
+            if best is not None or last_resort is not None:
+                logger.warning(f"{task}: answer {attempt} request failed; keeping what is held: {e}")
+                break
             if _rejected(e):
                 raise FinalDecisionError(f"{task}: Claude rejected the request: {e}") from e
             raise DecisionError(f"{task}: Claude request failed: {e}", retryable=True) from e
@@ -202,8 +212,8 @@ async def ask_json(
         return best[0], model, best[1]
     if last_resort is not None:
         logger.warning(
-            f"{task}: no answer kept every rule in {attempts} attempts; keeping answer "
-            f"{last_resort[1]} as a last resort: {problems}"
+            f"{task}: no answer kept every rule; keeping answer {last_resort[1]} as a last "
+            f"resort: {problems}"
         )
         return last_resort[0], model, last_resort[1]
     raise FinalDecisionError(f"{task}: no acceptable answer after {attempts} attempts: {problems}")

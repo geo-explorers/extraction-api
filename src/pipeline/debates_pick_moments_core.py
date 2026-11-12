@@ -201,24 +201,50 @@ def dangling_opener(sentence) -> Optional[str]:
     return first if first in DANGLING_OPENERS else None
 
 
+def _opens_on_a_letter(text: str) -> bool:
+    """Whether `text`'s first letter or digit is a letter. A sentence opening on a number ("50",
+    "1960s", "10x") says nothing about case."""
+    lead = re.search(r"[A-Za-z0-9]", text)
+    return bool(lead) and lead.group(0).isalpha()
+
+
 def cased(input: DebatesPickMomentsInput) -> bool:
-    """Whether the transcript keeps capitals at sentence starts (CASED_SHARE)."""
-    firsts = [m.group(0) for m in (re.search(r"[A-Za-z]", s.text) for s in input.sentences) if m]
+    """Whether the transcript keeps capitals at sentence starts (CASED_SHARE), among the sentences
+    that open on a letter."""
+    firsts = [re.search(r"[A-Za-z]", s.text).group(0) for s in input.sentences if _opens_on_a_letter(s.text)]
     return bool(firsts) and sum(c.isupper() for c in firsts) >= CASED_SHARE * len(firsts)
 
 
 def opens_mid_sentence(sentence) -> bool:
     """Whether `sentence` opens on a lowercase word ("and not just get…"): in a cased transcript, the
     speech recogniser heard it run on from the words before, wherever the punctuation put its start.
-    A word cased inside ("iPhone") is a name, not a run-on; one with no letters ("50") says nothing."""
-    letters = re.sub(r"[^A-Za-z]", "", _head(sentence))
-    return bool(letters) and letters.islower()
+    A word cased inside ("iPhone") is a name, not a run-on; one opening on a number ("50", "1960s")
+    says nothing."""
+    head = _head(sentence)
+    letters = re.sub(r"[^A-Za-z]", "", head)
+    return _opens_on_a_letter(head) and letters.islower()
+
+
+def _hard_start(sentence, is_cased: bool) -> Tuple[bool, Optional[str]]:
+    """What the first clip may not open on, for `sentence`: whether it starts mid-sentence (in a cased
+    transcript), and the connective or filler it opens on, if that is hard on the first clip."""
+    opener = dangling_opener(sentence)
+    return is_cased and opens_mid_sentence(sentence), (opener if opener not in FIRST_CLIP_SOFT_OPENERS else None)
 
 
 def clean_start(sentence, is_cased: bool) -> bool:
     """Whether `sentence` can open a clip: no dangling opener, and in a cased transcript not
-    mid-sentence. What a trim looks for, and what the first clip must keep."""
+    mid-sentence. What a trim looks for first."""
     return dangling_opener(sentence) is None and not (is_cased and opens_mid_sentence(sentence))
+
+
+def _start_rank(sentence, is_cased: bool) -> int:
+    """How well `sentence` opens a clip, best first: clean (0); only a soft opener, which the first
+    clip may keep (1); breaking the first clip's rules (2)."""
+    if clean_start(sentence, is_cased):
+        return 0
+    mid, opener = _hard_start(sentence, is_cased)
+    return 2 if mid or opener else 1
 
 
 def first_clip_problems(input: DebatesPickMomentsInput, start: int, picked_start: int) -> List[str]:
@@ -235,10 +261,10 @@ def first_clip_problems(input: DebatesPickMomentsInput, start: int, picked_start
         "thought, or pick another first clip."
     )
     problems = []
-    if cased(input) and opens_mid_sentence(sentence):
+    mid, opener = _hard_start(sentence, cased(input))
+    if mid:
         problems.append(f"{where}, which starts mid-sentence (it opens on a lowercase word). {fix}")
-    opener = dangling_opener(sentence)
-    if opener and opener not in FIRST_CLIP_SOFT_OPENERS:
+    if opener:
         problems.append(f'{where}, which opens on "{opener}", a connective or filler. {fix}')
     return problems
 
@@ -246,7 +272,9 @@ def first_clip_problems(input: DebatesPickMomentsInput, start: int, picked_start
 def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optional[int]:
     """Where a clip over the hard limit should start so it fits: sentences dropped from its start
     (the payoff at its end stays), and past any that open on a dangling word or mid-sentence
-    (clean_start), so the trim never lands on "And ..." when a cleaner start fits. `None` when no start leaves it within the
+    (clean_start), so the trim never lands on "And ..." when a cleaner start fits. With no clean
+    start, one with only a soft opener ("It's ...") beats one the first clip may not open on
+    (_start_rank). `None` when no start leaves it within the
     limits, so the clip is reported at the length the model picked. A clip within the limit is
     left where it starts."""
     sentences = input.sentences
@@ -261,8 +289,8 @@ def trim_to_fit(input: DebatesPickMomentsInput, start: int, end: int) -> Optiona
     if not fitting:
         return None
     is_cased = cased(input)
-    clean = [first for first in fitting if clean_start(sentences[first], is_cased)]
-    return (clean or fitting)[0]
+    # The earliest of the best-ranked starts: min keeps the first among equals.
+    return min(fitting, key=lambda first: _start_rank(sentences[first], is_cased))
 
 
 def _int(value: Any) -> Optional[int]:

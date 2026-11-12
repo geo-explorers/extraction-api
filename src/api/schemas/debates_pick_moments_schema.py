@@ -125,7 +125,7 @@ class DebatesPickMomentsResult(BaseModel):
     moments: List[PickedMoment] = Field(description="Exactly four, in play order, alternating speakers.")
     provider: str
     model_used: str
-    attempts: int = Field(description="How many answers were asked for before one passed every rule.")
+    attempts: int = Field(description="Which answer the reel came from (1 for the first): the one that passed every rule, or for a last resort (first_clip_problems) the latest that broke only the first clip's rules.")
     candidates: int = Field(default=1, description="How many reels the pick was made from: those with no soft problem when any passed, else all that passed. More than one means the judge picked.")
     judge_why: Optional[str] = Field(default=None, description="Why the judge picked this reel, when it judged.")
     first_clip_problems: List[str] = Field(

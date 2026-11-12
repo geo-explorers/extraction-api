@@ -899,3 +899,89 @@ def test_a_cut_off_with_no_retry_left_keeps_the_last_resort():
     client = _FakeClaude({"reels": [GOOD]}, _CutOff("a"), _CutOff("b"))
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert len(client.calls) == 3 and result.attempts == 1 and result.first_clip_problems
+
+
+# --- round 2: trims, numbers, and answers held when a later call cannot be made ------------
+
+
+def test_a_trim_with_no_clean_start_takes_a_soft_opener_over_one_clip_1_refuses():
+    debate = _debate()
+    debate.clip_max_ms = 30_000  # timed against a 30 s limit
+    # 0-2 is 34 s. Sentence 1 runs on and opens on "and"; sentence 2 opens on "It's", soft on clip 1.
+    _long_first_turn(debate, [10, 12, 12], ["One.", "and not just get completely overwhelmed.", "It's time we set rules."])
+    (_, moments), problems, soft = pick.check(debate, GOOD)
+    assert problems == [] and moments[0].start_sentence == 2 and moments[0].trimmed_from_sentence == 0
+
+
+@pytest.mark.parametrize("text", ["1960s America had no voter ID laws.", "10x more people vote by mail now.", "2nd, the rolls are clean."])
+def test_a_first_clip_opening_on_a_number_with_a_suffix_is_not_mid_sentence(text):
+    debate = _debate()
+    debate.sentences[0].text = text
+    value, problems, _ = pick.check(debate, GOOD)
+    assert problems == [] and value is not None
+
+
+def test_sentences_opening_on_numbers_do_not_make_a_transcript_look_uncased():
+    debate = _debate()
+    for sentence in debate.sentences[:7]:
+        sentence.text = "50 states agree."
+    assert pick.cased(debate)
+
+
+def _guard_trips_after(monkeypatch, calls):
+    from src.pipeline import claude_json
+    from src.infrastructure.spend_guard import SpendLimitExceeded
+
+    made = []
+
+    def check_and_record(key):
+        if len(made) >= calls:
+            raise SpendLimitExceeded("hourly budget spent")
+        made.append(key)
+
+    monkeypatch.setattr(claude_json.spend_guard, "check_and_record", check_and_record)
+
+
+def _last_resort_debate():
+    debate = _debate()
+    debate.sentences[0].text = "And it is a state matter."  # GOOD's opener: a last resort
+    return debate
+
+
+def test_a_spend_guard_trip_on_a_send_back_keeps_the_last_resort(monkeypatch):
+    _guard_trips_after(monkeypatch, 1)
+    client = _FakeClaude({"reels": [GOOD]})
+    result = asyncio.run(pick.pick_moments(_last_resort_debate(), client=client))
+    assert len(client.calls) == 1 and result.attempts == 1 and result.first_clip_problems
+
+
+def test_a_spend_guard_trip_before_any_answer_is_still_final(monkeypatch):
+    _guard_trips_after(monkeypatch, 0)
+    with pytest.raises(FinalDecisionError, match="spend guard"):
+        asyncio.run(pick.pick_moments(_debate(), client=_FakeClaude({"reels": [GOOD]})))
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("overloaded"), _status_error(500), _status_error(400)])
+def test_a_send_back_whose_request_fails_keeps_the_last_resort(failure):
+    client = _FakeClaude({"reels": [GOOD]}, failure)
+    result = asyncio.run(pick.pick_moments(_last_resort_debate(), client=client))
+    assert len(client.calls) == 2 and result.attempts == 1 and result.first_clip_problems
+
+
+def test_a_send_back_whose_request_fails_keeps_an_acceptable_answer():
+    debate = _debate()
+    debate.sentences[3].text = "And it is a federal problem."  # a soft problem: asked again
+    client = _FakeClaude({"reels": [GOOD]}, RuntimeError("overloaded"))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 2 and result.attempts == 1 and result.first_clip_problems == []
+
+
+def test_each_answer_logs_its_token_counts(monkeypatch):
+    from src.pipeline import claude_json
+
+    lines = []
+    monkeypatch.setattr(claude_json.logger, "info", lines.append)
+    usage = SimpleNamespace(input_tokens=10, cache_read_input_tokens=900, cache_creation_input_tokens=None, output_tokens=40)
+    message = SimpleNamespace(content=[], usage=usage)
+    claude_json._log_usage("t", 2, message)
+    assert lines == ["t: answer 2 used input_tokens 10, cache_read_input_tokens 900, output_tokens 40"]

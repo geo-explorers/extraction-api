@@ -26,6 +26,8 @@ Both tasks run on Claude, using the `moments_claude_*` settings. They write an a
 - a tripped spend guard
 - a request Claude rejects: any 4xx except 408, 409 and 429 (a schema structured outputs can't compile, a model without them, a prompt too long). The judge still keeps the first reel when its request is rejected.
 
+Once pick holds an answer, acceptable or a last resort, a later spend-guard trip or failed request (any of the above) returns that answer instead of failing the run, since a rerun would throw it away. Punctuate and the judge never hold an answer they then ask again about, so this changes nothing for them.
+
 The caller then falls back. Each task's execution timeout covers every request at its 300 s ceiling. The client doesn't retry on its own.
 
 ## transcript.punctuate
