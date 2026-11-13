@@ -20,8 +20,10 @@ from tests.test_moment_reel_tasks import (
     OTHER,
     STORY,
     _debate,
+    _clips_of,
     _FakeClaude,
     _last_resort_debate,
+    _two_sentence_clips,
     _links,
     _said,
 )
@@ -84,6 +86,20 @@ def test_a_last_resort_is_kept_when_the_deadline_stops_send_backs(monkeypatch):
     client = _SlowClaude(clock, 450, {"reels": [GOOD]}, {"reels": [GOOD]})
     result = asyncio.run(pick.pick_moments(_last_resort_debate(), client=client, deadline=_deadline(clock, 500)))
     assert len(client.calls) == 1 and result.attempts == 1 and result.first_clip_problems
+
+
+def test_a_short_reel_held_when_the_deadline_stops_its_send_back_is_refused(monkeypatch):
+    # GEO-3741: the send-back that would lengthen it is never asked, and the short reel is not kept.
+    lines = _warnings(monkeypatch)
+    clock = _Clock()
+    debate = _debate("after")
+    _clips_of(debate, 15)
+    short = _two_sentence_clips(STORY)
+    client = _SlowClaude(clock, 450, short, STORY, _links(0, 5, 8, 9))
+    with pytest.raises(FinalDecisionError, match="the reel plays 40.0 s, under 50.0 s, and short reels are refused"):
+        asyncio.run(pick.pick_moments(debate, client=client, deadline=_deadline(clock, 500)))
+    assert len(client.calls) == 1
+    assert any("answer 2 was not asked for" in line for line in lines), lines
 
 
 # --- the judge ----------------------------------------------------------------------------

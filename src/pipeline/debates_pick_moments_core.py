@@ -43,9 +43,12 @@ alone (`REELS_SCHEMA`, `JUDGE_SCHEMA`).
 
 Under link_claims "after" (GEO-3716), a clip that ends just before the rest of a sentence the
 transcript broke in two runs on to finish it (finish_sentence), within the hard limit; the judge
-is shown a clip that plays under SHORT_CLIP_MS, one still stopping mid-sentence, and a reel under
-min_reel_ms as flaws, none of which sends an answer back. A reel that plays under min_reel_ms is
-returned with `short_reel` set, or refused under the moments_pick_short_reel setting.
+is shown a clip that plays under SHORT_CLIP_MS and one still stopping mid-sentence as flaws,
+neither of which sends an answer back. A reel that plays (as heard) under min_reel_ms, under either
+link_claims, is a soft problem (GEO-3741): sent back with each clip's length (short_reel_problem),
+ranked below any reel long enough (answer_rank), and dropped before the judge when a candidate
+plays long enough. A reel still under it when the answers run out is refused, or returned with
+`short_reel` set, as the moments_pick_short_reel setting says (refuse by default).
 
 Under a deadline (GEO-3697, deadline.Deadline), the run returns before geo-chat stops
 waiting: ask_json sends no more answers back once too little time is left and keeps
@@ -308,7 +311,7 @@ def render(input: DebatesPickMomentsInput) -> str:
         "",
         f"Target clip length: {_seconds(input.target_min_ms)}-{_seconds(input.target_max_ms)} s. "
         f"Hard limits: {_seconds(input.clip_min_ms)}-{_seconds(input.clip_max_ms)} s. "
-        f"The whole reel: under {_seconds(reel_max_ms(input))} s.",
+        f"The whole reel: under {_seconds(reel_max_ms(input))} s, and at least {_seconds(input.min_reel_ms)} s.",
     ]
     if links_in_pick(input):
         lines += ["", "Claims:"]
@@ -406,6 +409,31 @@ def heard_ms(input: DebatesPickMomentsInput, moment: PickedMoment) -> int:
 def heard_reel_ms(input: DebatesPickMomentsInput, moments: List[PickedMoment]) -> int:
     """How long a reel plays as heard: its clips back to back (heard_ms)."""
     return sum(heard_ms(input, m) for m in moments)
+
+
+def plays_short(input: DebatesPickMomentsInput, moments: List[PickedMoment]) -> bool:
+    """Whether a reel plays (heard_reel_ms) under the input's min_reel_ms (GEO-3741)."""
+    return heard_reel_ms(input, moments) < input.min_reel_ms
+
+
+def short_reel_problem(input: DebatesPickMomentsInput, moments: List[PickedMoment]) -> str:
+    """What a reel under min_reel_ms is sent back with (GEO-3741): how long it and each clip play as
+    heard, past the filler geo-chat cuts, which is what the rule reads, and which clips are under
+    the target, so the next pick lengthens those rather than padding with filler."""
+    played = [heard_ms(input, m) for m in moments]
+    under = [str(i) for i, ms in enumerate(played) if ms < input.target_min_ms]
+    if len(under) == 1:
+        which = f"Clip {under[0]} plays under {_seconds(input.target_min_ms)} s: lengthen it"
+    elif under:
+        which = f"Clips {', '.join(under)} play under {_seconds(input.target_min_ms)} s: lengthen them"
+    else:
+        which = "Lengthen the clips"
+    return (
+        f"The reel plays {_seconds(sum(played))} s as heard (clips {', '.join(_seconds(ms) for ms in played)} s), "
+        f"under the {_seconds(input.min_reel_ms)} s a reel must play. {which} toward "
+        f"{_seconds(input.target_min_ms)}-{_seconds(input.target_max_ms)} s, each still ending where a sentence "
+        "and its point end."
+    )
 
 
 def heard_text(input: DebatesPickMomentsInput, start: int, end: int) -> str:
@@ -814,6 +842,12 @@ def check(
             f"The reel runs {_seconds(picked_reel_ms(input, moments))} s; keep the four clips under "
             f"{_seconds(reel_max_ms(input))} s together. Shorten the longest clips."
         )
+    # A reel under min_reel_ms is sent back to be picked longer (GEO-3741). Soft, so a reel that
+    # keeps every hard rule is still held over any last resort, and refused at the end if no answer
+    # plays long enough (pick_moments). Read as heard, on the clips as finished and cut, as the
+    # final check reads it.
+    if not problems and len(moments) == MOMENTS and plays_short(input, moments):
+        soft.append(short_reel_problem(input, moments))
     story = answer.get("story") if isinstance(answer.get("story"), str) else ""
     if problems:
         return None, problems + fixable, soft
@@ -845,7 +879,8 @@ def check_reels(
     the other reels' problems.
 
     A reel with no soft problem is taken without a send-back (pick_moments judges only those). When
-    every passing reel has one (a later clip opening on "But…", a reel over its length), the answer
+    every passing reel has one (a later clip opening on "But…", a reel over its length or under
+    min_reel_ms), the answer
     is sent back to fix them, however many passed: in the 12 Nov preview about 17 clips past the
     first opened mid-thought, and reels that passed together were never asked again. ask_json
     keeps whichever answer's best reel has the fewest problems (answer_rank), so a send-back that
@@ -889,12 +924,13 @@ def check_reels(
     return passed, [], softs + problems
 
 
-def answer_rank(candidates: List[Candidate]) -> int:
+def answer_rank(input: DebatesPickMomentsInput, candidates: List[Candidate]) -> Tuple[bool, int]:
     """How an answer with no clean reel ranks against another (claude_json.ask_json's `rank`, lower
-    is better): the fewest problems of any of its reels, soft ones for reels that passed, fixable
+    is better): its best reel, a reel that plays long enough (plays_short) first, as a short one is
+    refused at the end (GEO-3741), then the fewest problems, soft ones for reels that passed, fixable
     and soft ones for last resorts (a soft flaw counts between two last resorts too). Before, the latest answer always won, and once every soft answer was
     sent back (GEO-3691) a worse second answer replaced a better first one."""
-    return min(len(problems) for _, problems in candidates)
+    return min((plays_short(input, reel[1]), len(problems)) for reel, problems in candidates)
 
 
 def top_ranked(candidates: List[Candidate]) -> int:
@@ -1200,7 +1236,7 @@ async def pick_moments(
         client=client,
         schema=REELS_SCHEMA if in_pick else STORY_REELS_SCHEMA,
         cut_off_retries=CUT_OFF_RETRIES,
-        rank=answer_rank,
+        rank=lambda candidates: answer_rank(input, candidates),
         deadline=deadline,
     )
     # Judged among the reels with no soft problem when there are any, else among all that passed,
@@ -1208,6 +1244,9 @@ async def pick_moments(
     # problems, so they are judged among themselves.)
     clean = [(reel, soft) for reel, soft in passed if not soft]
     candidates = clean or passed
+    # A reel that plays under min_reel_ms is refused (or flagged) below, so it is judged only when
+    # every candidate is one (GEO-3741).
+    candidates = [c for c in candidates if not plays_short(input, c[0][1])] or candidates
     best, why = (0, "")
     if len(candidates) > 1 and deadline is not None and not deadline.allows_request():
         best = top_ranked(candidates)
@@ -1231,8 +1270,9 @@ async def pick_moments(
     cut = [i for i, m in enumerate(moments) if m.trimmed_from_sentence is not None or m.trimmed_to_sentence is not None]
     if cut:
         logger.warning(f"{TASK}: no reel kept every clip within the limit; kept one with clips {cut} cut to fit")
-    # A reel under min_reel_ms is never returned silently (GEO-3716): flagged, or refused before the
-    # link call spends anything, as the moments_pick_short_reel setting says.
+    # A reel under min_reel_ms is never returned silently (GEO-3716). It was sent back (check), so
+    # here every answer played short, or the deadline stopped the send-back (GEO-3741): refused before
+    # the link call spends anything, or flagged, as the moments_pick_short_reel setting says.
     played = heard_reel_ms(input, moments)
     short = played < input.min_reel_ms
     if short:
@@ -1283,12 +1323,14 @@ __all__ = [
     "link_claims",
     "pick_moments",
     "picked_reel_ms",
+    "plays_short",
     "read_links",
     "reel_ms",
     "render",
     "render_for_judge",
     "render_for_link",
     "runs_on_from",
+    "short_reel_problem",
     "split_start",
     "top_ranked",
 ]
