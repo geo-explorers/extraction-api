@@ -41,6 +41,12 @@ breaks on the result (`first_clip_problems`) and its cut clips marked.
 Both calls answer under a JSON schema (structured outputs), so the reply is the JSON
 alone (`REELS_SCHEMA`, `JUDGE_SCHEMA`).
 
+Under link_claims "after" (GEO-3716), a clip that ends just before the rest of a sentence the
+transcript broke in two runs on to finish it (finish_sentence), within the hard limit; the judge
+is shown a clip that plays under SHORT_CLIP_MS, one still stopping mid-sentence, and a reel under
+min_reel_ms as flaws, none of which sends an answer back. A reel that plays under min_reel_ms is
+returned with `short_reel` set, or refused under the moments_pick_short_reel setting.
+
 Under a deadline (GEO-3697, deadline.Deadline), the run returns before geo-chat stops
 waiting: ask_json sends no more answers back once too little time is left and keeps
 the best held, and the judge is skipped for the top-ranked passing reel (`top_ranked`), the
@@ -62,6 +68,7 @@ from src.api.schemas.debates_pick_moments_schema import (
     PickedMoment,
 )
 from src.config.overrides import prompts
+from src.config.settings import settings
 from src.decisions.base import DecisionError
 from src.pipeline.deadline import Deadline
 from src.infrastructure.logger import get_logger
@@ -90,6 +97,9 @@ COMMON_WORDS = frozenset(
     "this that these those i we you he she they them our your their my me us not no do does did have "
     "has had will would should could can just than then there here what which who".split()
 )
+# A clip that plays shorter than this, as heard, often stops before its point lands (GEO-3716; 13 Nov
+# blind grading). The judge sees it as a flaw (clip_flaws); it is no rule, as a whole point can be short.
+SHORT_CLIP_MS = 9_000
 # Candidate reels asked for in one answer; more are ignored.
 CANDIDATES = 3
 # Titles a speaker's short name skips: "Dr. Jane Smith" is Jane.
@@ -345,11 +355,11 @@ def filler_lead(words: List[str]) -> int:
     return first
 
 
-def heard_start(input: DebatesPickMomentsInput, start: int, end: int) -> Tuple[int, List[str]]:
+def _heard(input: DebatesPickMomentsInput, start: int, end: int) -> Tuple[int, List[str], int]:
     """Where the viewer starts hearing a clip of sentences `start`-`end`, once geo-chat has cut its
-    filler: the sentence, and its words from the first one heard. Sentences that are nothing but
-    filler ("Um.") are skipped, then the filler the next one opens on, unless that leaves fewer than
-    FILLER_KEEP_WORDS of it. geo-chat's story_moments::filler_lead.
+    filler: the sentence, its words from the first one heard, and when that word starts. Sentences
+    that are nothing but filler ("Um.") are skipped, then the filler the next one opens on, unless
+    that leaves fewer than FILLER_KEEP_WORDS of it. geo-chat's story_moments::filler_lead.
 
     geo-chat keeps all of it when the clip would run under the minimum length without it
     (story_reel, CLIP_MIN_MS, sent as clip_min_ms): "Um. We need rules." at 6.5 s, "Um." taking
@@ -363,11 +373,29 @@ def heard_start(input: DebatesPickMomentsInput, start: int, end: int) -> Tuple[i
             continue
         if len(words) - lead < FILLER_KEEP_WORDS:
             lead = 0
-        heard_ms = sentences[k].start_ms + (sentences[k].end_ms - sentences[k].start_ms) * lead // max(len(words), 1)
-        if (k > start or lead) and sentences[end].end_ms - heard_ms < input.clip_min_ms:
-            return start, sentences[start].text.split()
-        return k, words[lead:]
-    return end, sentences[end].text.split()
+        heard_at = sentences[k].start_ms + (sentences[k].end_ms - sentences[k].start_ms) * lead // max(len(words), 1)
+        if (k > start or lead) and sentences[end].end_ms - heard_at < input.clip_min_ms:
+            return start, sentences[start].text.split(), sentences[start].start_ms
+        return k, words[lead:], heard_at
+    return end, sentences[end].text.split(), sentences[end].start_ms
+
+
+def heard_start(input: DebatesPickMomentsInput, start: int, end: int) -> Tuple[int, List[str]]:
+    """Where the viewer starts hearing a clip of sentences `start`-`end`: the sentence, and its words
+    from the first one heard (_heard)."""
+    k, words, _ = _heard(input, start, end)
+    return k, words
+
+
+def heard_ms(input: DebatesPickMomentsInput, moment: PickedMoment) -> int:
+    """How long `moment` plays as heard: from its first heard word (_heard) to its end. What the
+    viewer gets, give or take the room geo-chat leaves around a cut (GEO-3716)."""
+    return moment.end_ms - _heard(input, moment.start_sentence, moment.end_sentence)[2]
+
+
+def heard_reel_ms(input: DebatesPickMomentsInput, moments: List[PickedMoment]) -> int:
+    """How long a reel plays as heard: its clips back to back (heard_ms)."""
+    return sum(heard_ms(input, m) for m in moments)
 
 
 def heard_text(input: DebatesPickMomentsInput, start: int, end: int) -> str:
@@ -590,6 +618,42 @@ def fit_to_limit(input: DebatesPickMomentsInput, start: int, end: int) -> Option
     return (start, ends[0]) if ends else None
 
 
+def runs_on_from(input: DebatesPickMomentsInput, k: int, is_cased: bool) -> bool:
+    """Whether sentence `k` is the rest of the sentence before it in its turn: it opens mid-sentence
+    (on a lowercase word, in a cased transcript) or is marked the second half of a split sentence
+    (continues). The punctuation step put a full stop inside a phrase there ("…would reduce the." /
+    "obesity."), so a clip that ends just before it stops mid-sentence. A turn's first sentence
+    never is."""
+    sentences = input.sentences
+    if not 0 < k < len(sentences) or sentences[k].turn != sentences[k - 1].turn:
+        return False
+    return (is_cased and opens_mid_sentence(sentences[k])) or continues(input, k)
+
+
+def finish_sentence(
+    input: DebatesPickMomentsInput, moment: PickedMoment, taken: set, is_cased: bool
+) -> PickedMoment:
+    """`moment` ending where its last sentence really ends (GEO-3716): while the next sentence of its
+    turn is the rest of its last one (runs_on_from), that sentence is added, as long as the clip stays
+    within the hard limit and runs into no sentence in `taken` (another clip's, or a stretch to
+    avoid). Graders flagged such clips as cut mid-thought in the 13 Nov offline runs ("…not looking to
+    have multiple." / "partners."). The model's end is kept in
+    `ended_from_sentence`; a clip that cannot be finished is left as picked (clip_flaws says so)."""
+    sentences = input.sentences
+    end = moment.end_sentence
+    while (
+        runs_on_from(input, end + 1, is_cased)
+        and end + 1 not in taken
+        and sentences[end + 1].end_ms - sentences[moment.start_sentence].start_ms <= input.clip_max_ms
+    ):
+        end += 1
+    if end == moment.end_sentence:
+        return moment
+    return moment.model_copy(
+        update={"end_sentence": end, "end_ms": sentences[end].end_ms, "ended_from_sentence": moment.end_sentence}
+    )
+
+
 def over_limit_problem(input: DebatesPickMomentsInput, name: str, start: int, end: int) -> str:
     """What a clip over the hard limit is sent back with: how long it runs to each of its
     sentences, so the next pick can end (or start) where it fits."""
@@ -706,6 +770,13 @@ def check(
                 trimmed_to_sentence=picked_end if end != picked_end else None,
             )
         )
+    if len(moments) == len(rows) == MOMENTS and not in_pick:
+        # The story picker's clips run on to the end of a sentence the transcript broke (GEO-3716),
+        # before the rules that read clips together (overlap, length of the reel) and the judge.
+        avoided = {k for a in input.avoid for k in range(a.start_sentence, a.end_sentence + 1)}
+        for i, m in enumerate(moments):
+            taken = avoided | {k for j, o in enumerate(moments) if j != i for k in range(o.start_sentence, o.end_sentence + 1)}
+            moments[i] = finish_sentence(input, m, taken, is_cased)
     if len(moments) == len(rows) == MOMENTS:
         for a, b in zip(moments, moments[1:]):
             if a.speaker == b.speaker:
@@ -823,7 +894,9 @@ def top_ranked(candidates: List[Candidate]) -> int:
 def clip_flaws(input: DebatesPickMomentsInput, position: int, moment: PickedMoment, is_cased: bool) -> List[str]:
     """What the checks found wrong with a clip at `position`, as the viewer hears it: the soft
     problems (later_clip_problems) and the hard ones a last resort keeps (first_clip_problems, a
-    cut to fit), in the judge's words. Each is how the clip plays, not what the picker meant."""
+    cut to fit), in the judge's words. Each is how the clip plays, not what the picker meant. For
+    the story picker (link_claims "after"), also a clip that plays under SHORT_CLIP_MS (GEO-3716):
+    a flaw for the judge to weigh, never a reason to send the answer back."""
     mid, split, opener = _opening(input, moment.start_sentence, moment.end_sentence, is_cased, later=position > 0)
     flaws = []
     if mid:
@@ -836,28 +909,39 @@ def clip_flaws(input: DebatesPickMomentsInput, position: int, moment: PickedMome
         flaws.append("its opening was cut to fit the length limit, so it may lack its setup")
     if moment.trimmed_to_sentence is not None:
         flaws.append("its ending was cut to fit the length limit, so it may stop before its point lands")
+    if not links_in_pick(input) and (played := heard_ms(input, moment)) < SHORT_CLIP_MS:
+        flaws.append(f"plays only {_seconds(played)} s, so it may stop before its point lands")
+    if not links_in_pick(input) and runs_on_from(input, moment.end_sentence + 1, is_cased):
+        flaws.append("stops mid-sentence: its speaker's sentence runs on past the clip")
     return flaws
 
 
 def render_for_judge(input: DebatesPickMomentsInput, reels: List[Reel]) -> str:
     """The reels as a viewer meets them: the motion, who speaks for which side, and each clip's
-    words as heard, past the filler geo-chat cuts (heard_text), and its length as picked. Under a
-    reel, the problems the checks found in how its clips play (clip_flaws), so a clean reel is
-    preferred over one that reads as well but plays worse. No transcript, no claims, no story: the
-    judge sees what the viewer sees."""
+    words as heard, past the filler geo-chat cuts (heard_text), and its length as picked; for the
+    story picker (link_claims "after"), its length as heard (heard_ms), as its flaws give it. Under
+    a reel, the problems the checks found in how its clips play (clip_flaws), so a clean reel is
+    preferred over one that reads as well but plays worse, and for the story picker a reel that
+    plays under min_reel_ms (GEO-3716). No transcript, no claims, no story: the judge sees what the
+    viewer sees."""
     names = short_names(input)
     is_cased = cased(input)
+    story = not links_in_pick(input)
+    length = (lambda m: heard_ms(input, m)) if story else (lambda m: m.end_ms - m.start_ms)
     lines = [f"Motion: {input.title}", ""]
     lines += [f"{names[s.slot]}{_side(s)}" for s in input.speakers]
     for number, (_, moments) in enumerate(reels):
-        lines += ["", f"## Reel {number} ({_seconds(reel_ms(moments))} s)"]
+        played = sum(length(m) for m in moments)
+        lines += ["", f"## Reel {number} ({_seconds(played)} s)"]
         flaws = []
         for position, m in enumerate(moments):
             words = heard_text(input, m.start_sentence, m.end_sentence)
-            lines.append(f"Clip {position + 1}, {names[m.speaker]}, {_seconds(m.end_ms - m.start_ms)} s: {words}")
+            lines.append(f"Clip {position + 1}, {names[m.speaker]}, {_seconds(length(m))} s: {words}")
             flaws += [f"- Clip {position + 1} {flaw}." for flaw in clip_flaws(input, position, m, is_cased)]
         if reel_ms(moments) > reel_max_ms(input):
             flaws.append(f"- The reel runs over {_seconds(reel_max_ms(input))} s.")
+        if story and played < input.min_reel_ms:
+            flaws.append(f"- The reel plays only {_seconds(played)} s, under {_seconds(input.min_reel_ms)} s: too short to tell the debate.")
         if flaws:
             lines += ["Problems found:"] + flaws
     return "\n".join(lines)
@@ -1135,6 +1219,15 @@ async def pick_moments(
     cut = [i for i, m in enumerate(moments) if m.trimmed_from_sentence is not None or m.trimmed_to_sentence is not None]
     if cut:
         logger.warning(f"{TASK}: no reel kept every clip within the limit; kept one with clips {cut} cut to fit")
+    # A reel under min_reel_ms is never returned silently (GEO-3716): flagged, or refused before the
+    # link call spends anything, as the moments_pick_short_reel setting says.
+    played = heard_reel_ms(input, moments)
+    short = played < input.min_reel_ms
+    if short:
+        too_short = f"the reel plays {_seconds(played)} s, under {_seconds(input.min_reel_ms)} s"
+        if settings.moments_pick_short_reel == "refuse":
+            raise FinalDecisionError(f"{TASK}: {too_short}, and short reels are refused (moments_pick_short_reel)")
+        logger.warning(f"{TASK}: {too_short}, returned with short_reel set")
     if not in_pick:
         moments = await link_claims(input, moments, client=client, deadline=deadline)
     return DebatesPickMomentsResult(
@@ -1146,6 +1239,8 @@ async def pick_moments(
         candidates=len(candidates),
         judge_why=why or None,
         first_clip_problems=broken,
+        reel_ms=played,
+        short_reel=short,
     )
 
 
@@ -1164,8 +1259,11 @@ __all__ = [
     "closest_claims",
     "continues",
     "filler_lead",
+    "finish_sentence",
     "first_clip_problems",
     "fit_to_limit",
+    "heard_ms",
+    "heard_reel_ms",
     "heard_start",
     "heard_text",
     "judge",
@@ -1177,6 +1275,7 @@ __all__ = [
     "render",
     "render_for_judge",
     "render_for_link",
+    "runs_on_from",
     "split_start",
     "top_ranked",
 ]

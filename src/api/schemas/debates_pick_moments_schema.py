@@ -86,6 +86,10 @@ class DebatesPickMomentsInput(OverridesMixin):
     # What to aim for. The reel aims at about four times the middle of this range.
     target_min_ms: int = Field(default=10_000, ge=1_000)
     target_max_ms: int = Field(default=18_000, ge=2_000)
+    # The shortest a reel should run, its four clips as heard back to back (GEO-3716). Under link_claims
+    # "after" the judge is shown a reel under it as a flaw; under either, a reel under it is returned
+    # with `short_reel` set (or refused, under the moments_pick_short_reel setting).
+    min_reel_ms: int = Field(default=45_000, ge=0)
     # Clips the caller refused after checking an earlier answer itself (for example, judged by
     # claims.score_clips to argue the other side). The new reel avoids them.
     avoid: List[AvoidRange] = Field(default_factory=list, max_length=20)
@@ -110,6 +114,8 @@ class DebatesPickMomentsInput(OverridesMixin):
             raise ValueError(f"the transcript is over {MAX_TOTAL_CHARS} chars")
         if not (self.clip_min_ms <= self.target_min_ms <= self.target_max_ms <= self.clip_max_ms):
             raise ValueError("need clip_min_ms <= target_min_ms <= target_max_ms <= clip_max_ms")
+        if self.min_reel_ms > MOMENTS * self.target_max_ms:
+            raise ValueError(f"need min_reel_ms <= {MOMENTS} * target_max_ms, the longest a reel should run")
         if any(not 0 <= a.start_sentence <= a.end_sentence < len(self.sentences) for a in self.avoid):
             raise ValueError("an avoid range is outside the sentences")
         if any(s.end_ms < s.start_ms for s in self.sentences):
@@ -150,6 +156,13 @@ class PickedMoment(BaseModel):
         "under link_claims \"in_pick\") were given for the longer clip. Only on a reel kept as a "
         "last resort.",
     )
+    ended_from_sentence: Optional[int] = Field(
+        default=None,
+        description="The sentence the picker ended this clip on, when the clip ran on into the rest of a "
+        "sentence the transcript broke in two (GEO-3716, link_claims \"after\" only): the sentences "
+        "after it in its turn that open mid-sentence or are marked a split half were added, within "
+        "the hard limit. role and why were given for the clip as picked.",
+    )
 
 
 class DebatesPickMomentsResult(BaseModel):
@@ -160,6 +173,16 @@ class DebatesPickMomentsResult(BaseModel):
     attempts: int = Field(description="Which answer the reel came from (1 for the first): the one that passed every rule, else the passing one whose best reel had the fewest soft problems, or for a last resort the one (with the fewest problems in its best reel) that broke only the first clip's opening rules (first_clip_problems) or ran a clip over the limit (cut to fit: trimmed_to_sentence, trimmed_from_sentence).")
     candidates: int = Field(default=1, description="How many reels the pick was made from: those with no soft problem when any passed, else all that passed. More than one means the judge picked.")
     judge_why: Optional[str] = Field(default=None, description="Why the judge picked this reel, when it judged.")
+    reel_ms: int = Field(
+        default=0,
+        description="How long the reel plays: its four clips back to back, each from the first word heard "
+        "once the filler geo-chat cuts is gone, as the sentences' times place it (GEO-3716).",
+    )
+    short_reel: bool = Field(
+        default=False,
+        description="True when the reel plays (reel_ms) under the input's min_reel_ms and was returned "
+        "rather than refused (the moments_pick_short_reel setting, GEO-3716).",
+    )
     first_clip_problems: List[str] = Field(
         default_factory=list,
         description="Empty unless no answer had a reel whose first clip keeps its rules (it starts a "
