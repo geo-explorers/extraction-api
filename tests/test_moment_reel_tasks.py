@@ -2468,3 +2468,51 @@ def test_the_first_clips_opener_is_read_on_the_finished_clip():
     (_, moments), problems, soft = pick.check(debate, answer)
     assert problems == [] and moments[0].end_sentence == 2
     assert pick.first_clip_problems(debate, 0, 2, 0) == []
+
+
+def test_the_judge_is_not_told_a_reel_runs_long_for_a_run_on():
+    debate, answer = _story_ending_early()
+    debate.clip_max_ms = 30_000
+    _clips_of(debate, 18.3)
+    debate.sentences[1].text = "We are not looking to have multiple."
+    debate.sentences[2].text = "partners at the same time."
+    answer["moments"][0]["end_sentence"] = 1  # 67.1 s as picked, 73.2 s run on
+    reel = pick.check(debate, answer)[0]
+    assert pick.picked_reel_ms(debate, reel[1]) == 67_100 and pick.reel_ms(reel[1]) == 73_200
+    assert "runs over" not in pick.render_for_judge(debate, [reel])
+
+
+def test_a_clip_cut_to_fit_from_its_start_still_runs_on_to_finish_its_sentence():
+    debate = _debate("after")
+    times = [(0, 10_000), (10_000, 20_000), (20_000, 30_000), (30_000, 32_000)]
+    texts = ["We would cut the.", "Rates for the.", "Families who need it", "and fast."]
+    for k, ((a, b), text) in enumerate(zip(times, texts)):
+        debate.sentences[k].turn, debate.sentences[k].speaker = 0, 1
+        debate.sentences[k].start_ms, debate.sentences[k].end_ms, debate.sentences[k].text = a, b, text
+    # Turn 0 is now sentences 0-3, Dahmmy's; the rest move 20 s later into three turns.
+    for k in range(4, 12):
+        debate.sentences[k].start_ms += 20_000
+        debate.sentences[k].end_ms += 20_000
+    for k, (turn, speaker) in enumerate([(1, 2), (1, 2), (2, 1), (2, 1), (3, 2), (3, 2), (3, 2), (3, 2)], start=4):
+        debate.sentences[k].turn, debate.sentences[k].speaker = turn, speaker
+    answer = {"story": "x", "moments": [
+        # 30 s, over the limit; no end before sentence 2 is clean, so it is cut to fit from its start.
+        dict(STORY["moments"][0], start_sentence=0, end_sentence=2),
+        dict(STORY["moments"][1], start_sentence=4, end_sentence=5),
+        dict(STORY["moments"][2], start_sentence=6, end_sentence=7),
+        dict(STORY["moments"][3], start_sentence=8, end_sentence=9),
+    ]}
+    moment = pick.check(debate, answer)[0][1][0]
+    assert moment.trimmed_from_sentence == 0 and moment.start_sentence == 1
+    assert (moment.end_sentence, moment.ended_from_sentence) == (3, 2)
+
+
+def test_a_wild_sentence_number_is_refused_without_a_stall():
+    import time
+
+    answer = json.loads(json.dumps(STORY))
+    answer["moments"][3]["end_sentence"] = 30_000_000
+    started = time.monotonic()
+    value, problems, _ = pick.check(_debate("after"), answer)
+    assert value is None and any("not a range" in p for p in problems)
+    assert time.monotonic() - started < 1
