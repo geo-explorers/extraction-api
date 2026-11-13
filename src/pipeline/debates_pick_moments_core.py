@@ -1268,6 +1268,18 @@ async def pick_moments(
     # A reel that plays under min_reel_ms is refused (or flagged) below, so it is judged only when
     # every candidate is one (GEO-3741).
     candidates = [c for c in candidates if not plays_short(input, c[0][1])] or candidates
+    # A reel under min_reel_ms is never returned silently (GEO-3716). It was sent back (check), so
+    # here every answer played short, or the send-back was cut short (GEO-3741): the deadline, the
+    # spend guard, a declined or cut-off answer, or a failed request. Refused before the judge and
+    # the link call spend anything, or flagged below, as the moments_pick_short_reel setting says. A
+    # failed request is refused too, not rerun: a short reel is not published, a live one stays
+    # (geo-chat, GEO-3730), and a rerun would pay for the whole pick again; a backfill can ask again.
+    if settings.moments_pick_short_reel == "refuse" and plays_short(input, candidates[0][0][1]):
+        played = max(heard_reel_ms(input, reel[1]) for reel, _ in candidates)
+        raise FinalDecisionError(
+            f"{TASK}: the reel plays {_seconds(played)} s, under {_seconds(input.min_reel_ms)} s, and short "
+            "reels are refused (moments_pick_short_reel)"
+        )
     best, why = (0, "")
     if len(candidates) > 1 and deadline is not None and not deadline.allows_request():
         best = top_ranked(candidates)
@@ -1291,19 +1303,11 @@ async def pick_moments(
     cut = [i for i, m in enumerate(moments) if cut_to_fit(m)]
     if cut:
         logger.warning(f"{TASK}: no reel kept every clip within the limit; kept one with clips {cut} cut to fit")
-    # A reel under min_reel_ms is never returned silently (GEO-3716). It was sent back (check), so
-    # here every answer played short, or the send-back was cut short (GEO-3741): the deadline, the
-    # spend guard, a declined or cut-off answer, or a failed request. Refused before the link call
-    # spends anything, or flagged, as the moments_pick_short_reel setting says. A failed request is
-    # refused too, not rerun: a short reel is not published, a live one stays (geo-chat, GEO-3730),
-    # and a rerun would pay for the whole pick again; a backfill can ask again.
+    # Under "flag", a short reel (refused above under "refuse") is returned with short_reel set.
     played = heard_reel_ms(input, moments)
     short = plays_short(input, moments)
     if short:
-        too_short = f"the reel plays {_seconds(played)} s, under {_seconds(input.min_reel_ms)} s"
-        if settings.moments_pick_short_reel == "refuse":
-            raise FinalDecisionError(f"{TASK}: {too_short}, and short reels are refused (moments_pick_short_reel)")
-        logger.warning(f"{TASK}: {too_short}, returned with short_reel set")
+        logger.warning(f"{TASK}: the reel plays {_seconds(played)} s, under {_seconds(input.min_reel_ms)} s, returned with short_reel set")
     if not in_pick:
         moments = await link_claims(input, moments, client=client, deadline=deadline)
     return DebatesPickMomentsResult(

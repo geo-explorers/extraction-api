@@ -2414,6 +2414,17 @@ def test_a_reel_still_short_after_every_answer_is_refused_before_the_link_call()
     assert len(client.calls) == 3  # three answers, no link call
 
 
+def test_a_short_reel_is_refused_before_the_judge_too():
+    # Review of GEO-3741: every candidate short, the judge's pick would be refused anyway.
+    debate = _debate("after")
+    _clips_of(debate, 15)
+    answer = {"reels": [_two_sentence_clips(STORY), _two_sentence_clips(_story(OTHER))]}
+    client = _FakeClaude(answer, answer, answer, {"best": 1, "why": "never asked"})
+    with pytest.raises(FinalDecisionError, match="the reel plays 40.0 s, under 50.0 s, and short reels are refused"):
+        asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 3
+
+
 def test_a_short_reel_is_returned_flagged_and_logged_when_configured(monkeypatch, caplog):
     from src.config.settings import settings
 
