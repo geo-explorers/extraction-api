@@ -2365,6 +2365,29 @@ def test_a_short_reel_with_a_clip_cut_to_fit_is_not_told_to_lengthen_that_clip()
     ], fixable
 
 
+def test_a_short_reels_budget_is_never_past_the_target():
+    # Review of GEO-3741: three clips cut to 8 s leave clip 3 needing 26 s, past the target's top.
+    debate = _debate("after")
+    # Turns 0-2: sentences of 8, 15 and 1 s (24 s clips, cut to their first 8 s); turn 3: 5 s each.
+    times = []
+    for turn in range(3):
+        at = turn * 24_000
+        times += [(at, at + 8_000), (at + 8_000, at + 23_000), (at + 23_000, at + 24_000)]
+    times += [(72_000 + k * 5_000, 77_000 + k * 5_000) for k in range(3)]
+    for sentence, (start, end) in zip(debate.sentences, times):
+        sentence.start_ms, sentence.end_ms = start, end
+    value, fixable, _ = pick.check(debate, STORY)
+    assert [m.end_ms - m.start_ms for m in value[1]] == [8_000, 8_000, 8_000, 15_000]
+    assert [p for p in fixable if p.startswith("The reel plays")] == [
+        "The reel plays 39.0 s as heard (clips 8.0, 8.0, 8.0, 15.0 s), under the 50.0 s a reel must "
+        "play. Each clip must play 14.0-20.0 s as heard, 50.0 s together, each still ending where a "
+        "sentence and its point end."
+    ], fixable
+    # One clip left with a budget it can reach: named alone.
+    debate.min_reel_ms = 40_000
+    assert any("Clip 3, not over the limit, must play at least 16.0 s as heard: aim it at 14.0-20.0 s" in p for p in pick.check(debate, STORY)[1])
+
+
 def test_a_short_reel_is_told_so_on_every_send_back_with_its_other_problems():
     # Refused at the end for playing short, it was told so every time (design review of GEO-3741).
     debate = _debate("after")

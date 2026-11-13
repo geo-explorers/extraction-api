@@ -426,8 +426,8 @@ def short_reel_problem(input: DebatesPickMomentsInput, moments: List[PickedMomen
     heard, past the filler geo-chat cuts, which is what the rule reads. Then what to lengthen, never
     a clip cut to fit, which the same message sends back to be picked shorter (over_limit_problem):
     with none cut, the clips under the target; with some cut, how long the others must play together
-    (a budget, not a direction for every clip); with all cut, only the reel's and the target's
-    lengths. It is sent whenever the reel plays short, so a reel refused for it was told why."""
+    (a budget, not a direction for every clip), when that is within the target; else, as with all
+    cut, only the reel's and the target's lengths. It is sent whenever the reel plays short, so a reel refused for it was told why."""
     played = [heard_ms(input, m) for m in moments]
     target = f"{_seconds(input.target_min_ms)}-{_seconds(input.target_max_ms)} s"
     cut = [i for i, m in enumerate(moments) if cut_to_fit(m)]
@@ -440,11 +440,14 @@ def short_reel_problem(input: DebatesPickMomentsInput, moments: List[PickedMomen
             what = f"Clips {', '.join(under)} play under {_seconds(input.target_min_ms)} s: lengthen them toward {target}"
         else:
             what = f"Lengthen the clips toward {target}"
-    elif uncut:
-        need = input.min_reel_ms - sum(played[i] for i in cut)
-        names = f"Clip {uncut[0]}, not over the limit, must" if len(uncut) == 1 else f"Clips {', '.join(map(str, uncut))}, not over the limit, must together"
-        what = f"{names} play at least {_seconds(need)} s as heard: aim each at {target}"
+    elif uncut and (need := input.min_reel_ms - sum(played[i] for i in cut)) <= len(uncut) * input.target_max_ms:
+        if len(uncut) == 1:
+            what = f"Clip {uncut[0]}, not over the limit, must play at least {_seconds(need)} s as heard: aim it at {target}"
+        else:
+            what = f"Clips {', '.join(map(str, uncut))}, not over the limit, must together play at least {_seconds(need)} s as heard: aim each at {target}"
     else:
+        # Every clip cut, or the cut clips at their cut lengths would leave the others more than the
+        # target's top: they are to be picked again, so only the lengths every clip aims at.
         what = f"Each clip must play {target} as heard, {_seconds(input.min_reel_ms)} s together"
     return (
         f"The reel plays {_seconds(sum(played))} s as heard (clips {', '.join(_seconds(ms) for ms in played)} s), "
