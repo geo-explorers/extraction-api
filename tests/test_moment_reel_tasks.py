@@ -2339,6 +2339,25 @@ def test_a_clip_under_the_target_is_named_alone():
     ]
 
 
+def test_a_short_reel_with_a_clip_cut_to_fit_is_not_told_to_lengthen_that_clip():
+    # Review of GEO-3741: sent back in one message with the over-limit problem, which says to
+    # shorten the clip, the short reel's line never names it.
+    debate = _debate("after")
+    _clips_of(debate, 15)  # 5 s sentences
+    answer = _two_sentence_clips(STORY)
+    answer["moments"][1].update(end_sentence=5)  # clip 1: three sentences, 15 s
+    debate.clip_max_ms = 12_000  # over the limit (set past the validator), so it is cut to 10 s
+    value, fixable, _ = pick.check(debate, answer)
+    assert value is not None and value[1][1].trimmed_to_sentence == 5
+    short = [p for p in fixable if p.startswith("The reel plays")]
+    assert short == [
+        "The reel plays 40.0 s as heard (clips 10.0, 10.0, 10.0, 10.0 s), under the 50.0 s a reel must "
+        "play. Clips 0, 2, 3 play under 14.0 s: lengthen them toward 14.0-20.0 s, each still ending where "
+        "a sentence and its point end."
+    ], fixable
+    assert any("over the 12.0 s limit" in p for p in fixable)
+
+
 def test_a_reel_still_short_after_every_answer_is_refused_before_the_link_call():
     # The default (GEO-3741): geo-chat keeps a live story reel over a failed pick (GEO-3730), or
     # uses its claim-built reel; it never reads short_reel, so a returned short reel would publish.

@@ -419,9 +419,11 @@ def plays_short(input: DebatesPickMomentsInput, moments: List[PickedMoment]) -> 
 def short_reel_problem(input: DebatesPickMomentsInput, moments: List[PickedMoment]) -> str:
     """What a reel under min_reel_ms is sent back with (GEO-3741): how long it and each clip play as
     heard, past the filler geo-chat cuts, which is what the rule reads, and which clips are under
-    the target, so the next pick lengthens those rather than padding with filler."""
+    the target, so the next pick lengthens those rather than padding with filler. A clip cut to fit
+    is never named: it is sent back to be picked shorter (over_limit_problem), in the same message."""
     played = [heard_ms(input, m) for m in moments]
-    under = [str(i) for i, ms in enumerate(played) if ms < input.target_min_ms]
+    cut = {i for i, m in enumerate(moments) if m.trimmed_from_sentence is not None or m.trimmed_to_sentence is not None}
+    under = [str(i) for i, ms in enumerate(played) if ms < input.target_min_ms and i not in cut]
     if len(under) == 1:
         which = f"Clip {under[0]} plays under {_seconds(input.target_min_ms)} s: lengthen it"
     elif under:
@@ -1272,8 +1274,11 @@ async def pick_moments(
     if cut:
         logger.warning(f"{TASK}: no reel kept every clip within the limit; kept one with clips {cut} cut to fit")
     # A reel under min_reel_ms is never returned silently (GEO-3716). It was sent back (check), so
-    # here every answer played short, or the deadline stopped the send-back (GEO-3741): refused before
-    # the link call spends anything, or flagged, as the moments_pick_short_reel setting says.
+    # here every answer played short, or the send-back was cut short (GEO-3741): the deadline, the
+    # spend guard, a declined or cut-off answer, or a failed request. Refused before the link call
+    # spends anything, or flagged, as the moments_pick_short_reel setting says. A failed request is
+    # refused too, not rerun: a short reel is not published, a live one stays (geo-chat, GEO-3730),
+    # and a rerun would pay for the whole pick again; a backfill can ask again.
     played = heard_reel_ms(input, moments)
     short = plays_short(input, moments)
     if short:
