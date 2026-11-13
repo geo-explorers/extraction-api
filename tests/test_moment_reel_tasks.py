@@ -2352,10 +2352,31 @@ def test_a_short_reel_with_a_clip_cut_to_fit_is_not_told_to_lengthen_that_clip()
     short = [p for p in fixable if p.startswith("The reel plays")]
     assert short == [
         "The reel plays 40.0 s as heard (clips 10.0, 10.0, 10.0, 10.0 s), under the 50.0 s a reel must "
-        "play. Clips 0, 2, 3 play under 14.0 s: lengthen them toward 14.0-20.0 s, each still ending where "
-        "a sentence and its point end."
+        "play. Clips 0, 2, 3, not over the limit, must together play at least 40.0 s as heard: aim each "
+        "at 14.0-20.0 s, each still ending where a sentence and its point end."
     ], fixable
     assert any("over the 12.0 s limit" in p for p in fixable)
+    # Every clip cut: only the reel's and the target's lengths, no clip told to lengthen.
+    _, fixable, _ = pick.check(debate, STORY)
+    assert [p for p in fixable if p.startswith("The reel plays")] == [
+        "The reel plays 40.0 s as heard (clips 10.0, 10.0, 10.0, 10.0 s), under the 50.0 s a reel must "
+        "play. Each clip must play 14.0-20.0 s as heard, 50.0 s together, each still ending where a "
+        "sentence and its point end."
+    ], fixable
+
+
+def test_a_short_reel_is_told_so_on_every_send_back_with_its_other_problems():
+    # Refused at the end for playing short, it was told so every time (design review of GEO-3741).
+    debate = _debate("after")
+    _clips_of(debate, 15)
+    debate.sentences[0].text = "But states run it."  # the first clip opens on "but": a last resort
+    short = _two_sentence_clips(STORY)
+    client = _FakeClaude(short, short, short)
+    with pytest.raises(FinalDecisionError, match="under 50.0 s, and short reels are refused"):
+        asyncio.run(pick.pick_moments(debate, client=client))
+    for call in client.calls[1:]:
+        sent = call["messages"][-1]["content"]
+        assert "The reel plays 40.0 s as heard" in sent and "the reel's first clip" in sent, sent
 
 
 def test_a_reel_still_short_after_every_answer_is_refused_before_the_link_call():
@@ -2407,8 +2428,9 @@ def test_a_reel_long_enough_beats_a_short_one_in_the_same_answer_without_a_judge
     client = _FakeClaude({"reels": [short, STORY]}, _links(0, 5, 8, 9))
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert len(client.calls) == 2 and result.candidates == 1 and result.reel_ms == 60_000
-    # Long with a soft problem: sent back like any soft answer, but at the end the short sibling is
-    # dropped before the judge, which is never asked.
+    # Long with a soft problem: sent back like any soft answer. The short sibling, a last resort, is
+    # dropped by check_reels since a sibling passes, so the judge is never asked. (The filter before
+    # the judge, among last resorts, is pinned by the one-answer case of the test below.)
     debate.sentences[9].text = "But every president tips it."  # the long reel's clip 3 opens on "but"
     answer = {"reels": [short, STORY]}
     client = _FakeClaude(answer, answer, answer, _links(0, 5, 8, 9))

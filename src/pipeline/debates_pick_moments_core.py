@@ -416,25 +416,40 @@ def plays_short(input: DebatesPickMomentsInput, moments: List[PickedMoment]) -> 
     return heard_reel_ms(input, moments) < input.min_reel_ms
 
 
+def cut_to_fit(moment: PickedMoment) -> bool:
+    """Whether a clip was cut to fit the hard limit (fit_to_limit), from either end."""
+    return moment.trimmed_from_sentence is not None or moment.trimmed_to_sentence is not None
+
+
 def short_reel_problem(input: DebatesPickMomentsInput, moments: List[PickedMoment]) -> str:
     """What a reel under min_reel_ms is sent back with (GEO-3741): how long it and each clip play as
-    heard, past the filler geo-chat cuts, which is what the rule reads, and which clips are under
-    the target, so the next pick lengthens those rather than padding with filler. A clip cut to fit
-    is never named: it is sent back to be picked shorter (over_limit_problem), in the same message."""
+    heard, past the filler geo-chat cuts, which is what the rule reads. Then what to lengthen, never
+    a clip cut to fit, which the same message sends back to be picked shorter (over_limit_problem):
+    with none cut, the clips under the target; with some cut, how long the others must play together
+    (a budget, not a direction for every clip); with all cut, only the reel's and the target's
+    lengths. It is sent whenever the reel plays short, so a reel refused for it was told why."""
     played = [heard_ms(input, m) for m in moments]
-    cut = {i for i, m in enumerate(moments) if m.trimmed_from_sentence is not None or m.trimmed_to_sentence is not None}
-    under = [str(i) for i, ms in enumerate(played) if ms < input.target_min_ms and i not in cut]
-    if len(under) == 1:
-        which = f"Clip {under[0]} plays under {_seconds(input.target_min_ms)} s: lengthen it"
-    elif under:
-        which = f"Clips {', '.join(under)} play under {_seconds(input.target_min_ms)} s: lengthen them"
+    target = f"{_seconds(input.target_min_ms)}-{_seconds(input.target_max_ms)} s"
+    cut = [i for i, m in enumerate(moments) if cut_to_fit(m)]
+    uncut = [i for i in range(len(moments)) if i not in cut]
+    if not cut:
+        under = [str(i) for i in uncut if played[i] < input.target_min_ms]
+        if len(under) == 1:
+            what = f"Clip {under[0]} plays under {_seconds(input.target_min_ms)} s: lengthen it toward {target}"
+        elif under:
+            what = f"Clips {', '.join(under)} play under {_seconds(input.target_min_ms)} s: lengthen them toward {target}"
+        else:
+            what = f"Lengthen the clips toward {target}"
+    elif uncut:
+        need = input.min_reel_ms - sum(played[i] for i in cut)
+        names = f"Clip {uncut[0]}, not over the limit, must" if len(uncut) == 1 else f"Clips {', '.join(map(str, uncut))}, not over the limit, must together"
+        what = f"{names} play at least {_seconds(need)} s as heard: aim each at {target}"
     else:
-        which = "Lengthen the clips"
+        what = f"Each clip must play {target} as heard, {_seconds(input.min_reel_ms)} s together"
     return (
         f"The reel plays {_seconds(sum(played))} s as heard (clips {', '.join(_seconds(ms) for ms in played)} s), "
-        f"under the {_seconds(input.min_reel_ms)} s a reel must play. {which} toward "
-        f"{_seconds(input.target_min_ms)}-{_seconds(input.target_max_ms)} s, each still ending where a sentence "
-        "and its point end."
+        f"under the {_seconds(input.min_reel_ms)} s a reel must play. {what}, each still ending where a "
+        "sentence and its point end."
     )
 
 
@@ -1270,7 +1285,7 @@ async def pick_moments(
     broken = first_clip_problems(input, first.start_sentence, first.end_sentence, picked)
     if broken:
         logger.warning(f"{TASK}: no reel kept the first clip's rules; kept one that breaks them: {broken}")
-    cut = [i for i, m in enumerate(moments) if m.trimmed_from_sentence is not None or m.trimmed_to_sentence is not None]
+    cut = [i for i, m in enumerate(moments) if cut_to_fit(m)]
     if cut:
         logger.warning(f"{TASK}: no reel kept every clip within the limit; kept one with clips {cut} cut to fit")
     # A reel under min_reel_ms is never returned silently (GEO-3716). It was sent back (check), so
@@ -1316,6 +1331,7 @@ __all__ = [
     "clip_flaws",
     "closest_claims",
     "continues",
+    "cut_to_fit",
     "filler_lead",
     "finish_sentence",
     "first_clip_problems",
