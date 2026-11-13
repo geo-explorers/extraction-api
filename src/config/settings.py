@@ -16,6 +16,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Anthropic output_config.effort levels; "" sends none (the model's default).
 EFFORT_LEVELS = ("", "low", "medium", "high", "xhigh", "max")
+# What debates.pick_moments does with a reel under min_reel_ms (moments_pick_short_reel, GEO-3716).
+SHORT_REEL_CHOICES = ("flag", "refuse")
 
 
 class Settings(BaseSettings):
@@ -347,6 +349,25 @@ class Settings(BaseSettings):
         default=32000,
         description="Max output tokens per debates.pick_moments call, thinking included: three reels under a JSON schema run about 2k, and the rest leaves room for the model's thinking (16000 under claude-sonnet-4-6, which did not think)."
     )
+
+    # GEO-3716: what debates.pick_moments does when the reel it kept (judged, or taken under the
+    # deadline) plays under the request's min_reel_ms, 45 s by default, under either link_claims.
+    # "flag": return it with short_reel set and a warning logged. "refuse": fail the pick as final, so geo-chat has no
+    # story reel for the debate and falls back to its earlier, claim-built reel (it does not leave
+    # the debate without a reel).
+    moments_pick_short_reel: str = Field(
+        default="flag",
+        description="What debates.pick_moments does with a reel under min_reel_ms: flag (return it with short_reel set) or refuse (fail as final; geo-chat falls back to its earlier reel).",
+    )
+
+    @field_validator("moments_pick_short_reel")
+    @classmethod
+    def _known_short_reel(cls, value: str) -> str:
+        # A typo would silently flag (or refuse) every short reel, so it fails at startup instead.
+        choice = value.strip().lower()
+        if choice not in SHORT_REEL_CHOICES:
+            raise ValueError(f"moments_pick_short_reel must be one of {list(SHORT_REEL_CHOICES)}, not {value!r}")
+        return choice
 
     @field_validator("moments_pick_claude_effort")
     @classmethod
