@@ -350,9 +350,9 @@ class Settings(BaseSettings):
         description="Max output tokens per debates.pick_moments call, thinking included: three reels under a JSON schema run about 2k, and the rest leaves room for the model's thinking (16000 under claude-sonnet-4-6, which did not think)."
     )
 
-    # GEO-3716: what debates.pick_moments does with a reel that plays under the request's
-    # min_reel_ms (45 s by default) when no answer had a longer one. "flag": return it with
-    # short_reel set and a warning logged. "refuse": fail the pick as final, so geo-chat has no
+    # GEO-3716: what debates.pick_moments does when the reel it kept (judged, or taken under the
+    # deadline) plays under the request's min_reel_ms, 45 s by default, under either link_claims.
+    # "flag": return it with short_reel set and a warning logged. "refuse": fail the pick as final, so geo-chat has no
     # story reel for the debate and falls back to its earlier, claim-built reel (it does not leave
     # the debate without a reel).
     moments_pick_short_reel: str = Field(

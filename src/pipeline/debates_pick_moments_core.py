@@ -630,28 +630,20 @@ def runs_on_from(input: DebatesPickMomentsInput, k: int, is_cased: bool) -> bool
     return (is_cased and opens_mid_sentence(sentences[k])) or continues(input, k)
 
 
-def finish_sentence(
-    input: DebatesPickMomentsInput, moment: PickedMoment, taken: set, is_cased: bool
-) -> PickedMoment:
-    """`moment` ending where its last sentence really ends (GEO-3716): while the next sentence of its
-    turn is the rest of its last one (runs_on_from), that sentence is added, as long as the clip stays
-    within the hard limit and runs into no sentence in `taken` (another clip's, or a stretch to
-    avoid). Graders flagged such clips as cut mid-thought in the 13 Nov offline runs ("…not looking to
-    have multiple." / "partners."). The model's end is kept in
-    `ended_from_sentence`; a clip that cannot be finished is left as picked (clip_flaws says so)."""
+def finish_sentence(input: DebatesPickMomentsInput, start: int, end: int, taken: set, is_cased: bool) -> int:
+    """Where a clip of sentences `start`-`end` should end so it does not stop mid-sentence (GEO-3716):
+    past the next sentences of its turn that are the rest of its last one (runs_on_from), when that
+    reaches a sentence that really ends within the hard limit, running into no sentence in `taken`
+    (another clip's, or a stretch to avoid). Else `end`, as picked: a run-on that would still stop
+    mid-sentence is not kept. Graders flagged such clips as cut mid-thought in the 13 Nov offline
+    runs ("…not looking to have multiple." / "partners.")."""
     sentences = input.sentences
-    end = moment.end_sentence
-    while (
-        runs_on_from(input, end + 1, is_cased)
-        and end + 1 not in taken
-        and sentences[end + 1].end_ms - sentences[moment.start_sentence].start_ms <= input.clip_max_ms
-    ):
-        end += 1
-    if end == moment.end_sentence:
-        return moment
-    return moment.model_copy(
-        update={"end_sentence": end, "end_ms": sentences[end].end_ms, "ended_from_sentence": moment.end_sentence}
-    )
+    last = end
+    while runs_on_from(input, last + 1, is_cased):
+        last += 1
+        if last in taken or sentences[last].end_ms - sentences[start].start_ms > input.clip_max_ms:
+            return end
+    return last
 
 
 def over_limit_problem(input: DebatesPickMomentsInput, name: str, start: int, end: int) -> str:
@@ -696,6 +688,22 @@ def check(
     in_pick = links_in_pick(input)
     sentences = input.sentences
     moments: List[PickedMoment] = []
+    # A clip run on to finish a sentence (finish_sentence) stops short of every other clip's sentences
+    # as picked and of the stretches to avoid. Clips only ever run on, never start earlier, so two run
+    # on clips cannot meet.
+    avoided = {k for a in input.avoid for k in range(a.start_sentence, a.end_sentence + 1)}
+    picked = [
+        (_int(r.get("start_sentence")), _int(r.get("end_sentence"))) if isinstance(r, dict) else (None, None) for r in rows
+    ]
+
+    def taken_by_others(position: int) -> set:
+        return avoided | {
+            k for i, (a, b) in enumerate(picked) if i != position and a is not None and b is not None for k in range(a, b + 1)
+        }
+
+    # Each clip's length as picked (cut to fit, not run on), which the reel's soft length rule reads:
+    # a run-on is never a reason to send the answer back.
+    played_as_picked: List[int] = []
     for position, row in enumerate(rows):
         name = f"Clip {position}"
         if not isinstance(row, dict):
@@ -726,6 +734,13 @@ def check(
         if fit is not None and fit != (start, end):
             fixable.append(over_limit_problem(input, name, start, end))
             start, end = fit
+        # The story picker's clip runs on to the end of a sentence the transcript broke (GEO-3716),
+        # before every rule reads it; not one cut to fit, whose end was chosen to fit.
+        ended_from = None
+        if not in_pick and (start, end) == (picked_start, picked_end):
+            finished = finish_sentence(input, start, end, taken_by_others(position), is_cased)
+            ended_from, end = (end, finished) if finished != end else (None, end)
+        played_as_picked.append(sentences[ended_from if ended_from is not None else end].end_ms - sentences[start].start_ms)
         run = sentences[start : end + 1]
         # Every opener rule reads the clip as it plays, cut to fit or not, past the filler geo-chat
         # cuts: the first clip's are hard (a newcomer meets the debate there), the rest soft, and
@@ -767,16 +782,10 @@ def check(
                 answers=answers,
                 why=str(row.get("why") or "")[:500],
                 trimmed_from_sentence=picked_start if start != picked_start else None,
-                trimmed_to_sentence=picked_end if end != picked_end else None,
+                trimmed_to_sentence=picked_end if end != picked_end and ended_from is None else None,
+                ended_from_sentence=ended_from,
             )
         )
-    if len(moments) == len(rows) == MOMENTS and not in_pick:
-        # The story picker's clips run on to the end of a sentence the transcript broke (GEO-3716),
-        # before the rules that read clips together (overlap, length of the reel) and the judge.
-        avoided = {k for a in input.avoid for k in range(a.start_sentence, a.end_sentence + 1)}
-        for i, m in enumerate(moments):
-            taken = avoided | {k for j, o in enumerate(moments) if j != i for k in range(o.start_sentence, o.end_sentence + 1)}
-            moments[i] = finish_sentence(input, m, taken, is_cased)
     if len(moments) == len(rows) == MOMENTS:
         for a, b in zip(moments, moments[1:]):
             if a.speaker == b.speaker:
@@ -797,9 +806,9 @@ def check(
         for a in input.avoid:
             if m.start_sentence <= a.end_sentence and a.start_sentence <= m.end_sentence:
                 problems.append(f"Clip {i} uses sentences {a.start_sentence}-{a.end_sentence}, which you were told to avoid ({a.reason}).")
-    if not problems and reel_ms(moments) > reel_max_ms(input):
+    if not problems and sum(played_as_picked) > reel_max_ms(input):
         soft.append(
-            f"The reel runs {_seconds(reel_ms(moments))} s; keep the four clips under "
+            f"The reel runs {_seconds(sum(played_as_picked))} s; keep the four clips under "
             f"{_seconds(reel_max_ms(input))} s together. Shorten the longest clips."
         )
     story = answer.get("story") if isinstance(answer.get("story"), str) else ""

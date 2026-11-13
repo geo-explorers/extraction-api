@@ -2402,3 +2402,69 @@ def test_a_run_on_clip_is_returned_with_the_end_the_picker_gave_it():
     result = asyncio.run(pick.pick_moments(debate, client=_FakeClaude({"reels": [answer]}, _links(0, 5, 8, 9))))
     assert (result.moments[0].end_sentence, result.moments[0].ended_from_sentence) == (2, 1)
     assert "partners at the same time" in pick.render_for_link(debate, result.moments)
+
+
+def test_a_clip_is_not_run_on_into_another_clips_sentences():
+    debate, answer = _story_ending_early()
+    # Clip 1 is moved to Dahmmy's sentence 2 and the turn is re-cut so the picks still alternate.
+    answer["moments"] = [
+        dict(answer["moments"][0], start_sentence=0, end_sentence=0),
+        answer["moments"][1],
+        dict(answer["moments"][2], start_sentence=1, end_sentence=2),
+        answer["moments"][3],
+    ]
+    debate.sentences[0].end_ms = 6_500  # clip 0 lasts the minimum on its own
+    debate.sentences[1].text = "partners at the same time."  # would run on from sentence 0
+    (_, moments), problems, _ = pick.check(debate, answer)
+    assert problems == [] and (moments[0].end_sentence, moments[0].ended_from_sentence) == (0, None)
+
+
+def test_a_run_on_that_would_still_stop_mid_sentence_is_not_kept():
+    debate, answer = _story_ending_early()
+    debate.sentences[2].text = "partners and the."  # ends mid-phrase again, and the turn ends there
+    debate.sentences[3].text = "and that is wrong."  # the other speaker's: no run-on across turns
+    # Sentence 2 runs on from 1, but 2 itself is followed by nothing of its turn, so 0-2 ends cleanly.
+    assert pick.check(debate, answer)[0][1][0].end_sentence == 2
+    # A chain that hits the limit before a clean end keeps the clip as picked.
+    debate, answer = _story_ending_early()
+    answer["moments"][0]["end_sentence"] = 0
+    debate.sentences[0].end_ms = 6_500
+    debate.sentences[1].text = "partners at the."
+    debate.sentences[2].text = "same time."
+    debate.sentences[2].end_ms = 22_001
+    moment = pick.check(debate, answer)[0][1][0]
+    assert (moment.end_sentence, moment.ended_from_sentence) == (0, None)
+
+
+def test_a_clip_cut_to_fit_is_not_run_on():
+    debate, answer = _story_ending_early()
+    debate.clip_max_ms = 12_000
+    debate.target_max_ms = 12_000
+    answer["moments"][0]["end_sentence"] = 2  # 14.8 s: cut to fit, to 0-1
+    moment = pick.check(debate, answer)[0][1][0]
+    assert moment.trimmed_to_sentence == 2 and moment.ended_from_sentence is None and moment.end_sentence == 1
+
+
+def test_a_run_on_never_sends_the_answer_back_for_the_reels_length():
+    debate, answer = _story_ending_early()
+    debate.clip_max_ms = 30_000
+    _clips_of(debate, 18.3)  # four 18.3 s clips would be 73.2 s, over 4 x 18 s
+    debate.sentences[1].text = "We are not looking to have multiple."
+    debate.sentences[2].text = "partners at the same time."
+    answer["moments"][0]["end_sentence"] = 1  # picked 12.2 s (67.1 s in all), run on to 18.3 s
+    (_, moments), problems, soft = pick.check(debate, answer)
+    assert moments[0].ended_from_sentence == 1 and problems == [] and soft == []
+
+
+def test_the_first_clips_opener_is_read_on_the_finished_clip():
+    # "Um." is kept when cutting it would leave the clip under the minimum (heard_start), so the
+    # opener rules must read the clip as it plays once run on.
+    debate, answer = _story_ending_early()
+    debate.sentences[0].text = "Um."
+    debate.sentences[0].end_ms = 1_000
+    debate.sentences[1].start_ms, debate.sentences[1].end_ms = 1_000, 6_500
+    debate.sentences[1].text = "We need rules for the."
+    debate.sentences[2].text = "whole country at once."
+    (_, moments), problems, soft = pick.check(debate, answer)
+    assert problems == [] and moments[0].end_sentence == 2
+    assert pick.first_clip_problems(debate, 0, 2, 0) == []
