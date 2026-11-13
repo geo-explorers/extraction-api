@@ -698,20 +698,15 @@ def check(
     in_pick = links_in_pick(input)
     sentences = input.sentences
     moments: List[PickedMoment] = []
-    # A clip run on to finish a sentence (finish_sentence) stops short of every other clip's sentences
-    # as picked and of the stretches to avoid. Clips only ever run on, never start earlier, so two run
-    # on clips cannot meet.
-    # Only ranges inside the transcript count (a bad one is a problem below), each sentence once.
-    avoided = {k for a in input.avoid for k in range(a.start_sentence, a.end_sentence + 1)}
-    owner: Dict[int, List[int]] = {}
-    for position, row in enumerate(rows):
+    # A clip run on to finish a sentence (finish_sentence) stops short of every clip's sentences as
+    # picked and of the stretches to avoid. A clip only runs on past its own end, so its own sentences
+    # never stop it, and clips never start earlier, so two run-on clips cannot meet. Only ranges inside
+    # the transcript count; a bad one is a problem below.
+    taken = {k for a in input.avoid for k in range(a.start_sentence, a.end_sentence + 1)}
+    for row in rows:
         a, b = (_int(row.get("start_sentence")), _int(row.get("end_sentence"))) if isinstance(row, dict) else (None, None)
         if a is not None and b is not None and 0 <= a <= b < len(sentences):
-            for k in range(a, b + 1):
-                owner.setdefault(k, []).append(position)
-
-    def taken_by_others(position: int) -> set:
-        return avoided | {k for k, owners in owner.items() if owners != [position]}
+            taken.update(range(a, b + 1))
 
     for position, row in enumerate(rows):
         name = f"Clip {position}"
@@ -747,7 +742,7 @@ def check(
         # before every rule reads it; not one cut to fit from its end, whose end was chosen to fit.
         ended_from = None
         if not in_pick and end == picked_end:
-            finished = finish_sentence(input, start, end, taken_by_others(position), is_cased)
+            finished = finish_sentence(input, start, end, taken, is_cased)
             ended_from, end = (end, finished) if finished != end else (None, end)
         run = sentences[start : end + 1]
         # Every opener rule reads the clip as it plays, cut to fit or not, past the filler geo-chat
