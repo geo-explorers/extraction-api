@@ -45,9 +45,9 @@ Under link_claims "after" (GEO-3716), a clip that ends just before the rest of a
 transcript broke in two runs on to finish it (finish_sentence), within the hard limit; the judge
 is shown a clip that plays under SHORT_CLIP_MS and one still stopping mid-sentence as flaws,
 neither of which sends an answer back. A reel that plays (as heard) under min_reel_ms, under either
-link_claims, is a soft problem (GEO-3741): sent back with each clip's length (short_reel_problem),
-ranked below any reel long enough (answer_rank), and dropped before the judge when a candidate
-plays long enough. A reel still under it when the answers run out is refused, or returned with
+link_claims, is refused like a clip over the limit (GEO-3741): sent back with each clip's length
+(short_reel_problem), and a last resort, ranked below any last resort long enough (answer_rank) and
+dropped before the judge when a candidate plays long enough. A reel still under it when the answers run out is refused, or returned with
 `short_reel` set, as the moments_pick_short_reel setting says (refuse by default).
 
 Under a deadline (GEO-3697, deadline.Deadline), the run returns before geo-chat stops
@@ -708,9 +708,9 @@ def check(
     input: DebatesPickMomentsInput, answer: Any
 ) -> Tuple[Optional[Tuple[str, List[PickedMoment]]], List[str], List[str]]:
     """The answer as (story, moments), its problems, and its soft problems. A reel whose only
-    problems are its first clip's opening (first_clip_problems) or clips over the hard limit
-    (over_limit_problem) comes back with them, those clips cut to fit (fit_to_limit): refused, but
-    usable as a last resort. Under link_claims "after" no claim is asked for or checked: each
+    problems are its first clip's opening (first_clip_problems), clips over the hard limit
+    (over_limit_problem), those clips cut to fit (fit_to_limit), or that it plays under min_reel_ms
+    (short_reel_problem) comes back with them: refused, but usable as a last resort. Under link_claims "after" no claim is asked for or checked: each
     moment holds UNLINKED until link_claims links it."""
     if not isinstance(answer, dict) or not isinstance(answer.get("moments"), list):
         return None, ['The answer needs a "moments" list.'], []
@@ -842,12 +842,13 @@ def check(
             f"The reel runs {_seconds(picked_reel_ms(input, moments))} s; keep the four clips under "
             f"{_seconds(reel_max_ms(input))} s together. Shorten the longest clips."
         )
-    # A reel under min_reel_ms is sent back to be picked longer (GEO-3741). Soft, so a reel that
-    # keeps every hard rule is still held over any last resort, and refused at the end if no answer
-    # plays long enough (pick_moments). Read as heard, on the clips as finished and cut, as the
-    # final check reads it.
-    if not problems and len(moments) == MOMENTS and plays_short(input, moments):
-        soft.append(short_reel_problem(input, moments))
+    # A reel under min_reel_ms is sent back to be picked longer (GEO-3741): hard, but a last resort
+    # like a first clip's opening or a clip cut to fit, so whatever order the answers come in, any
+    # reel that plays long enough (passing, or a last resort) is kept over a short one (answer_rank),
+    # and a short one kept at the end is refused (pick_moments). Read as heard, on the clips as
+    # finished and cut, as the final check reads it.
+    if not problems and plays_short(input, moments):
+        fixable.append(short_reel_problem(input, moments))
     story = answer.get("story") if isinstance(answer.get("story"), str) else ""
     if problems:
         return None, problems + fixable, soft
@@ -866,8 +867,8 @@ def named(input: DebatesPickMomentsInput, story: str) -> str:
 
 Reel = Tuple[str, List[PickedMoment]]
 # A candidate reel that passed, with its soft problems; or, as a last resort, one that broke only
-# its first clip's opening rules or ran a clip over the limit (cut to fit), with those and its soft
-# problems.
+# its first clip's opening rules, ran a clip over the limit (cut to fit) or plays under min_reel_ms,
+# with those and its soft problems.
 Candidate = Tuple[Reel, List[str]]
 
 
@@ -879,15 +880,14 @@ def check_reels(
     the other reels' problems.
 
     A reel with no soft problem is taken without a send-back (pick_moments judges only those). When
-    every passing reel has one (a later clip opening on "But…", a reel over its length or under
-    min_reel_ms), the answer
+    every passing reel has one (a later clip opening on "But…", a reel over its length), the answer
     is sent back to fix them, however many passed: in the 12 Nov preview about 17 clips past the
     first opened mid-thought, and reels that passed together were never asked again. ask_json
     keeps whichever answer's best reel has the fewest problems (answer_rank), so a send-back that
     comes back worse does not replace a better answer.
 
     When none passes, the reels whose only problems are fixable (their first clip's opening, a clip
-    cut to fit) come back with the problems, each with its own and its soft ones: the answer is
+    cut to fit, a reel under min_reel_ms) come back with the problems, each with its own and its soft ones: the answer is
     sent back with the hard problems alone, but they are a last resort (claude_json.ask_json).
 
     A single reel (an answer in the old shape, {"moments": ...}) is one candidate."""
@@ -927,7 +927,8 @@ def check_reels(
 def answer_rank(input: DebatesPickMomentsInput, candidates: List[Candidate]) -> Tuple[bool, int]:
     """How an answer with no clean reel ranks against another (claude_json.ask_json's `rank`, lower
     is better): its best reel, a reel that plays long enough (plays_short) first, as a short one is
-    refused at the end (GEO-3741), then the fewest problems, soft ones for reels that passed, fixable
+    refused at the end (GEO-3741; a short reel is always a last resort, so this orders last resorts),
+    then the fewest problems, soft ones for reels that passed, fixable
     and soft ones for last resorts (a soft flaw counts between two last resorts too). Before, the latest answer always won, and once every soft answer was
     sent back (GEO-3691) a worse second answer replaced a better first one."""
     return min((plays_short(input, reel[1]), len(problems)) for reel, problems in candidates)
@@ -988,7 +989,7 @@ def render_for_judge(input: DebatesPickMomentsInput, reels: List[Reel]) -> str:
             flaws += [f"- Clip {position + 1} {flaw}." for flaw in clip_flaws(input, position, m, is_cased)]
         if picked_reel_ms(input, moments) > reel_max_ms(input):
             flaws.append(f"- The reel runs over {_seconds(reel_max_ms(input))} s.")
-        if story and played < input.min_reel_ms:
+        if story and plays_short(input, moments):
             flaws.append(f"- The reel plays only {_seconds(played)} s, under {_seconds(input.min_reel_ms)} s: too short to tell the debate.")
         if flaws:
             lines += ["Problems found:"] + flaws
@@ -1274,7 +1275,7 @@ async def pick_moments(
     # here every answer played short, or the deadline stopped the send-back (GEO-3741): refused before
     # the link call spends anything, or flagged, as the moments_pick_short_reel setting says.
     played = heard_reel_ms(input, moments)
-    short = played < input.min_reel_ms
+    short = plays_short(input, moments)
     if short:
         too_short = f"the reel plays {_seconds(played)} s, under {_seconds(input.min_reel_ms)} s"
         if settings.moments_pick_short_reel == "refuse":
