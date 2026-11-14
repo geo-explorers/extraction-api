@@ -83,13 +83,15 @@ class DebatesPickMomentsInput(OverridesMixin):
     # A clip's length bounds, first sentence's start to last sentence's end.
     clip_min_ms: int = Field(default=6_000, ge=1_000)
     clip_max_ms: int = Field(default=22_000, ge=2_000)
-    # What to aim for. The reel aims at about four times the middle of this range.
-    target_min_ms: int = Field(default=10_000, ge=1_000)
-    target_max_ms: int = Field(default=18_000, ge=2_000)
-    # The shortest a reel should run, its four clips as heard back to back (GEO-3716). Under link_claims
-    # "after" the judge is shown a reel under it as a flaw; under either, a reel under it is returned
-    # with `short_reel` set (or refused, under the moments_pick_short_reel setting).
-    min_reel_ms: int = Field(default=45_000, ge=0)
+    # What to aim for. The reel aims at about four times the middle of this range. 14-20 s since
+    # GEO-3741: at 10-18 s Sonnet 5.5 picked near the bottom (13 Nov: clips 12.3 s, reels ~49 s,
+    # against 17.8 s and ~71 s on Sonnet 4.6), under the agreed minute or so per debate.
+    target_min_ms: int = Field(default=14_000, ge=1_000)
+    target_max_ms: int = Field(default=20_000, ge=2_000)
+    # The shortest a reel may play, its four clips as heard back to back (GEO-3716). A reel under it
+    # is sent back to be picked longer (GEO-3741); one still under it when the answers run out is
+    # refused, or returned with `short_reel` set, as the moments_pick_short_reel setting says.
+    min_reel_ms: int = Field(default=50_000, ge=0)
     # Clips the caller refused after checking an earlier answer itself (for example, judged by
     # claims.score_clips to argue the other side). The new reel avoids them.
     avoid: List[AvoidRange] = Field(default_factory=list, max_length=20)
@@ -170,8 +172,8 @@ class DebatesPickMomentsResult(BaseModel):
     moments: List[PickedMoment] = Field(description="Exactly four, in play order, alternating speakers.")
     provider: str
     model_used: str
-    attempts: int = Field(description="Which answer the reel came from (1 for the first): the one that passed every rule, else the passing one whose best reel had the fewest soft problems, or for a last resort the one (with the fewest problems in its best reel) that broke only the first clip's opening rules (first_clip_problems) or ran a clip over the limit (cut to fit: trimmed_to_sentence, trimmed_from_sentence).")
-    candidates: int = Field(default=1, description="How many reels the pick was made from: those with no soft problem when any passed, else all that passed. More than one means the judge picked.")
+    attempts: int = Field(description="Which answer the reel came from (1 for the first): the one that passed every rule, else the passing one whose best reel had the fewest soft problems, or for a last resort the one (with a reel that plays at least min_reel_ms first, then the fewest problems in its best reel, GEO-3741) that broke only the first clip's opening rules (first_clip_problems), ran a clip over the limit (cut to fit: trimmed_to_sentence, trimmed_from_sentence) or played under min_reel_ms (then refused, or short_reel under moments_pick_short_reel \"flag\").")
+    candidates: int = Field(default=1, description="How many reels the pick was made from: those with no soft problem when any passed, else all that passed (or the last resorts), less any that play under min_reel_ms when one does not (GEO-3741). More than one means the judge picked.")
     judge_why: Optional[str] = Field(default=None, description="Why the judge picked this reel, when it judged.")
     reel_ms: int = Field(
         default=0,
@@ -180,8 +182,8 @@ class DebatesPickMomentsResult(BaseModel):
     )
     short_reel: bool = Field(
         default=False,
-        description="True when the reel plays (reel_ms) under the input's min_reel_ms and was returned "
-        "rather than refused (the moments_pick_short_reel setting, GEO-3716).",
+        description="True when the reel plays (reel_ms) under the input's min_reel_ms, after every send-back, "
+        "and was returned rather than refused (moments_pick_short_reel \"flag\"; the default refuses, GEO-3741).",
     )
     first_clip_problems: List[str] = Field(
         default_factory=list,

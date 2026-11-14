@@ -367,7 +367,7 @@ def test_pick_shows_the_motion_sides_lengths_claims_and_numbered_sentences_by_tu
     shown = pick.render(_debate())
     assert "Motion: Voter ID should be required nationwide" in shown
     assert "Speaker 2 (Nico): Agree with the motion" in shown
-    assert "Target clip length: 10.0-18.0 s. Hard limits: 6.0-22.0 s. The whole reel: under 72.0 s." in shown
+    assert "Target clip length: 14.0-20.0 s. Hard limits: 6.0-22.0 s. The whole reel: under 80.0 s, and at least 50.0 s." in shown
     assert "[9] Speaker 2: Every president tips the scales" in shown
     assert "## Turn 1: Speaker 2 (Nico)\n[3] 15.0-19.8 s (4.8 s): Point 1.0." in shown
 
@@ -741,11 +741,11 @@ def _clips_of(debate, seconds):
 def test_a_reel_over_four_clips_at_the_target_is_asked_to_shorten():
     debate = _debate()
     debate.clip_max_ms = 30_000
-    _clips_of(debate, 18.3)  # 73.2 s, over 4 x 18 s
+    _clips_of(debate, 20.3)  # 81.2 s, over 4 x 20 s
     _, problems, soft = pick.check(debate, GOOD)
-    assert problems == [] and any("keep the four clips under 72.0 s" in p for p in soft), soft
-    # Four clips inside the 10-18 s target are never told to shorten: 70.8 s.
-    _clips_of(debate, 17.7)
+    assert problems == [] and any("keep the four clips under 80.0 s" in p for p in soft), soft
+    # Four clips inside the 14-20 s target are never told to shorten: 78.8 s.
+    _clips_of(debate, 19.7)
     assert pick.check(debate, GOOD)[2] == []
     # The limit follows the target the caller sends.
     debate.target_max_ms = 17_000
@@ -1507,6 +1507,7 @@ def test_a_sentence_that_opens_a_thought_is_not_marked_split(before, text):
 
 def test_a_split_is_found_past_a_sentence_of_nothing_but_filler():
     debate = _debate()
+    debate.min_reel_ms = 0  # the rule tested here, not the reel's length (GEO-3741)
     debate.clip_min_ms = 1_000  # short enough that geo-chat cuts the filler sentence
     debate.sentences[3].text = "I think legal immigration is a."  # turn 1
     debate.sentences[4].text = "Um."
@@ -1605,6 +1606,7 @@ def test_a_send_back_that_comes_back_worse_does_not_replace_the_better_answer():
     # Every soft answer is sent back now, so the answer kept is the one whose best reel has the
     # fewest problems, not the latest (review of GEO-3691).
     debate = _debate()
+    debate.min_reel_ms = 0  # the rule tested here, not the reel's length (GEO-3741)
     debate.sentences[6].text = "Because it is a state matter."
     debate.sentences[9].text = "But every president tips it."
     better = _with(2, start_sentence=7)  # only clip 3 opens on "but"
@@ -1628,6 +1630,7 @@ def test_a_send_back_that_comes_back_worse_does_not_replace_the_better_answer():
 
 def test_a_last_resort_that_comes_back_worse_does_not_replace_the_better_one():
     debate = _debate()
+    debate.min_reel_ms = 0  # the rule tested here, not the reel's length (GEO-3741)
     debate.sentences[0].text = "but states run it."  # GOOD's clip 1: mid-sentence (fixable)
     debate.sentences[1].text = "But states run it well."  # better's clip 1: on "but" (fixable)
     debate.sentences[9].text = "But every president tips it."  # GOOD's clip 4 also opens on "but" (soft)
@@ -1642,6 +1645,7 @@ def test_a_lowercase_opener_is_one_flaw_so_a_reel_with_two_bad_clips_does_not_wi
     # "but we need…" starts mid-sentence and on "but": one flaw, as "But we need…" is. Counted as
     # two, an answer with two bad clips tied it and, being later, was kept (review of GEO-3691).
     debate = _debate()
+    debate.min_reel_ms = 0  # the rule tested here, not the reel's length (GEO-3741)
     debate.sentences[3].text = "but we need federal rules here."
     debate.sentences[6].text = "Because states do it well."
     debate.sentences[9].text = "But every president tips it."
@@ -1668,6 +1672,7 @@ def test_the_last_resort_log_names_the_problems_of_the_answer_it_keeps(monkeypat
     lines = []
     monkeypatch.setattr(claude_json.logger, "warning", lines.append)
     debate = _debate()
+    debate.min_reel_ms = 0  # the rule tested here, not the reel's length (GEO-3741)
     debate.sentences[0].text = "but states run it."
     debate.sentences[1].text = "But states run it well."
     debate.sentences[9].text = "But every president tips it."
@@ -1713,8 +1718,8 @@ def test_the_judge_sees_a_clip_cut_to_fit_and_a_reel_over_its_length():
     assert "- Clip 1 its ending was cut to fit the length limit, so it may stop before its point lands." in judged
     debate = _debate()
     debate.clip_max_ms = 30_000
-    _clips_of(debate, 18.3)  # 73.2 s, over 4 x 18 s
-    assert "- The reel runs over 72.0 s." in pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
+    _clips_of(debate, 20.3)  # 81.2 s, over 4 x 20 s
+    assert "- The reel runs over 80.0 s." in pick.render_for_judge(debate, [pick.check(debate, GOOD)[0]])
 
 
 def test_flawed_reels_reach_the_judge_with_their_problems_when_none_is_clean():
@@ -2223,8 +2228,14 @@ def test_a_declined_send_back_keeps_the_answer_held():
 
 def test_a_reels_shortest_length_cannot_pass_its_longest():
     with pytest.raises(ValueError, match="min_reel_ms"):
-        DebatesPickMomentsInput(**{**_debate("after").model_dump(), "min_reel_ms": 72_001})
-    assert DebatesPickMomentsInput(**_debate("after").model_dump()).min_reel_ms == 45_000
+        DebatesPickMomentsInput(**{**_debate("after").model_dump(), "min_reel_ms": 80_001})
+    data = _debate("after").model_dump()
+    for key in ("target_min_ms", "target_max_ms", "min_reel_ms"):
+        del data[key]
+    defaults = DebatesPickMomentsInput(**data)
+    # GEO-3741: clips aimed at 14-20 s, and a reel under 50 s sent back.
+    assert (defaults.target_min_ms, defaults.target_max_ms, defaults.min_reel_ms) == (14_000, 20_000, 50_000)
+    assert (defaults.clip_min_ms, defaults.clip_max_ms) == (6_000, 22_000)
 
 
 def test_a_clip_plays_from_its_first_heard_word():
@@ -2244,7 +2255,7 @@ def test_the_judge_sees_a_short_clip_and_a_short_reel_at_the_length_the_viewer_h
     assert "## Reel 0 (34.8 s)" in judged
     assert "- Clip 1 plays only 8.7 s, so it may stop before its point lands." in judged
     assert "- Clip 4 plays only 8.7 s, so it may stop before its point lands." in judged
-    assert "- The reel plays only 34.8 s, under 45.0 s: too short to tell the debate." in judged
+    assert "- The reel plays only 34.8 s, under 50.0 s: too short to tell the debate." in judged
     # Heard, past the filler geo-chat cuts: a clip picked at 9.6 s whose first sentence is "Um."
     # plays 6.4 s, and is short.
     debate = _debate("after")
@@ -2257,7 +2268,7 @@ def test_the_judge_sees_a_short_clip_and_a_short_reel_at_the_length_the_viewer_h
 
 def test_clips_and_reels_long_enough_have_no_length_flaw():
     debate = _debate("after")
-    _clips_of(debate, 11.4)  # 45.6 s
+    _clips_of(debate, 12.6)  # 50.4 s
     judged = pick.render_for_judge(debate, [pick.check(debate, STORY)[0]])
     assert "plays only" not in judged and "Problems found" not in judged
 
@@ -2270,44 +2281,163 @@ def test_the_in_pick_judge_sees_what_it_did():
     assert "Clip 1, Dahmmy, 8.7 s:" in judged
 
 
-def test_short_clips_and_reels_send_no_answer_back():
-    # A flaw for the judge, never a send-back: a short clip can be a whole point, and soft problems
-    # would keep a reel with one from the judge whenever a sibling is clean.
+def test_a_short_clip_in_a_reel_long_enough_sends_no_answer_back():
+    # A flaw for the judge, never a send-back: a short clip can be a whole point.
     debate = _debate("after")
-    _clips_of(debate, 8.7)
+    _clips_of(debate, 16.5)  # 5.5 s sentences
+    debate.sentences[0].text = "Um."  # clip 0 plays from sentence 1: 11.0 s
+    debate.sentences[1].start_ms = 8_000  # ... and from 8.0 s: 8.5 s
+    moments = pick.check(debate, STORY)[0][1]
+    assert pick.heard_ms(debate, moments[0]) == 8_500 and pick.heard_reel_ms(debate, moments) == 58_000
     assert pick.check(debate, STORY)[1:] == ([], [])
     client = _FakeClaude({"reels": [STORY]}, _links(0, 5, 8, 9))
     asyncio.run(pick.pick_moments(debate, client=client))
     assert len(client.calls) == 2  # the pick and the link call
 
 
-def test_a_short_reel_is_returned_flagged_and_logged(caplog):
+def _two_sentence_clips(answer):
+    """`answer` with each clip one sentence shorter: 10 s clips in a debate of 5 s sentences."""
+    answer = json.loads(json.dumps(answer))
+    for row in answer["moments"]:
+        row["end_sentence"] = row["start_sentence"] + 1
+    return answer
+
+
+@pytest.mark.parametrize("link_claims", ["after", "in_pick"])
+def test_a_short_reel_is_sent_back_with_each_clips_heard_length(link_claims):
+    # GEO-3741: a reel under min_reel_ms is picked again, not just flagged.
+    debate = _debate(link_claims)
+    _clips_of(debate, 15)  # 5 s sentences: three-sentence clips run 15 s, two-sentence ones 10 s
+    long_reel = STORY if link_claims == "after" else GOOD
+    short = _two_sentence_clips(long_reel)
+    debate.sentences[6].text = "So we need rules here."  # clip 2 plays past "So": 9 s of 10 heard
+    assert pick.check(debate, short)[1:] == ([
+        "The reel plays 39.0 s as heard (clips 10.0, 10.0, 9.0, 10.0 s), under the 50.0 s a reel must "
+        "play. Clips 0, 1, 2, 3 play under 14.0 s: lengthen them toward 14.0-20.0 s, each still ending "
+        "where a sentence and its point end."
+    ], [])
+    replies = [short, long_reel] + ([_links(0, 5, 8, 9)] if link_claims == "after" else [])
+    client = _FakeClaude(*replies)
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 2 and result.short_reel is False and result.reel_ms == 59_000
+    assert [m.end_sentence for m in result.moments] == [2, 5, 8, 11]
+    assert "The reel plays 39.0 s as heard" in client.calls[1]["messages"][-1]["content"]
+    # The picker is told the minimum up front.
+    assert "The whole reel: under 80.0 s, and at least 50.0 s." in pick.render(debate)
+
+
+def test_a_clip_under_the_target_is_named_alone():
     debate = _debate("after")
-    _clips_of(debate, 11.1)  # 44.4 s
-    client = _FakeClaude({"reels": [STORY]}, _links(0, 5, 8, 9))
-    with caplog.at_level("WARNING"):
-        result = asyncio.run(pick.pick_moments(debate, client=client))
-    assert result.short_reel is True and result.reel_ms == 44_400
-    assert "the reel plays 44.4 s, under 45.0 s, returned with short_reel set" in caplog.text
-    assert result.judge_why is None  # one reel, no judge
-    _clips_of(debate, 11.4)
-    result = asyncio.run(pick.pick_moments(debate, client=_FakeClaude({"reels": [STORY]}, _links(0, 5, 8, 9))))
-    assert result.short_reel is False and result.reel_ms == 45_600
+    _clips_of(debate, 15)
+    short = json.loads(json.dumps(STORY))
+    short["moments"][1]["end_sentence"] = 4  # 10 s; the reel 55 s
+    debate.min_reel_ms = 56_000
+    assert pick.check(debate, short)[1] == [
+        "The reel plays 55.0 s as heard (clips 15.0, 10.0, 15.0, 15.0 s), under the 56.0 s a reel must "
+        "play. Clip 1 plays under 14.0 s: lengthen it toward 14.0-20.0 s, each still ending where a "
+        "sentence and its point end."
+    ]
 
 
-def test_a_short_reel_is_refused_before_the_link_call_when_configured(monkeypatch):
+def test_a_short_reel_with_a_clip_cut_to_fit_is_not_told_to_lengthen_that_clip():
+    # Review of GEO-3741: sent back in one message with the over-limit problem, which says to
+    # shorten the clip, the short reel's line never names it.
+    debate = _debate("after")
+    _clips_of(debate, 15)  # 5 s sentences
+    answer = _two_sentence_clips(STORY)
+    answer["moments"][1].update(end_sentence=5)  # clip 1: three sentences, 15 s
+    debate.clip_max_ms = 12_000  # over the limit (set past the validator), so it is cut to 10 s
+    value, fixable, _ = pick.check(debate, answer)
+    assert value is not None and value[1][1].trimmed_to_sentence == 5
+    short = [p for p in fixable if p.startswith("The reel plays")]
+    assert short == [
+        "The reel plays 40.0 s as heard (clips 10.0, 10.0, 10.0, 10.0 s), under the 50.0 s a reel must "
+        "play. Clips 0, 2, 3, not over the limit, must together play at least 40.0 s as heard: aim each "
+        "at 14.0-20.0 s, each still ending where a sentence and its point end."
+    ], fixable
+    assert any("over the 12.0 s limit" in p for p in fixable)
+    # Every clip cut: only the reel's and the target's lengths, no clip told to lengthen.
+    _, fixable, _ = pick.check(debate, STORY)
+    assert [p for p in fixable if p.startswith("The reel plays")] == [
+        "The reel plays 40.0 s as heard (clips 10.0, 10.0, 10.0, 10.0 s), under the 50.0 s a reel must "
+        "play. Each clip must play 14.0-20.0 s as heard, 50.0 s together, each still ending where a "
+        "sentence and its point end."
+    ], fixable
+
+
+def test_a_short_reels_budget_is_never_past_the_target():
+    # Review of GEO-3741: three clips cut to 8 s leave clip 3 needing 26 s, past the target's top.
+    debate = _debate("after")
+    # Turns 0-2: sentences of 8, 15 and 1 s (24 s clips, cut to their first 8 s); turn 3: 5 s each.
+    times = []
+    for turn in range(3):
+        at = turn * 24_000
+        times += [(at, at + 8_000), (at + 8_000, at + 23_000), (at + 23_000, at + 24_000)]
+    times += [(72_000 + k * 5_000, 77_000 + k * 5_000) for k in range(3)]
+    for sentence, (start, end) in zip(debate.sentences, times):
+        sentence.start_ms, sentence.end_ms = start, end
+    value, fixable, _ = pick.check(debate, STORY)
+    assert [m.end_ms - m.start_ms for m in value[1]] == [8_000, 8_000, 8_000, 15_000]
+    assert [p for p in fixable if p.startswith("The reel plays")] == [
+        "The reel plays 39.0 s as heard (clips 8.0, 8.0, 8.0, 15.0 s), under the 50.0 s a reel must "
+        "play. Each clip must play 14.0-20.0 s as heard, 50.0 s together, each still ending where a "
+        "sentence and its point end."
+    ], fixable
+    # One clip left with a budget it can reach: named alone.
+    debate.min_reel_ms = 40_000
+    assert any("Clip 3, not over the limit, must play at least 16.0 s as heard: aim it at 14.0-20.0 s" in p for p in pick.check(debate, STORY)[1])
+
+
+def test_a_short_reel_is_told_so_on_every_send_back_with_its_other_problems():
+    # Refused at the end for playing short, it was told so every time (design review of GEO-3741).
+    debate = _debate("after")
+    _clips_of(debate, 15)
+    debate.sentences[0].text = "But states run it."  # the first clip opens on "but": a last resort
+    short = _two_sentence_clips(STORY)
+    client = _FakeClaude(short, short, short)
+    with pytest.raises(FinalDecisionError, match="under 50.0 s, and short reels are refused"):
+        asyncio.run(pick.pick_moments(debate, client=client))
+    for call in client.calls[1:]:
+        sent = call["messages"][-1]["content"]
+        assert "The reel plays 40.0 s as heard" in sent and "the reel's first clip" in sent, sent
+
+
+def test_a_reel_still_short_after_every_answer_is_refused_before_the_link_call():
+    # The default (GEO-3741): geo-chat keeps a live story reel over a failed pick (GEO-3730), or
+    # uses its claim-built reel; it never reads short_reel, so a returned short reel would publish.
+    debate = _debate("after")
+    _clips_of(debate, 15)
+    short = _two_sentence_clips(STORY)
+    client = _FakeClaude(short, short, short)
+    with pytest.raises(FinalDecisionError, match="the reel plays 40.0 s, under 50.0 s, and short reels are refused"):
+        asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 3  # three answers, no link call
+
+
+def test_a_short_reel_is_refused_before_the_judge_too():
+    # Review of GEO-3741: every candidate short, the judge's pick would be refused anyway.
+    debate = _debate("after")
+    _clips_of(debate, 15)
+    answer = {"reels": [_two_sentence_clips(STORY), _two_sentence_clips(_story(OTHER))]}
+    client = _FakeClaude(answer, answer, answer, {"best": 1, "why": "never asked"})
+    with pytest.raises(FinalDecisionError, match="the reel plays 40.0 s, under 50.0 s, and short reels are refused"):
+        asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 3
+
+
+def test_a_short_reel_is_returned_flagged_and_logged_when_configured(monkeypatch, caplog):
     from src.config.settings import settings
 
-    monkeypatch.setattr(settings, "moments_pick_short_reel", "refuse")
+    monkeypatch.setattr(settings, "moments_pick_short_reel", "flag")
     debate = _debate("after")
-    _clips_of(debate, 11.1)
-    client = _FakeClaude({"reels": [STORY]})
-    with pytest.raises(FinalDecisionError, match="the reel plays 44.4 s, under 45.0 s, and short reels are refused"):
-        asyncio.run(pick.pick_moments(debate, client=client))
-    assert len(client.calls) == 1  # no link call
-    # A reel long enough is returned as ever.
-    _clips_of(debate, 11.4)
-    assert asyncio.run(pick.pick_moments(debate, client=_FakeClaude({"reels": [STORY]}, _links(0, 5, 8, 9)))).short_reel is False
+    _clips_of(debate, 15)
+    short = _two_sentence_clips(STORY)
+    client = _FakeClaude(short, short, short, _links(0, 5, 8, 9))
+    with caplog.at_level("WARNING"):
+        result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.short_reel is True and result.reel_ms == 40_000 and result.attempts == 3
+    assert "the reel plays 40.0 s, under 50.0 s, returned with short_reel set" in caplog.text
+    assert len(client.calls) == 4  # sent back twice, then linked
 
 
 def test_the_short_reel_setting_is_checked_at_startup(monkeypatch):
@@ -2315,18 +2445,81 @@ def test_the_short_reel_setting_is_checked_at_startup(monkeypatch):
 
     from src.config.settings import Settings
 
-    assert Settings(_env_file=None).moments_pick_short_reel == "flag"
-    monkeypatch.setenv("MOMENTS_PICK_SHORT_REEL", " Refuse ")
+    monkeypatch.delenv("MOMENTS_PICK_SHORT_REEL", raising=False)
     assert Settings(_env_file=None).moments_pick_short_reel == "refuse"
+    monkeypatch.setenv("MOMENTS_PICK_SHORT_REEL", " Flag ")
+    assert Settings(_env_file=None).moments_pick_short_reel == "flag"
     monkeypatch.setenv("MOMENTS_PICK_SHORT_REEL", "drop")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
 
 
-def test_a_short_reel_keeps_the_judges_reason():
+def test_a_reel_long_enough_beats_a_short_one_in_the_same_answer_without_a_judge():
     debate = _debate("after")
-    _clips_of(debate, 11.1)
-    client = _FakeClaude({"reels": [STORY, _story(OTHER)]}, {"best": 1, "why": "Nico opens stronger."}, _links(5, 0, 9, 8))
+    _clips_of(debate, 15)
+    short = _two_sentence_clips(STORY)
+    # Clean and long: taken at once, the short sibling never judged.
+    client = _FakeClaude({"reels": [short, STORY]}, _links(0, 5, 8, 9))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 2 and result.candidates == 1 and result.reel_ms == 60_000
+    # Long with a soft problem: sent back like any soft answer. The short sibling, a last resort, is
+    # dropped by check_reels since a sibling passes, so the judge is never asked. (The filter before
+    # the judge, among last resorts, is pinned by the one-answer case of the test below.)
+    debate.sentences[9].text = "But every president tips it."  # the long reel's clip 3 opens on "but"
+    answer = {"reels": [short, STORY]}
+    client = _FakeClaude(answer, answer, answer, _links(0, 5, 8, 9))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert len(client.calls) == 4 and result.candidates == 1 and result.judge_why is None
+    assert result.reel_ms == 60_000 and result.short_reel is False
+
+
+def test_an_answer_long_enough_outranks_a_later_short_one_with_fewer_problems():
+    debate = _debate("after")
+    _clips_of(debate, 15)
+    debate.sentences[6].text = "Because states do it well."
+    debate.sentences[9].text = "But every president tips it."  # the long reel: two soft problems
+    short = _two_sentence_clips(STORY)
+    short["moments"][2].update(start_sentence=7, end_sentence=8)
+    short["moments"][3].update(start_sentence=10, end_sentence=11)  # clean openers, 40 s: one problem
+    long_moments = pick.check(debate, STORY)[0][1]
+    short_moments = pick.check(debate, short)[0][1]
+    assert pick.answer_rank(debate, [(("", long_moments), ["a", "b"])]) == (False, 2)
+    assert pick.answer_rank(debate, [(("", short_moments), ["a"])]) == (True, 1)
+    client = _FakeClaude(STORY, short, short, _links(0, 5, 8, 9))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.attempts == 1 and result.reel_ms == 60_000
+
+
+def test_a_long_last_resort_beats_a_short_reel_whatever_order_the_answers_come_in():
+    # A short reel is a last resort too (review of GEO-3741): held as passing, it would be refused
+    # over a later long last resort, while the same last resort alone would publish.
+    debate = _debate("after")
+    _clips_of(debate, 15)
+    short = _two_sentence_clips(STORY)
+    debate.sentences[0].text = "But states run it."  # the long reel's first clip: a last resort
+    short["moments"][0].update(start_sentence=1, end_sentence=2)  # the short reel's opens cleanly
+    debate.sentences[1].text = "States run it."
+    assert pick.check(debate, STORY)[0] is not None and pick.check(debate, STORY)[1][0].startswith("Clip 0")
+    assert pick.check(debate, short)[0] is not None and pick.check(debate, short)[1][0].startswith("The reel plays 40.0 s")
+    for replies in ([short, STORY, STORY], [STORY, short, short], [STORY, STORY, STORY]):
+        client = _FakeClaude(*replies, _links(0, 5, 8, 9))
+        result = asyncio.run(pick.pick_moments(debate, client=client))
+        assert result.reel_ms == 60_000 and result.first_clip_problems and not result.short_reel
+    # In one answer too: the long last resort, unjudged.
+    answer = {"reels": [short, STORY]}
+    client = _FakeClaude(answer, answer, answer, _links(0, 5, 8, 9))
+    result = asyncio.run(pick.pick_moments(debate, client=client))
+    assert result.reel_ms == 60_000 and result.candidates == 1 and len(client.calls) == 4
+
+
+def test_a_short_reel_keeps_the_judges_reason_when_flagged(monkeypatch):
+    from src.config.settings import settings
+
+    monkeypatch.setattr(settings, "moments_pick_short_reel", "flag")
+    debate = _debate("after")
+    _clips_of(debate, 11.1)  # 44.4 s
+    answer = {"reels": [STORY, _story(OTHER)]}
+    client = _FakeClaude(answer, answer, answer, {"best": 1, "why": "Nico opens stronger."}, _links(5, 0, 9, 8))
     result = asyncio.run(pick.pick_moments(debate, client=client))
     assert result.short_reel is True and result.judge_why == "Nico opens stronger."
 
@@ -2415,6 +2608,7 @@ def test_a_clip_is_not_run_on_into_another_clips_sentences():
     ]
     debate.sentences[0].end_ms = 6_500  # clip 0 lasts the minimum on its own
     debate.sentences[1].text = "partners at the same time."  # would run on from sentence 0
+    debate.min_reel_ms = 0  # the rule tested here, not the reel's length (GEO-3741)
     (_, moments), problems, _ = pick.check(debate, answer)
     assert problems == [] and (moments[0].end_sentence, moments[0].ended_from_sentence) == (0, None)
 

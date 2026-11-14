@@ -351,13 +351,15 @@ class Settings(BaseSettings):
     )
 
     # GEO-3716: what debates.pick_moments does when the reel it kept (judged, or taken under the
-    # deadline) plays under the request's min_reel_ms, 45 s by default, under either link_claims.
-    # "flag": return it with short_reel set and a warning logged. "refuse": fail the pick as final, so geo-chat has no
-    # story reel for the debate and falls back to its earlier, claim-built reel (it does not leave
-    # the debate without a reel).
+    # deadline) plays under the request's min_reel_ms, 50 s by default, under either link_claims. Such
+    # a reel is sent back first (GEO-3741), so this is the reel left when every answer played short.
+    # "refuse" (default since GEO-3741): fail the pick as final, so geo-chat has no story reel for the
+    # debate: a backfill over a live story reel keeps it (GEO-3730), and a debate without one gets
+    # the earlier, claim-built reel (it is never left without a reel). "flag": return it with
+    # short_reel set and a warning logged; geo-chat does not read the flag, so it publishes the reel.
     moments_pick_short_reel: str = Field(
-        default="flag",
-        description="What debates.pick_moments does with a reel under min_reel_ms: flag (return it with short_reel set) or refuse (fail as final; geo-chat falls back to its earlier reel).",
+        default="refuse",
+        description="What debates.pick_moments does with a reel still under min_reel_ms after its send-backs: refuse (fail as final; geo-chat keeps a live story reel, else uses its earlier reel) or flag (return it with short_reel set).",
     )
 
     @field_validator("moments_pick_short_reel")
